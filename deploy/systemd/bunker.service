@@ -1,0 +1,13 @@
+[Unit]
+Description=bunker-go daemon (mail, WhatsApp, Matrix hub)
+Documentation=file://%h/projects/bunker-go/docs/cli.md
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/bunker daemon
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

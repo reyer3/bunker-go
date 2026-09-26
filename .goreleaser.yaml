@@ -1,0 +1,45 @@
+version: 2
+
+project_name: bunker
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: bunker
+    main: ./cmd/bunker
+    binary: bunker
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -tags=goolm
+      - -trimpath
+    ldflags:
+      - -s -w
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - docs/*
+      - deploy/systemd/*
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"

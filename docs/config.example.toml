@@ -1,0 +1,57 @@
+# bunker-go sample configuration. Copy to $BUNKER_CONFIG_DIR/config.toml
+# (default ~/.config/bunker-go/config.toml). Every account is a
+# [[account]] table; "channel" and "name" are read by internal/config,
+# everything else is passed through as Options for that channel's
+# adapter to decode. No secrets belong in this file: mail auth goes
+# through GNOME Online Accounts (goa_identity) or a 0600 password file
+# outside the repo (password_env); WhatsApp and Matrix keep their own
+# session/device state under $BUNKER_STATE_DIR after "bunker link ...".
+
+# --- Mail: Gmail (.com), authenticated via GOA/OAuth2 ---
+[[account]]
+channel = "mail"
+name = "example"
+imap_host = "imap.gmail.com"
+smtp_host = "smtp.gmail.com"
+username = "alice@example.com"
+auth = "xoauth2"
+gmail = true
+goa_identity = "alice@example.com"
+
+# --- Mail: .cl Dovecot/Roundcube, password login ---
+[[account]]
+channel = "mail"
+name = "cl"
+imap_host = "mail.example.cl"
+smtp_host = "mail.example.cl"
+username = "alice@example.cl"
+auth = "login"
+folder_prefix = "INBOX"
+folder_sep = "."
+# password_env points at a 0600 file holding the password, outside the
+# repo (e.g. ~/.config/bunker-go/cl.password). Omit it to rely on GOA
+# instead, if the .cl account is also registered there.
+password_env = "~/.config/bunker-go/cl.password"
+
+# --- WhatsApp: personal account, linked device ---
+[[account]]
+channel = "whatsapp"
+name = "personal"
+# db_path defaults to $BUNKER_STATE_DIR/whatsapp-<name>.db; set it only
+# to relocate the device store.
+# min_send_interval_seconds throttles outgoing messages (default 1s).
+# history_messages_per_chat caps how many of the most recent messages a
+# history-sync import keeps per unread conversation on link (default 5);
+# it never imports a chat's full history.
+# max_broadcast_recipients caps a "send"/"reply" fan-out broadcast
+# (default 10; see docs/cli.md's Fan-out section). broadcast_pause_min_
+# seconds/broadcast_pause_max_seconds bound the randomized pause between
+# recipients (default 3/8).
+
+# --- Matrix: the company homeserver, E2EE ---
+[[account]]
+channel = "matrix"
+name = "work"
+homeserver = "https://matrix.example.org"
+# state_dir defaults to $BUNKER_STATE_DIR/matrix/<name>; set it only to
+# relocate the session, crypto store and pickle key.

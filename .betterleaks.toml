@@ -1,0 +1,8 @@
+# Extends the default rules. The only exceptions are the exact fake
+# credentials used by tests; a different secret in a test still fails.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fake credentials used only in tests"
+regexes = ['''^s3cr3t$''', '''^env-password$''']

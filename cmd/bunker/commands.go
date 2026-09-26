@@ -1,0 +1,553 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/reyer3/bunker-go/internal/core"
+)
+
+// splitRecipients splits raw on commas, trims surrounding whitespace off
+// each part and drops empty results, so "a@b.cl, c@d.cl ,," yields
+// ["a@b.cl", "c@d.cl"]. Used for the comma-separated <to> positional and
+// for each --cc value, which may itself be comma-separated.
+func splitRecipients(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// collectCc splits and flattens every --cc flag value (each of which may
+// itself be comma-separated) into one deduplicated-order recipient list.
+func collectCc(raw []string) []string {
+	var cc []string
+	for _, v := range raw {
+		cc = append(cc, splitRecipients(v)...)
+	}
+	return cc
+}
+
+// stringSliceFlag collects a repeatable flag (--label x --label y) into a
+// slice.
+type stringSliceFlag []string
+
+func (s *stringSliceFlag) String() string { return strings.Join(*s, ",") }
+func (s *stringSliceFlag) Set(v string) error {
+	*s = append(*s, v)
+	return nil
+}
+
+const topLevelUsage = `bunker <command> [flags]
+
+Commands:
+  daemon [--fake]                                          run the daemon
+  list [--channel c] [--account a] [--unread] [--label l]  list items
+       [-q text] [--limit n] [--json]
+  read <id> [--no-receipt] [--json]                        fetch full body
+       (marks it read on WhatsApp/Matrix unless --no-receipt; mail is
+       always PEEK-only, unaffected)
+  reply <id> <text|-> [--cc addr]... [--attach path]...
+       [--dry-run] [--json]                                 reply to an item
+  send <channel> <account> <to> <text|->
+       [--cc addr]... [--subject s]
+       [--attach path]... [--media path]...
+       [--dry-run] [--json]                                 send a fresh message
+                                                             (<to> and each --cc
+                                                             may be a comma list)
+  organize <id> [--label x]... [--unlabel x]...
+       [--move folder] [--seen|--unseen] [--dry-run] [--json]
+  status post <channel> <account> <text>
+       [--media path] [--dry-run] [--json]                 publish a status
+  counts [--json]                                          unread counts
+  render [--tmux] [--json]                                 tmux status segment
+  link whatsapp <account>                                  QR-pair WhatsApp
+  link matrix <account> [--recovery-key|--recovery-key-stdin]
+                                                             Matrix SSO login,
+                                                             optionally importing
+                                                             the recovery key
+  import-keys matrix <account> <file> [--passphrase-stdin]  import an Element
+                                                             megolm key export
+`
+
+// runWithBackend dispatches every command that talks to a Backend
+// (everything except "daemon" and "render", which manage their own
+// connection/fallback). It is the seam CLI command tests use with a
+// fakeBackend, so they never open a real socket.
+func runWithBackend(ctx context.Context, backend Backend, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprint(stderr, topLevelUsage)
+		return 2
+	}
+	switch args[0] {
+	case "list":
+		return cmdList(ctx, backend, args[1:], stdout, stderr)
+	case "read":
+		return cmdRead(ctx, backend, args[1:], stdout, stderr)
+	case "reply":
+		return cmdReply(ctx, backend, args[1:], stdin, stdout, stderr)
+	case "send":
+		return cmdSend(ctx, backend, args[1:], stdin, stdout, stderr)
+	case "organize":
+		return cmdOrganize(ctx, backend, args[1:], stdout, stderr)
+	case "status":
+		return cmdStatus(ctx, backend, args[1:], stdin, stdout, stderr)
+	case "counts":
+		return cmdCounts(ctx, backend, args[1:], stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "unknown command %q\n\n%s", args[0], topLevelUsage)
+		return 2
+	}
+}
+
+func writeJSON(w io.Writer, v any) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		fmt.Fprintf(w, `{"error":%q}`+"\n", err.Error())
+		return
+	}
+	w.Write(b)
+	w.Write([]byte("\n"))
+}
+
+func fail(jsonOut bool, stdout, stderr io.Writer, err error) int {
+	if jsonOut {
+		writeJSON(stdout, map[string]string{"error": err.Error()})
+	} else {
+		fmt.Fprintln(stderr, "error:", err)
+	}
+	return 1
+}
+
+func textOrStdin(arg string, stdin io.Reader) (string, error) {
+	if arg != "-" {
+		return arg, nil
+	}
+	b, err := io.ReadAll(stdin)
+	if err != nil {
+		return "", fmt.Errorf("read stdin: %w", err)
+	}
+	return strings.TrimRight(string(b), "\n"), nil
+}
+
+func newFlagSet(name string, stderr io.Writer) *flag.FlagSet {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	return fs
+}
+
+// parseInterspersed parses fs against args the way every command in this
+// CLI is documented (docs/cli.md): flags may appear before, after or
+// between positional arguments, e.g. "reply <id> <text> --dry-run". The
+// stdlib flag package alone stops at the first non-flag token, so this
+// walks args once, routes anything starting with "-" (plus its value,
+// unless it is a boolean flag or uses --flag=value) to fs.Parse, and
+// returns the rest as positionals in their original order.
+func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
+	var flagArgs, positionals []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			positionals = append(positionals, args[i+1:]...)
+			break
+		}
+		if len(a) > 1 && a[0] == '-' {
+			name := strings.TrimLeft(a, "-")
+			hasValue := strings.Contains(name, "=")
+			if hasValue {
+				name = name[:strings.Index(name, "=")]
+			}
+			fl := fs.Lookup(name)
+			if fl == nil {
+				return nil, fmt.Errorf("unknown flag: %s", a)
+			}
+			flagArgs = append(flagArgs, a)
+			if !hasValue {
+				type boolFlag interface{ IsBoolFlag() bool }
+				bf, isBool := fl.Value.(boolFlag)
+				if !isBool || !bf.IsBoolFlag() {
+					if i+1 >= len(args) {
+						return nil, fmt.Errorf("flag %s needs a value", a)
+					}
+					i++
+					flagArgs = append(flagArgs, args[i])
+				}
+			}
+			continue
+		}
+		positionals = append(positionals, a)
+	}
+	if err := fs.Parse(flagArgs); err != nil {
+		return nil, err
+	}
+	return positionals, nil
+}
+
+func cmdList(ctx context.Context, backend Backend, args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("list", stderr)
+	channel := fs.String("channel", "", "filter by channel (mail, whatsapp, matrix)")
+	account := fs.String("account", "", "filter by account")
+	unread := fs.Bool("unread", false, "only unread items")
+	label := fs.String("label", "", "filter by label")
+	query := fs.String("q", "", "full-text query over subject and body")
+	limit := fs.Int("limit", 0, "max items (0 = no limit)")
+	jsonOut := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	filter := core.Filter{Channel: core.Channel(*channel), Account: *account, Label: *label, Query: *query, Limit: *limit}
+	if *unread {
+		t := true
+		filter.Unread = &t
+	}
+
+	items, err := backend.List(ctx, filter)
+	if err != nil {
+		return fail(*jsonOut, stdout, stderr, err)
+	}
+	if *jsonOut {
+		writeJSON(stdout, map[string]any{"items": items})
+		return 0
+	}
+	for _, it := range items {
+		mark := " "
+		if it.Unread {
+			mark = "*"
+		}
+		fmt.Fprintf(stdout, "%s %s\t%s\n", mark, it.ID, it.Subject)
+	}
+	return 0
+}
+
+func cmdRead(ctx context.Context, backend Backend, args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("read", stderr)
+	jsonOut := fs.Bool("json", false, "emit JSON")
+	noReceipt := fs.Bool("no-receipt", false, "fetch without marking the item read (WhatsApp/Matrix)")
+	positionals, err := parseInterspersed(fs, args)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if len(positionals) < 1 {
+		fmt.Fprintln(stderr, "usage: bunker read <id> [--no-receipt] [--json]")
+		return 2
+	}
+	item, err := backend.Read(ctx, positionals[0], !*noReceipt)
+	if err != nil {
+		return fail(*jsonOut, stdout, stderr, err)
+	}
+	if *jsonOut {
+		writeJSON(stdout, map[string]any{"item": item})
+		return 0
+	}
+	fmt.Fprintf(stdout, "%s\nFrom: %s <%s>\nSubject: %s\n\n%s\n", item.ID, item.From.Name, item.From.ID, item.Subject, item.Body)
+	return 0
+}
+
+func cmdReply(ctx context.Context, backend Backend, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	fs := newFlagSet("reply", stderr)
+	var attach, cc stringSliceFlag
+	fs.Var(&attach, "attach", "local file to attach (repeatable)")
+	fs.Var(&cc, "cc", "additional recipient, comma-separated values allowed (repeatable)")
+	dryRun := fs.Bool("dry-run", false, "plan the reply without sending it")
+	jsonOut := fs.Bool("json", false, "emit JSON")
+	positionals, err := parseInterspersed(fs, args)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if len(positionals) < 2 {
+		fmt.Fprintln(stderr, "usage: bunker reply <id> <text|-> [--cc addr]... [--attach path]... [--dry-run] [--json]")
+		return 2
+	}
+	if err := validateAttachmentPaths(attach); err != nil {
+		return fail(*jsonOut, stdout, stderr, err)
+	}
+	body, err := textOrStdin(positionals[1], stdin)
+	if err != nil {
+		return fail(*jsonOut, stdout, stderr, err)
+	}
+	plan, receipt, err := backend.Reply(ctx, positionals[0], body, collectCc(cc), attach, *dryRun)
+	if err != nil {
+		return fail(*jsonOut, stdout, stderr, err)
+	}
+	return printPlanResult(*jsonOut, *dryRun, plan, receipt, stdout)
+}
+
+// validateAttachmentPaths checks every path up front: it must exist, not
+// be a directory, and be readable. That is the CLI's whole job — the MIME
+// type and size rules that decide whether a channel will actually accept
+// the file live in core.Service, validated against the adapter's own
+// core.AttachmentPolicy (see internal/core/service.go), on --dry-run too.
+// This runs before anything is sent or even planned, so a bad path fails
+// fast with a clear error either way.
+func validateAttachmentPaths(paths []string) error {
+	for _, p := range paths {
+		f, err := os.Open(p)
+		if err != nil {
+			return fmt.Errorf("attachment %q: %w", p, err)
+		}
+		info, statErr := f.Stat()
+		f.Close()
+		if statErr != nil {
+			return fmt.Errorf("attachment %q: %w", p, statErr)
+		}
+		if info.IsDir() {
+			return fmt.Errorf("attachment %q is a directory, not a file", p)
+		}
+	}
+	return nil
+}
+
+func cmdSend(ctx context.Context, backend Backend, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	fs := newFlagSet("send", stderr)
+	subject := fs.String("subject", "", "message subject (mail only)")
+	var attach, media, cc stringSliceFlag
+	fs.Var(&attach, "attach", "local file to attach (repeatable)")
+	fs.Var(&media, "media", "alias of --attach, kept for compatibility (repeatable)")
+	fs.Var(&cc, "cc", "additional recipient, comma-separated values allowed (repeatable)")
+	dryRun := fs.Bool("dry-run", false, "plan the send without delivering it")
+	jsonOut := fs.Bool("json", false, "emit JSON")
+	positionals, err := parseInterspersed(fs, args)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if len(positionals) < 4 {
+		fmt.Fprintln(stderr, "usage: bunker send <channel> <account> <to> <text|-> [--cc addr]... [--subject s] [--attach path]... [--media path]... [--dry-run] [--json]")
+		return 2
+	}
+	attachments := append(append([]string{}, []string(media)...), []string(attach)...)
+	if err := validateAttachmentPaths(attachments); err != nil {
+		return fail(*jsonOut, stdout, stderr, err)
+	}
+	to := splitRecipients(positionals[2])
+	if len(to) == 0 {
+		return fail(*jsonOut, stdout, stderr, fmt.Errorf("no recipient given in %q", positionals[2]))
+	}
+	body, err := textOrStdin(positionals[3], stdin)
+	if err != nil {
+		return fail(*jsonOut, stdout, stderr, err)
+	}
+	out := core.Outgoing{
+		Channel:     core.Channel(positionals[0]),
+		Account:     positionals[1],
+		To:          to,
+		Cc:          collectCc(cc),
+		Subject:     *subject,
+		Body:        body,
+		Attachments: attachments,
+	}
+	plan, receipt, err := backend.Send(ctx, out, *dryRun)
+	if err != nil {
+		return fail(*jsonOut, stdout, stderr, err)
+	}
+	return printPlanResult(*jsonOut, *dryRun, plan, receipt, stdout)
+}
+
+func cmdOrganize(ctx context.Context, backend Backend, args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("organize", stderr)
+	var labels, unlabels stringSliceFlag
+	fs.Var(&labels, "label", "add label (repeatable)")
+	fs.Var(&unlabels, "unlabel", "remove label (repeatable)")
+	move := fs.String("move", "", "move to folder")
+	seen := fs.Bool("seen", false, "mark as read")
+	unseen := fs.Bool("unseen", false, "mark as unread")
+	dryRun := fs.Bool("dry-run", false, "plan the change without applying it")
+	jsonOut := fs.Bool("json", false, "emit JSON")
+	positionals, err := parseInterspersed(fs, args)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if len(positionals) < 1 {
+		fmt.Fprintln(stderr, "usage: bunker organize <id> [--label x]... [--unlabel x]... [--move folder] [--seen|--unseen] [--dry-run] [--json]")
+		return 2
+	}
+	if *seen && *unseen {
+		return fail(*jsonOut, stdout, stderr, errors.New("--seen and --unseen are mutually exclusive"))
+	}
+
+	op := core.OrganizeOp{AddLabels: labels, RemoveLabels: unlabels, MoveTo: *move}
+	if *seen {
+		t := true
+		op.Seen = &t
+	}
+	if *unseen {
+		f := false
+		op.Seen = &f
+	}
+
+	plan, err := backend.Organize(ctx, positionals[0], op, *dryRun)
+	if err != nil {
+		return fail(*jsonOut, stdout, stderr, err)
+	}
+	if *jsonOut {
+		writeJSON(stdout, map[string]any{"dryRun": *dryRun, "plan": plan})
+		return 0
+	}
+	verb := "organized"
+	if *dryRun {
+		verb = "would organize"
+	}
+	fmt.Fprintf(stdout, "%s %s\n", verb, plan.Target)
+	return 0
+}
+
+func cmdStatus(ctx context.Context, backend Backend, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if len(args) < 1 || args[0] != "post" {
+		fmt.Fprintln(stderr, "usage: bunker status post <channel> <account> <text> [--media path] [--dry-run] [--json]")
+		return 2
+	}
+	fs := newFlagSet("status post", stderr)
+	media := fs.String("media", "", "local media file path")
+	dryRun := fs.Bool("dry-run", false, "plan the post without publishing it")
+	jsonOut := fs.Bool("json", false, "emit JSON")
+	positionals, err := parseInterspersed(fs, args[1:])
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if len(positionals) < 3 {
+		fmt.Fprintln(stderr, "usage: bunker status post <channel> <account> <text> [--media path] [--dry-run] [--json]")
+		return 2
+	}
+	text, err := textOrStdin(positionals[2], stdin)
+	if err != nil {
+		return fail(*jsonOut, stdout, stderr, err)
+	}
+	status := core.Status{Text: text, Media: *media}
+	plan, receipt, err := backend.PostStatus(ctx, core.Channel(positionals[0]), positionals[1], status, *dryRun)
+	if err != nil {
+		return fail(*jsonOut, stdout, stderr, err)
+	}
+	return printPlanResult(*jsonOut, *dryRun, plan, receipt, stdout)
+}
+
+func cmdCounts(ctx context.Context, backend Backend, args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("counts", stderr)
+	jsonOut := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	counts, err := backend.Counts(ctx)
+	if err != nil {
+		return fail(*jsonOut, stdout, stderr, err)
+	}
+	if *jsonOut {
+		writeJSON(stdout, map[string]any{"counts": counts})
+		return 0
+	}
+	for channel, byAccount := range counts {
+		for account, n := range byAccount {
+			fmt.Fprintf(stdout, "%s/%s: %d\n", channel, account, n)
+		}
+	}
+	return 0
+}
+
+// printPlanResult renders the shared {dryRun, plan, receipt} shape used by
+// reply, send and status post. A fan-out send/reply (T13a: Plan.Recipients
+// has more than one address on an adapter without
+// core.MultiRecipientSender) is delegated to printFanoutResult instead,
+// since it needs a per-recipient breakdown and its own exit code; reply
+// and status never reach that path (their Recipients has at most one
+// entry).
+func printPlanResult(jsonOut, dryRun bool, plan core.Plan, receipt core.Receipt, stdout io.Writer) int {
+	if len(plan.Recipients) > 1 {
+		return printFanoutResult(jsonOut, dryRun, plan, receipt, stdout)
+	}
+	if jsonOut {
+		writeJSON(stdout, map[string]any{"dryRun": dryRun, "plan": plan, "receipt": receipt})
+		return 0
+	}
+	to := ""
+	if len(plan.Recipients) > 0 {
+		to = fmt.Sprintf(" to %v", plan.Recipients)
+	}
+	cc := ""
+	if len(plan.Cc) > 0 {
+		cc = fmt.Sprintf(" cc %v", plan.Cc)
+	}
+	subject := ""
+	if plan.Subject != "" {
+		subject = fmt.Sprintf(" subject %q", plan.Subject)
+	}
+	if dryRun {
+		fmt.Fprintf(stdout, "[dry-run] would %s via %s/%s%s%s%s: %s\n", plan.Action, plan.Channel, plan.Account, to, cc, subject, plan.Preview)
+	} else {
+		fmt.Fprintf(stdout, "%s ok: %s%s (receipt %s)\n", plan.Action, plan.Target, cc, receipt.ID)
+	}
+	for _, att := range plan.Attachments {
+		fmt.Fprintf(stdout, "  %s (%s, %d bytes)\n", att.Name, att.MIME, att.Size)
+	}
+	return 0
+}
+
+// printFanoutResult renders a fan-out send (T13a): dry-run shows the full
+// per-recipient plan and the estimated pause budget without sending or
+// sleeping anything; a real send lists each recipient's ✓/✗ outcome and
+// exits 1 if any recipient failed, since "one failure never stops the
+// rest" must never look like a clean success.
+func printFanoutResult(jsonOut, dryRun bool, plan core.Plan, receipt core.Receipt, stdout io.Writer) int {
+	exitCode := 0
+	if !dryRun {
+		for _, r := range receipt.Recipients {
+			if r.Error != "" {
+				exitCode = 1
+				break
+			}
+		}
+	}
+
+	if jsonOut {
+		writeJSON(stdout, map[string]any{"dryRun": dryRun, "plan": plan, "receipt": receipt})
+		return exitCode
+	}
+
+	cc := ""
+	if len(plan.Cc) > 0 {
+		cc = fmt.Sprintf(" cc %v", plan.Cc)
+	}
+	subject := ""
+	if plan.Subject != "" {
+		subject = fmt.Sprintf(" subject %q", plan.Subject)
+	}
+
+	if dryRun {
+		fmt.Fprintf(stdout, "[dry-run] would %s via %s/%s to %d recipients %v%s%s: %s\n",
+			plan.Action, plan.Channel, plan.Account, len(plan.Recipients), plan.Recipients, cc, subject, plan.Preview)
+		if plan.FanoutPauseMax > 0 {
+			fmt.Fprintf(stdout, "  estimated pause between recipients: %s-%s (plus each adapter's own composing/typing time)\n",
+				plan.FanoutPauseMin.Round(time.Second), plan.FanoutPauseMax.Round(time.Second))
+		}
+		for _, att := range plan.Attachments {
+			fmt.Fprintf(stdout, "  %s (%s, %d bytes)\n", att.Name, att.MIME, att.Size)
+		}
+		return 0
+	}
+
+	fmt.Fprintf(stdout, "%s: %d recipients%s\n", plan.Action, len(receipt.Recipients), cc)
+	for _, r := range receipt.Recipients {
+		if r.Error == "" {
+			fmt.Fprintf(stdout, "  ✓ %s (receipt %s)\n", r.To, r.Receipt.ID)
+		} else {
+			fmt.Fprintf(stdout, "  ✗ %s: %s\n", r.To, r.Error)
+		}
+	}
+	return exitCode
+}

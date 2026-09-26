@@ -1,0 +1,195 @@
+package rpc
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
+	"os"
+
+	"github.com/reyer3/bunker-go/internal/core"
+)
+
+// Server dispatches line-delimited JSON requests to a core.Service over a
+// unix socket.
+type Server struct {
+	svc *core.Service
+}
+
+// NewServer wraps svc for RPC.
+func NewServer(svc *core.Service) *Server {
+	return &Server{svc: svc}
+}
+
+// Serve listens on socketPath and handles connections until ctx is
+// canceled, then closes the listener and returns.
+func (s *Server) Serve(ctx context.Context, socketPath string) error {
+	_ = os.Remove(socketPath) // stale socket from a previous crashed run
+
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		return fmt.Errorf("rpc: listen %s: %w", socketPath, err)
+	}
+
+	go func() {
+		<-ctx.Done()
+		ln.Close()
+	}()
+
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("rpc: accept: %w", err)
+		}
+		go s.handleConn(ctx, conn)
+	}
+}
+
+func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
+	defer conn.Close()
+	scanner := bufio.NewScanner(conn)
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	enc := json.NewEncoder(conn)
+
+	for scanner.Scan() {
+		var req Request
+		if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
+			enc.Encode(Response{Error: fmt.Sprintf("rpc: bad request: %v", err)})
+			continue
+		}
+		resp := s.dispatch(ctx, req)
+		if err := enc.Encode(resp); err != nil {
+			return
+		}
+	}
+}
+
+func (s *Server) dispatch(ctx context.Context, req Request) Response {
+	result, err := s.call(ctx, req)
+	if err != nil {
+		return errResponse(req.ID, err)
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return errResponse(req.ID, fmt.Errorf("rpc: marshal result: %w", err))
+	}
+	return Response{ID: req.ID, Result: raw}
+}
+
+func (s *Server) call(ctx context.Context, req Request) (any, error) {
+	switch req.Method {
+	case MethodList:
+		var p listParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		items, err := s.svc.List(ctx, p.Filter)
+		if err != nil {
+			return nil, err
+		}
+		return listResult{Items: items}, nil
+
+	case MethodGet:
+		var p idParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		item, err := s.svc.Get(ctx, p.ID)
+		if err != nil {
+			return nil, err
+		}
+		return itemResult{Item: item}, nil
+
+	case MethodFetch:
+		var p idParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		item, err := s.svc.Fetch(ctx, p.ID)
+		if err != nil {
+			return nil, err
+		}
+		return itemResult{Item: item}, nil
+
+	case MethodRead:
+		var p readParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		item, err := s.svc.Read(ctx, p.ID, p.MarkReceipt)
+		if err != nil {
+			return nil, err
+		}
+		return itemResult{Item: item}, nil
+
+	case MethodCounts:
+		counts, err := s.svc.Counts(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return countsResult{Counts: counts}, nil
+
+	case MethodReply:
+		var p replyParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		plan, receipt, err := s.svc.Reply(ctx, p.ID, p.Body, p.Cc, p.Attachments, p.DryRun)
+		if err != nil {
+			return nil, err
+		}
+		return planReceiptResult{Plan: plan, Receipt: receipt}, nil
+
+	case MethodSend:
+		var p sendParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		plan, receipt, err := s.svc.Send(ctx, p.Outgoing, p.DryRun)
+		if err != nil {
+			return nil, err
+		}
+		return planReceiptResult{Plan: plan, Receipt: receipt}, nil
+
+	case MethodOrganize:
+		var p organizeParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		plan, err := s.svc.Organize(ctx, p.ID, p.Op, p.DryRun)
+		if err != nil {
+			return nil, err
+		}
+		return planResult{Plan: plan}, nil
+
+	case MethodPostStatus:
+		var p statusParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		plan, receipt, err := s.svc.PostStatus(ctx, p.Channel, p.Account, p.Status, p.DryRun)
+		if err != nil {
+			return nil, err
+		}
+		return planReceiptResult{Plan: plan, Receipt: receipt}, nil
+
+	default:
+		return nil, fmt.Errorf("rpc: unknown method %q", req.Method)
+	}
+}
+
+func errResponse(id string, err error) Response {
+	resp := Response{ID: id, Error: err.Error()}
+	switch {
+	case errors.Is(err, core.ErrNotFound):
+		resp.ErrCode = errCodeNotFound
+	case errors.Is(err, core.ErrUnsupported):
+		resp.ErrCode = errCodeUnsupported
+	}
+	return resp
+}

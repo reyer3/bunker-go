@@ -1,0 +1,12 @@
+/bunker
+*.sock
+*.db
+*.db-wal
+*.db-shm
+.DS_Store
+/.codegraph/
+# Local AI runtime state
+.atl/
+.atl/
+.codegraph/
+dist/
