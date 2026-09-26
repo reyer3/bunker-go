@@ -25,6 +25,8 @@ const defaultMinSendInterval = 3 * time.Second
 // core.FanoutConfigurer against a waClient, so it is fully testable
 // without ever dialing WhatsApp.
 type Adapter struct {
+	// avatarTimeout bounds one profile-picture lookup (0 = default).
+	avatarTimeout   time.Duration
 	account         string
 	cli             waClient
 	minSendInterval time.Duration
@@ -40,21 +42,36 @@ type Adapter struct {
 	sleep  func(time.Duration)
 	rand01 func() float64
 
+	// httpGet fetches a plain HTTPS URL's bytes: WhatsApp profile/group
+	// pictures (see Avatar) are served over an ordinary HTTPS GET, unlike
+	// message media, which whatsmeow's own Download decrypts. It defaults
+	// to a real http.Client; tests inject a fake so avatar tests never
+	// touch the network.
+	httpGet func(ctx context.Context, url string) ([]byte, error)
+
 	mu         sync.Mutex
 	items      map[string]core.Item
 	lastSend   time.Time
 	groupNames map[string]groupNameCacheEntry
+	// sink is set once, at the top of Run, so DownloadAttachment (called
+	// independently, e.g. over RPC while Run is still active in the
+	// daemon) can read/write the same core.Sink handleEvent and
+	// handleHistorySync already persist media descriptors through. It is
+	// nil until Run has been called at least once.
+	sink core.Sink
 }
 
 var (
-	_ core.Adapter          = (*Adapter)(nil)
-	_ core.Fetcher          = (*Adapter)(nil)
-	_ core.Sender           = (*Adapter)(nil)
-	_ core.MediaSender      = (*Adapter)(nil)
-	_ core.Organizer        = (*Adapter)(nil)
-	_ core.StatusPublisher  = (*Adapter)(nil)
-	_ core.ReadMarker       = (*Adapter)(nil)
-	_ core.FanoutConfigurer = (*Adapter)(nil)
+	_ core.Adapter              = (*Adapter)(nil)
+	_ core.Fetcher              = (*Adapter)(nil)
+	_ core.Sender               = (*Adapter)(nil)
+	_ core.MediaSender          = (*Adapter)(nil)
+	_ core.Organizer            = (*Adapter)(nil)
+	_ core.StatusPublisher      = (*Adapter)(nil)
+	_ core.ReadMarker           = (*Adapter)(nil)
+	_ core.FanoutConfigurer     = (*Adapter)(nil)
+	_ core.AttachmentDownloader = (*Adapter)(nil)
+	_ core.AvatarProvider       = (*Adapter)(nil)
 )
 
 // NewAdapter builds an Adapter for account, driving cli. minSendInterval,
@@ -71,6 +88,7 @@ func NewAdapter(account string, cli waClient, minSendInterval ...time.Duration) 
 		items:           make(map[string]core.Item),
 		sleep:           time.Sleep,
 		rand01:          rand.Float64,
+		httpGet:         httpGetURL,
 	}
 }
 
@@ -99,6 +117,13 @@ func (a *Adapter) FanoutPolicy() core.FanoutPolicy { return a.fanout }
 // wire a fake.
 func (a *Adapter) SetNameResolver(r NameResolver) { a.names = r }
 
+// SetHTTPGet overrides how Avatar downloads a profile/group picture's
+// bytes once GetProfilePictureInfo has resolved its URL. Tests inject a
+// fake that never touches the network.
+func (a *Adapter) SetHTTPGet(get func(ctx context.Context, url string) ([]byte, error)) {
+	a.httpGet = get
+}
+
 // SetHistoryLimit sets how many of the most recent messages per
 // unread conversation a *events.HistorySync import keeps (see
 // handleHistorySync). n <= 0 leaves the default (defaultHistoryMessagesPerChat)
@@ -120,6 +145,10 @@ func (a *Adapter) Account() string { return a.account }
 // unlinked account fails fast with ErrNotLinked instead of trying to
 // pair, which only "bunker link whatsapp" does.
 func (a *Adapter) Run(ctx context.Context, sink core.Sink) error {
+	a.mu.Lock()
+	a.sink = sink
+	a.mu.Unlock()
+
 	if !a.cli.IsLinked() {
 		return ErrNotLinked
 	}
@@ -159,6 +188,7 @@ func (a *Adapter) handleEvent(ctx context.Context, sink core.Sink, evt any, done
 			return
 		}
 		item = a.enrichItem(ctx, item, e.Info.Chat, e.Info.Sender, string(e.Info.ID), e.Info.PushName)
+		a.persistMediaDescriptor(ctx, sink, item, e.Message)
 		a.cacheItem(item)
 		_ = sink.Upsert(ctx, item)
 

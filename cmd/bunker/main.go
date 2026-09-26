@@ -6,11 +6,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
 	"github.com/reyer3/bunker-go/internal/config"
 	"github.com/reyer3/bunker-go/internal/rpc"
+	"github.com/reyer3/bunker-go/internal/tui"
+	"golang.org/x/term"
 )
 
 // shortCommandTimeout bounds every CLI↔daemon call except send/reply
@@ -26,11 +29,15 @@ const shortCommandTimeout = 30 * time.Second
 const sendReplyTimeout = 15 * time.Minute
 
 // commandTimeout returns the context deadline run() applies for cmd
-// (args[0]): the long deadline for send/reply, the short one for
+// (args[0]): the long deadline for send/reply/download, the short one for
 // everything else. render sets its own 200ms budget independently (see
-// cmdRender) and never goes through this path.
+// cmdRender) and never goes through this path. download shares
+// send/reply's longer budget because it can move up to
+// core.DefaultMaxDownloadBytes (100 MB) over a slow IMAP/WhatsApp
+// connection — shortCommandTimeout's 30s is comfortably enough for every
+// other command but not guaranteed for that.
 func commandTimeout(cmd string) time.Duration {
-	if cmd == "send" || cmd == "reply" {
+	if cmd == "send" || cmd == "reply" || cmd == "download" {
 		return sendReplyTimeout
 	}
 	return shortCommandTimeout
@@ -41,11 +48,46 @@ func main() {
 }
 
 func run(args []string, stdin *os.File, stdout, stderr *os.File) int {
-	if len(args) == 0 {
-		fmt.Fprint(stderr, topLevelUsage)
-		return 2
-	}
+	return runWithDependencies(args, stdin, stdout, stderr, runDependencies{
+		isTerminal: func(file *os.File) bool { return term.IsTerminal(int(file.Fd())) },
+		dial:       func(ctx context.Context, path string) (tui.Client, error) { return rpc.DialContext(ctx, path) },
+		startTUI:   tui.Run,
+	})
+}
 
+type runDependencies struct {
+	isTerminal func(*os.File) bool
+	dial       func(context.Context, string) (tui.Client, error)
+	startTUI   func(tui.Client, io.Reader, io.Writer) error
+}
+
+func runWithDependencies(args []string, stdin *os.File, stdout, stderr io.Writer, deps runDependencies) int {
+	if len(args) == 0 {
+		if !deps.isTerminal(stdin) {
+			fmt.Fprint(stderr, topLevelUsage)
+			return 2
+		}
+		socket := rpc.DefaultSocketPath()
+		ctx, cancel := context.WithTimeout(context.Background(), shortCommandTimeout)
+		client, err := deps.dial(ctx, socket)
+		cancel()
+		if err != nil {
+			fmt.Fprintf(stderr, "error: cannot reach bunker daemon at %s: %v\n", socket, err)
+			fmt.Fprintln(stderr, "hint: start it with 'bunker daemon' (or 'bunker daemon --fake' to try it without real accounts)")
+			return 1
+		}
+		queries := tui.NewQueryClient(client, func(ctx context.Context) (tui.Client, error) { return deps.dial(ctx, socket) })
+		defer queries.Close()
+		if err := deps.startTUI(queries, stdin, stdout); err != nil {
+			fmt.Fprintln(stderr, "error: terminal UI:", err)
+			return 1
+		}
+		return 0
+	}
+	return runCommandLine(args, stdin, stdout, stderr)
+}
+
+func runCommandLine(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, topLevelUsage)

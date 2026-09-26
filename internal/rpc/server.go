@@ -178,6 +178,28 @@ func (s *Server) call(ctx context.Context, req Request) (any, error) {
 		}
 		return planReceiptResult{Plan: plan, Receipt: receipt}, nil
 
+	case MethodDownload:
+		var p downloadParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		res, err := s.svc.Download(ctx, p.ID, p.Index, p.Path, core.DownloadOptions{Force: p.Force})
+		if err != nil {
+			return nil, err
+		}
+		return downloadResult{Result: res}, nil
+
+	case MethodAvatar:
+		var p avatarParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		res, err := s.svc.Avatar(ctx, p.Channel, p.Account, p.Thread)
+		if err != nil {
+			return nil, err
+		}
+		return avatarResult{Result: res}, nil
+
 	default:
 		return nil, fmt.Errorf("rpc: unknown method %q", req.Method)
 	}

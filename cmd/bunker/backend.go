@@ -22,6 +22,8 @@ type Backend interface {
 	Send(ctx context.Context, out core.Outgoing, dryRun bool) (core.Plan, core.Receipt, error)
 	Organize(ctx context.Context, id string, op core.OrganizeOp, dryRun bool) (core.Plan, error)
 	PostStatus(ctx context.Context, channel core.Channel, account string, status core.Status, dryRun bool) (core.Plan, core.Receipt, error)
+	Download(ctx context.Context, id string, index int, destPath string, opts core.DownloadOptions) (core.DownloadResult, error)
+	Avatar(ctx context.Context, channel core.Channel, account, thread string) (core.AvatarResult, error)
 }
 
 var (

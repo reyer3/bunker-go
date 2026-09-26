@@ -4,8 +4,10 @@
 package fake
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -18,26 +20,35 @@ type OrganizeCall struct {
 	Op core.OrganizeOp
 }
 
+// attachmentKey identifies one attachment within an item, for
+// SetAttachmentData/DownloadAttachment.
+type attachmentKey struct {
+	id    string
+	index int
+}
+
 // Adapter is an in-memory core.Adapter that also implements Sender,
-// Organizer, StatusPublisher and Fetcher.
+// Organizer, StatusPublisher, Fetcher and AttachmentDownloader.
 type Adapter struct {
 	channel core.Channel
 	account string
 
-	mu        sync.Mutex
-	items     map[string]core.Item
-	sent      []core.Outgoing
-	organized []OrganizeCall
-	statuses  []core.Status
-	seq       int
+	mu             sync.Mutex
+	items          map[string]core.Item
+	sent           []core.Outgoing
+	organized      []OrganizeCall
+	statuses       []core.Status
+	seq            int
+	attachmentData map[attachmentKey][]byte
 }
 
 var (
-	_ core.Adapter         = (*Adapter)(nil)
-	_ core.Sender          = (*Adapter)(nil)
-	_ core.Organizer       = (*Adapter)(nil)
-	_ core.StatusPublisher = (*Adapter)(nil)
-	_ core.Fetcher         = (*Adapter)(nil)
+	_ core.Adapter              = (*Adapter)(nil)
+	_ core.Sender               = (*Adapter)(nil)
+	_ core.Organizer            = (*Adapter)(nil)
+	_ core.StatusPublisher      = (*Adapter)(nil)
+	_ core.Fetcher              = (*Adapter)(nil)
+	_ core.AttachmentDownloader = (*Adapter)(nil)
 )
 
 // New returns a fake adapter for (channel, account) preloaded with seed
@@ -138,4 +149,28 @@ func (a *Adapter) Fetch(ctx context.Context, id string) (core.Item, error) {
 		return core.Item{}, fmt.Errorf("fake: fetch %s: %w", id, core.ErrNotFound)
 	}
 	return it, nil
+}
+
+// SetAttachmentData registers the bytes DownloadAttachment returns for
+// item id's attachment at index. Tests call this before exercising
+// Service/RPC/CLI download.
+func (a *Adapter) SetAttachmentData(id string, index int, data []byte) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.attachmentData == nil {
+		a.attachmentData = make(map[attachmentKey][]byte)
+	}
+	a.attachmentData[attachmentKey{id, index}] = data
+}
+
+// DownloadAttachment implements core.AttachmentDownloader against the
+// bytes a test registered with SetAttachmentData.
+func (a *Adapter) DownloadAttachment(_ context.Context, item core.Item, index int) (io.ReadCloser, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	data, ok := a.attachmentData[attachmentKey{item.ID, index}]
+	if !ok {
+		return nil, fmt.Errorf("fake: download %s attachment %d: %w", item.ID, index, core.ErrNotFound)
+	}
+	return io.NopCloser(bytes.NewReader(data)), nil
 }

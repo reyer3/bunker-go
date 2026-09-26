@@ -3,6 +3,7 @@ package mail
 import (
 	"context"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -187,4 +188,71 @@ func TestAdapterRunObservesKeywordChangeFromAnotherClient(t *testing.T) {
 	if err := <-done; err != context.Canceled {
 		t.Fatalf("Run() error = %v, want context.Canceled", err)
 	}
+}
+
+// expungeBeforeIdleSink runs hook once, from the SetCursor call that
+// persists inbox.last_uid: after the initial FETCH, before IDLE starts.
+type expungeBeforeIdleSink struct {
+	*fakeSink
+	hook func()
+	ran  bool
+}
+
+func (s *expungeBeforeIdleSink) SetCursor(ctx context.Context, key, val string) error {
+	if err := s.fakeSink.SetCursor(ctx, key, val); err != nil {
+		return err
+	}
+	if strings.HasSuffix(key, "inbox.last_uid") && !s.ran {
+		s.ran = true
+		s.hook()
+	}
+	return nil
+}
+
+// TestAdapterRunObservesExpungeLandingBeforeIdle pins the test server's
+// IDLE behavior to what Dovecot does (cmd-idle.c checks for pending
+// changes right after "+ idling"): an EXPUNGE made by another client
+// between the adapter's FETCH and its IDLE must still be delivered.
+// Stock imapmemserver queued it until the next unrelated update, which
+// made TestAdapterRunObservesExpungeFromAnotherClient flaky under load.
+func TestAdapterRunObservesExpungeLandingBeforeIdle(t *testing.T) {
+	addr, _, _ := newMemIMAPServer(t)
+	appendMessage(t, addr, "INBOX", rawMessage("<keep@x>", "", "Keep", "a@x", "r@x", "b"))
+	appendMessage(t, addr, "INBOX", rawMessage("<gone@x>", "", "Gone", "a@x", "r@x", "b"))
+
+	cfg := AccountConfig{Name: "cl", IMAPHost: "unused"}
+	adapter := newAdapter(cfg, nil, nil, testDialInsecure(addr))
+	sink := &expungeBeforeIdleSink{fakeSink: newFakeSink(), hook: func() {
+		other := secondClient(t, addr, "INBOX")
+		var seqSet imap.SeqSet
+		seqSet.AddRange(2, 2)
+		if err := other.Store(seqSet, &imap.StoreFlags{
+			Op: imap.StoreFlagsAdd, Silent: true, Flags: []imap.Flag{imap.FlagDeleted},
+		}, nil).Close(); err != nil {
+			t.Errorf("store \\Deleted: %v", err)
+		}
+		if _, err := other.Expunge().Collect(); err != nil {
+			t.Errorf("expunge: %v", err)
+		}
+	}}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- adapter.Run(ctx, sink) }()
+
+	var goneID string
+	for i := 0; i < 2; i++ {
+		if item := waitForUpsert(t, sink.fakeSink, 5*time.Second); item.Subject == "Gone" {
+			goneID = item.ID
+		}
+	}
+	select {
+	case id := <-sink.deletes:
+		if id != goneID {
+			t.Errorf("deleted id = %q, want %q", id, goneID)
+		}
+	case <-time.After(3 * time.Second):
+		t.Error("expunge queued before IDLE was never delivered")
+	}
+	cancel()
+	<-done
 }

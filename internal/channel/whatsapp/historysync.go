@@ -76,6 +76,7 @@ func (a *Adapter) handleHistorySync(ctx context.Context, sink core.Sink, data *w
 			item = a.enrichItem(ctx, item, evt.Info.Chat, evt.Info.Sender, string(evt.Info.ID), evt.Info.PushName)
 			item.Unread = i >= readCount
 
+			a.persistMediaDescriptor(ctx, sink, item, evt.Message)
 			a.cacheItem(item)
 			_ = sink.Upsert(ctx, item)
 		}

@@ -28,11 +28,18 @@ type fakeWAClient struct {
 	isOnWAErr     error
 	downloadData  []byte
 	downloadErr   error
+	lastDownload  whatsmeow.DownloadableMessage
 	uploadResp    whatsmeow.UploadResponse
 	uploadErr     error
 	uploadedType  whatsmeow.MediaType
 	qrChan        chan whatsmeow.QRChannelItem
 	qrErr         error
+
+	profilePicInfo    *types.ProfilePictureInfo
+	profilePicErr     error
+	profilePicHang    bool // block until ctx is done, like an unanswered IQ
+	profilePicCalls   []types.JID
+	profilePicPreview []bool
 
 	handlers   map[uint32]whatsmeow.EventHandler
 	nextHandle uint32
@@ -196,9 +203,10 @@ func (f *fakeWAClient) callLog() []string {
 	return out
 }
 
-func (f *fakeWAClient) Download(_ context.Context, _ whatsmeow.DownloadableMessage) ([]byte, error) {
+func (f *fakeWAClient) Download(_ context.Context, msg whatsmeow.DownloadableMessage) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.lastDownload = msg
 	return f.downloadData, f.downloadErr
 }
 
@@ -216,6 +224,23 @@ func (f *fakeWAClient) GetQRChannel(_ context.Context) (<-chan whatsmeow.QRChann
 		return nil, f.qrErr
 	}
 	return f.qrChan, nil
+}
+
+func (f *fakeWAClient) GetProfilePictureInfo(ctx context.Context, jid types.JID, params *whatsmeow.GetProfilePictureParams) (*types.ProfilePictureInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.profilePicCalls = append(f.profilePicCalls, jid)
+	f.profilePicPreview = append(f.profilePicPreview, params != nil && params.Preview)
+	if f.profilePicHang {
+		f.mu.Unlock()
+		<-ctx.Done()
+		f.mu.Lock()
+		return nil, ctx.Err()
+	}
+	if f.profilePicErr != nil {
+		return nil, f.profilePicErr
+	}
+	return f.profilePicInfo, nil
 }
 
 // ParseWebMessage is a simplified stand-in for *whatsmeow.Client's real

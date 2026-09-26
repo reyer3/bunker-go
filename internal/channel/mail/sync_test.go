@@ -36,7 +36,7 @@ func newMemIMAPServer(t *testing.T) (addr string, mem *imapmemserver.User, serve
 
 	server = imapserver.New(&imapserver.Options{
 		NewSession: func(*imapserver.Conn) (imapserver.Session, *imapserver.GreetingData, error) {
-			return memServer.NewSession(), nil, nil
+			return pollingIdleSession{memServer.NewSession().(idleTestSession)}, nil, nil
 		},
 		InsecureAuth: true,
 		Caps: imap.CapSet{
@@ -57,6 +57,34 @@ func newMemIMAPServer(t *testing.T) (addr string, mem *imapmemserver.User, serve
 	})
 
 	return ln.Addr().String(), user, server
+}
+
+// idleTestSession is what imapmemserver's sessions implement; MOVE must
+// stay visible or the server rejects the advertised capability.
+type idleTestSession interface {
+	imapserver.Session
+	imapserver.SessionMove
+}
+
+// pollingIdleSession makes the test server's IDLE behave like Dovecot's
+// (cmd-idle.c checks for pending changes right after "+ idling"): it
+// flushes updates queued before IDLE and keeps polling until stopped.
+// Stock imapmemserver only sends an update that arrives DURING IDLE, so
+// an EXPUNGE landing between a client's FETCH and its IDLE was held back
+// until an unrelated update came along.
+type pollingIdleSession struct{ idleTestSession }
+
+func (s pollingIdleSession) Idle(w *imapserver.UpdateWriter, stop <-chan struct{}) error {
+	for {
+		if err := s.idleTestSession.Poll(w, true); err != nil {
+			return err
+		}
+		select {
+		case <-stop:
+			return nil
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 }
 
 // testDialInsecure is a dialFunc that dials addr in plaintext (no TLS)
@@ -463,5 +491,59 @@ func TestAdapterRunReconnectsAfterConnectionLoss(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run() did not return after ctx was canceled")
+	}
+}
+
+// TestSyncFromUsesCallerMessageCountNotClientCache covers the startup
+// stall: go-imap v2 releases Select().Wait() before it stores the
+// mailbox in client.Mailbox(), so syncFrom used to read a nil cache,
+// conclude "no messages", skip the initial sync and IDLE forever (about
+// 1 run in 15 under CPU load). That window cannot be forced through the
+// public client, so this pins the contract instead: the count the
+// caller passes (from the SELECT result or an EXISTS update) is the only
+// source. The cache here says 1 message; a caller count of 0 must fetch
+// nothing and a count of 1 must fetch the message, which fails if
+// syncFrom ever reads client.Mailbox() again.
+func TestSyncFromUsesCallerMessageCountNotClientCache(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		numMessages uint32
+		wantUpserts int
+	}{
+		{"caller count 0 wins over cached 1", 0, 0},
+		{"caller count 1 fetches", 1, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			addr, _, _ := newMemIMAPServer(t)
+			appendMessage(t, addr, "INBOX", rawMessage("<a@x>", "", "S", "a@x", "r@x", "b"))
+			cfg := AccountConfig{Name: "cl", IMAPHost: "unused"}
+			adapter := newAdapter(cfg, nil, nil, testDialInsecure(addr))
+			ctx := context.Background()
+
+			client, err := testDialInsecure(addr)(ctx, cfg, nil, nil, nil)
+			if err != nil {
+				t.Fatalf("dial: %v", err)
+			}
+			defer client.Close()
+			mbox, err := client.Select("INBOX", nil).Wait()
+			if err != nil {
+				t.Fatalf("select: %v", err)
+			}
+			folders, err := discoverFolders(ctx, client, cfg)
+			if err != nil {
+				t.Fatalf("discover folders: %v", err)
+			}
+			if cached := client.Mailbox(); cached == nil || cached.NumMessages != 1 {
+				t.Fatalf("precondition: client cache = %+v, want NumMessages 1", cached)
+			}
+
+			sink := newFakeSink()
+			if _, err := adapter.syncFrom(ctx, client, sink, folders, mbox.UIDValidity, 0, newSeqTracker(), tc.numMessages); err != nil {
+				t.Fatalf("syncFrom() error = %v", err)
+			}
+			if got := len(sink.upserts); got != tc.wantUpserts {
+				t.Errorf("upserts = %d, want %d", got, tc.wantUpserts)
+			}
+		})
 	}
 }

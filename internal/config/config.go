@@ -25,6 +25,7 @@ type Account struct {
 type Config struct {
 	Accounts []Account
 	Render   Render
+	Tui      Tui
 }
 
 // Render holds optional status-line presentation settings.
@@ -35,11 +36,22 @@ type Render struct {
 	Glyphs map[string]string
 }
 
+// Tui holds optional interactive-panel settings.
+type Tui struct {
+	// Notify opts out of desktop notifications (OSC 777) when set to an
+	// explicit false; nil (the key absent) means the default, enabled.
+	// BUNKER_TUI_NOTIFY=0 is a second, independent opt-out.
+	Notify *bool
+}
+
 type rawConfig struct {
 	Account []map[string]interface{} `toml:"account"`
 	Render  struct {
 		Glyphs map[string]string `toml:"glyphs"`
 	} `toml:"render"`
+	Tui struct {
+		Notify *bool `toml:"notify"`
+	} `toml:"tui"`
 }
 
 // Load parses the TOML file at path into a Config.
@@ -49,7 +61,11 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: load %s: %w", path, err)
 	}
 
-	cfg := &Config{Accounts: make([]Account, 0, len(raw.Account)), Render: Render{Glyphs: raw.Render.Glyphs}}
+	cfg := &Config{
+		Accounts: make([]Account, 0, len(raw.Account)),
+		Render:   Render{Glyphs: raw.Render.Glyphs},
+		Tui:      Tui{Notify: raw.Tui.Notify},
+	}
 	for _, entry := range raw.Account {
 		acc := Account{Options: make(map[string]interface{})}
 		for k, v := range entry {
@@ -108,4 +124,24 @@ func ConfigPath() string {
 // StoreDBPath returns StateDir()/bunker.db, the default SQLite store path.
 func StoreDBPath() string {
 	return filepath.Join(StateDir(), "bunker.db")
+}
+
+// CacheDir returns BUNKER_CACHE_DIR if set, else ~/.cache/bunker-go.
+// Unlike ConfigDir/StateDir, its contents are disposable: losing it only
+// means avatars are re-fetched, nothing more.
+func CacheDir() string {
+	if dir := os.Getenv("BUNKER_CACHE_DIR"); dir != "" {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".", ".cache", "bunker-go")
+	}
+	return filepath.Join(home, ".cache", "bunker-go")
+}
+
+// AvatarCacheDir returns CacheDir()/avatars, where Service.Avatar caches
+// thumbnails and generated fallbacks (see internal/core/avatar.go).
+func AvatarCacheDir() string {
+	return filepath.Join(CacheDir(), "avatars")
 }

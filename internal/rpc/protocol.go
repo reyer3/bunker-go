@@ -45,6 +45,8 @@ const (
 	MethodSend       = "send"
 	MethodOrganize   = "organize"
 	MethodPostStatus = "status"
+	MethodDownload   = "download"
+	MethodAvatar     = "avatar"
 )
 
 type listParams struct {
@@ -106,6 +108,35 @@ type statusParams struct {
 	Account string       `json:"account"`
 	Status  core.Status  `json:"status"`
 	DryRun  bool         `json:"dryRun"`
+}
+
+// downloadParams is MethodDownload's params: save item ID's attachment
+// at Index to Path on the machine the daemon runs on. The daemon writes
+// the file itself instead of returning its bytes (see Client.Download
+// and core.Service.Download): the CLI and the daemon always run as the
+// same user on the same machine, so this is both simpler and keeps every
+// download under one enforced size cap, instead of also needing to fit
+// a 100 MB attachment through this line-delimited JSON protocol's much
+// smaller read buffer (see Server.handleConn's 8 MB scanner buffer).
+type downloadParams struct {
+	ID    string `json:"id"`
+	Index int    `json:"index"`
+	Path  string `json:"path"`
+	Force bool   `json:"force"`
+}
+type downloadResult struct {
+	Result core.DownloadResult `json:"result"`
+}
+
+// avatarParams is MethodAvatar's params: the same (channel, account,
+// thread) triple that groups Items into one conversation.
+type avatarParams struct {
+	Channel core.Channel `json:"channel"`
+	Account string       `json:"account"`
+	Thread  string       `json:"thread"`
+}
+type avatarResult struct {
+	Result core.AvatarResult `json:"result"`
 }
 
 // DefaultSocketPath returns BUNKER_SOCKET if set, else

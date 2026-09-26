@@ -37,15 +37,28 @@ type Service struct {
 	// never sleeps for real (T13f).
 	sleep       func(time.Duration)
 	choosePause func(min, max time.Duration) time.Duration
+
+	// avatarCacheDir, avatarClock, avatarLimiter and avatarCacheCapBytes
+	// back Service.Avatar (see avatar.go). avatarCacheDir is empty until
+	// SetAvatarCacheDir is called (production wiring in
+	// cmd/bunker/daemon.go; a t.TempDir() in tests) — Avatar refuses to
+	// run without it rather than guessing a default under a real HOME.
+	avatarCacheDir      string
+	avatarClock         func() time.Time
+	avatarLimiter       *avatarLimiter
+	avatarCacheCapBytes int64
 }
 
 // NewService wires a Service to its Store and Registry.
 func NewService(store Store, registry *Registry) *Service {
 	return &Service{
-		store:       store,
-		registry:    registry,
-		sleep:       time.Sleep,
-		choosePause: defaultChoosePause,
+		store:               store,
+		registry:            registry,
+		sleep:               time.Sleep,
+		choosePause:         defaultChoosePause,
+		avatarClock:         time.Now,
+		avatarLimiter:       newAvatarLimiter(defaultAvatarFetchInterval),
+		avatarCacheCapBytes: avatarCacheCapBytes,
 	}
 }
 

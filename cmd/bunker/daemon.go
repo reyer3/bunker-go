@@ -30,7 +30,7 @@ func cmdDaemonMain(args []string, stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := runDaemon(ctx, config.StateDir(), rpc.DefaultSocketPath(), *fakeMode, stdout); err != nil {
+	if err := runDaemon(ctx, config.StateDir(), config.AvatarCacheDir(), rpc.DefaultSocketPath(), *fakeMode, stdout); err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
@@ -40,8 +40,10 @@ func cmdDaemonMain(args []string, stdout, stderr io.Writer) int {
 // runDaemon opens the store, wires the registry (demo or configured),
 // starts every adapter's Run loop feeding the store, and serves the RPC
 // socket until ctx is canceled. It returns nil on a clean, ctx-triggered
-// shutdown.
-func runDaemon(ctx context.Context, stateDir, socketPath string, fakeMode bool, stdout io.Writer) error {
+// shutdown. avatarCacheDir is passed explicitly (like stateDir/
+// socketPath) rather than read from config internally, so tests always
+// point it at their own temp dir and never a real ~/.cache.
+func runDaemon(ctx context.Context, stateDir, avatarCacheDir, socketPath string, fakeMode bool, stdout io.Writer) error {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return fmt.Errorf("daemon: create state dir %s: %w", stateDir, err)
 	}
@@ -58,6 +60,7 @@ func runDaemon(ctx context.Context, stateDir, socketPath string, fakeMode bool, 
 	}
 
 	svc := core.NewService(st, reg)
+	svc.SetAvatarCacheDir(avatarCacheDir)
 	srv := rpc.NewServer(svc)
 
 	wg := startAdapters(ctx, reg, st, stdout)

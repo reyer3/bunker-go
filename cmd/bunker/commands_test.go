@@ -690,6 +690,195 @@ func TestCmdCountsJSON(t *testing.T) {
 	}
 }
 
+func TestCmdDownloadBuildsCall(t *testing.T) {
+	backend := newFakeBackend()
+	backend.downloadResult = core.DownloadResult{Path: "/tmp/out.bin", Bytes: 42, Name: "out.bin", MIME: "application/octet-stream"}
+	dest := filepath.Join(t.TempDir(), "out.bin")
+
+	var stdout, stderr bytes.Buffer
+	code := runWithBackend(context.Background(), backend, []string{"download", "mail:cl:1", "-n", "1", "-o", dest, "--force"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr=%s", code, stderr.String())
+	}
+	if len(backend.downloadCalls) != 1 {
+		t.Fatalf("downloadCalls = %+v, want 1 call", backend.downloadCalls)
+	}
+	call := backend.downloadCalls[0]
+	if call.ID != "mail:cl:1" || call.Index != 1 || call.DestPath != dest || !call.Opts.Force {
+		t.Fatalf("call = %+v, unexpected", call)
+	}
+	if !strings.Contains(stdout.String(), "out.bin") {
+		t.Fatalf("stdout = %q, want it to mention the saved file", stdout.String())
+	}
+}
+
+func TestCmdDownloadDefaultsIndexToZero(t *testing.T) {
+	backend := newFakeBackend()
+	dest := filepath.Join(t.TempDir(), "out.bin")
+
+	var stdout, stderr bytes.Buffer
+	code := runWithBackend(context.Background(), backend, []string{"download", "mail:cl:1", "-o", dest}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr=%s", code, stderr.String())
+	}
+	if len(backend.downloadCalls) != 1 || backend.downloadCalls[0].Index != 0 {
+		t.Fatalf("downloadCalls = %+v, want index 0", backend.downloadCalls)
+	}
+	if backend.downloadCalls[0].Opts.Force {
+		t.Fatalf("Force = true, want false by default")
+	}
+}
+
+// TestCmdDownloadResolvesRelativePathAgainstCallerCwd guards the
+// daemon-written design: the daemon runs in its own working directory,
+// so a relative -o must be made absolute against the CLI's cwd before
+// it crosses the RPC boundary, or the file lands next to the daemon.
+func TestCmdDownloadResolvesRelativePathAgainstCallerCwd(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	backend := newFakeBackend()
+
+	var stdout, stderr bytes.Buffer
+	code := runWithBackend(context.Background(), backend, []string{"download", "mail:cl:1", "-o", "manual.pdf"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr=%s", code, stderr.String())
+	}
+	if len(backend.downloadCalls) != 1 {
+		t.Fatalf("downloadCalls = %+v, want 1 call", backend.downloadCalls)
+	}
+	want := filepath.Join(dir, "manual.pdf")
+	if got := backend.downloadCalls[0].DestPath; got != want {
+		t.Fatalf("DestPath = %q, want %q (absolute, against the caller's cwd)", got, want)
+	}
+}
+
+func TestCmdDownloadRequiresOutputPath(t *testing.T) {
+	backend := newFakeBackend()
+	var stdout, stderr bytes.Buffer
+	code := runWithBackend(context.Background(), backend, []string{"download", "mail:cl:1"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2 for missing -o", code)
+	}
+	if len(backend.downloadCalls) != 0 {
+		t.Fatalf("downloadCalls = %+v, want 0", backend.downloadCalls)
+	}
+}
+
+func TestCmdDownloadJSON(t *testing.T) {
+	backend := newFakeBackend()
+	backend.downloadResult = core.DownloadResult{Path: "/tmp/out.bin", Bytes: 7, Name: "out.bin", MIME: "text/plain"}
+	dest := filepath.Join(t.TempDir(), "out.bin")
+
+	var stdout, stderr bytes.Buffer
+	code := runWithBackend(context.Background(), backend, []string{"download", "mail:cl:1", "-o", dest, "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr=%s", code, stderr.String())
+	}
+	var got struct {
+		Result core.DownloadResult `json:"result"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal stdout %q: %v", stdout.String(), err)
+	}
+	if got.Result.Bytes != 7 || got.Result.Name != "out.bin" {
+		t.Fatalf("Result = %+v", got.Result)
+	}
+}
+
+func TestCmdDownloadErrorProducesJSONError(t *testing.T) {
+	backend := newFakeBackend()
+	backend.downloadErr = errTest
+	dest := filepath.Join(t.TempDir(), "out.bin")
+
+	var stdout, stderr bytes.Buffer
+	code := runWithBackend(context.Background(), backend, []string{"download", "mail:cl:1", "-o", dest, "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("expected non-zero exit code on backend error")
+	}
+	var got struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal stdout %q: %v", stdout.String(), err)
+	}
+	if got.Error == "" {
+		t.Fatal("expected a non-empty error field")
+	}
+}
+
+func TestCmdAvatarBuildsCallAndPrintsPath(t *testing.T) {
+	backend := newFakeBackend()
+	backend.avatarResult = core.AvatarResult{Path: "/tmp/avatars/abc.png", Generated: true}
+
+	var stdout, stderr bytes.Buffer
+	code := runWithBackend(context.Background(), backend, []string{"avatar", "whatsapp", "personal", "5511@s.whatsapp.net"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr=%s", code, stderr.String())
+	}
+	if len(backend.avatarCalls) != 1 {
+		t.Fatalf("avatarCalls = %+v, want 1 call", backend.avatarCalls)
+	}
+	call := backend.avatarCalls[0]
+	if call.Channel != core.ChannelWhatsApp || call.Account != "personal" || call.Thread != "5511@s.whatsapp.net" {
+		t.Fatalf("call = %+v, unexpected", call)
+	}
+	if !strings.Contains(stdout.String(), "/tmp/avatars/abc.png") {
+		t.Fatalf("stdout = %q, want it to mention the avatar path", stdout.String())
+	}
+}
+
+func TestCmdAvatarRequiresThreePositionals(t *testing.T) {
+	backend := newFakeBackend()
+	var stdout, stderr bytes.Buffer
+	code := runWithBackend(context.Background(), backend, []string{"avatar", "whatsapp", "personal"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2", code)
+	}
+	if len(backend.avatarCalls) != 0 {
+		t.Fatalf("avatarCalls = %+v, want 0", backend.avatarCalls)
+	}
+}
+
+func TestCmdAvatarJSON(t *testing.T) {
+	backend := newFakeBackend()
+	backend.avatarResult = core.AvatarResult{Path: "/tmp/avatars/abc.png", Generated: false}
+
+	var stdout, stderr bytes.Buffer
+	code := runWithBackend(context.Background(), backend, []string{"avatar", "matrix", "work", "!room:example.com", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr=%s", code, stderr.String())
+	}
+	var got struct {
+		Result core.AvatarResult `json:"result"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal stdout %q: %v", stdout.String(), err)
+	}
+	if got.Result.Path != "/tmp/avatars/abc.png" || got.Result.Generated {
+		t.Fatalf("Result = %+v", got.Result)
+	}
+}
+
+func TestCmdAvatarErrorProducesJSONError(t *testing.T) {
+	backend := newFakeBackend()
+	backend.avatarErr = errTest
+
+	var stdout, stderr bytes.Buffer
+	code := runWithBackend(context.Background(), backend, []string{"avatar", "whatsapp", "personal", "thread-1", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("expected non-zero exit code on backend error")
+	}
+	var got struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal stdout %q: %v", stdout.String(), err)
+	}
+	if got.Error == "" {
+		t.Fatal("expected a non-empty error field")
+	}
+}
+
 func TestUnknownCommandReturnsUsageExitCode(t *testing.T) {
 	backend := newFakeBackend()
 	var stdout, stderr bytes.Buffer

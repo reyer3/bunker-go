@@ -3,6 +3,7 @@ package rpc_test
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -213,6 +214,72 @@ func TestClientSendOrganizeAndPostStatus(t *testing.T) {
 	}
 }
 
+// TestClientDownloadWritesFileViaDaemon proves the download RPC method
+// makes the daemon write the attachment straight to destPath on its own
+// filesystem, rather than streaming the bytes back over the socket (see
+// core.Service.Download and the design note in internal/rpc/protocol.go).
+func TestClientDownloadWritesFileViaDaemon(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "bunker.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer st.Close()
+
+	data := []byte("attachment bytes over rpc")
+	item := core.Item{
+		ID:          "mail:cl:att",
+		Channel:     core.ChannelMail,
+		Account:     "cl",
+		Attachments: []core.Attachment{{Name: "a.txt", MIME: "text/plain", Size: int64(len(data))}},
+	}
+	if err := st.Upsert(context.Background(), item); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	reg := core.NewRegistry()
+	adapter := fake.New(core.ChannelMail, "cl")
+	adapter.SetAttachmentData(item.ID, 0, data)
+	reg.Register(adapter)
+	svc := core.NewService(st, reg)
+
+	socket := filepath.Join(dir, "bunker.sock")
+	srv := rpc.NewServer(svc)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go srv.Serve(ctx, socket)
+
+	var client *rpc.Client
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if c, err := rpc.Dial(socket); err == nil {
+			client = c
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if client == nil {
+		t.Fatal("server never became reachable")
+	}
+	defer client.Close()
+
+	dest := filepath.Join(dir, "out.txt")
+	res, err := client.Download(context.Background(), item.ID, 0, dest, core.DownloadOptions{})
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if res.Bytes != int64(len(data)) || res.Path != dest {
+		t.Fatalf("Download result = %+v, want Bytes=%d Path=%s", res, len(data), dest)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("ReadFile(%s): %v", dest, err)
+	}
+	if string(got) != string(data) {
+		t.Fatalf("file contents = %q, want %q", got, data)
+	}
+}
+
 func TestClientReplyUnsupportedCapabilityReturnsErrUnsupported(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "bunker.db"))
@@ -251,5 +318,54 @@ func TestClientReplyUnsupportedCapabilityReturnsErrUnsupported(t *testing.T) {
 	_, _, err = client.Reply(context.Background(), item.ID, "x", nil, nil, true)
 	if !errors.Is(err, core.ErrUnsupported) {
 		t.Fatalf("err = %v, want ErrUnsupported", err)
+	}
+}
+
+// TestClientAvatarWritesGeneratedFallbackViaDaemon proves the avatar RPC
+// method reaches core.Service.Avatar and returns a path the daemon itself
+// wrote (like download, avatar bytes never round-trip the socket).
+func TestClientAvatarWritesGeneratedFallbackViaDaemon(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "bunker.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer st.Close()
+
+	reg := core.NewRegistry()
+	adapter := fake.New(core.ChannelMail, "cl") // no AvatarProvider capability
+	reg.Register(adapter)
+	svc := core.NewService(st, reg)
+	svc.SetAvatarCacheDir(filepath.Join(dir, "avatars"))
+
+	socket := filepath.Join(dir, "bunker.sock")
+	srv := rpc.NewServer(svc)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go srv.Serve(ctx, socket)
+
+	var client *rpc.Client
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if c, err := rpc.Dial(socket); err == nil {
+			client = c
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if client == nil {
+		t.Fatal("server never became reachable")
+	}
+	defer client.Close()
+
+	res, err := client.Avatar(context.Background(), core.ChannelMail, "cl", "thread-1")
+	if err != nil {
+		t.Fatalf("Avatar: %v", err)
+	}
+	if !res.Generated {
+		t.Errorf("Generated = false, want true (mail has no AvatarProvider)")
+	}
+	if _, err := os.Stat(res.Path); err != nil {
+		t.Errorf("avatar file %s does not exist: %v", res.Path, err)
 	}
 }

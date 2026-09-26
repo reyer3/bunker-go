@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"io"
 	"time"
 )
 
@@ -31,6 +32,45 @@ type Sink interface {
 // previews implement it to fetch a full body on demand.
 type Fetcher interface {
 	Fetch(ctx context.Context, id string) (Item, error)
+}
+
+// AttachmentDownloader is an optional capability: an adapter that can
+// fetch one attachment's raw bytes on demand implements it, so
+// Service.Download can save it to disk without the item ever carrying
+// the bytes (or any decryption material) itself. index is the
+// attachment's position within item.Attachments. mail re-fetches the
+// MIME part by UID over IMAP; WhatsApp looks up the download descriptor
+// it persisted for (item.ID, index) when the message first arrived and
+// calls whatsmeow's Download. The caller (Service.Download) closes the
+// returned io.ReadCloser.
+type AttachmentDownloader interface {
+	DownloadAttachment(ctx context.Context, item Item, index int) (io.ReadCloser, error)
+}
+
+// AvatarSource is what an adapter's AvatarProvider capability returns for
+// one conversation's picture: the raw bytes as fetched from the channel
+// (any size/format the source serves — Service.Avatar decodes, resizes
+// and re-encodes to the cached PNG shape) plus a display name Service
+// uses to derive the generated fallback's initial/color when the fetch
+// itself fails or the picture is later evicted.
+type AvatarSource struct {
+	Data        []byte
+	DisplayName string
+}
+
+// AvatarProvider is an optional capability: an adapter that can fetch a
+// conversation's profile/room picture (WhatsApp contacts and groups,
+// Matrix rooms and DMs) implements it. thread is the same Item.Thread
+// value grouping that conversation's items. ok is false with a nil err
+// when the channel itself reports "no picture set" or "not authorized to
+// view it" — a negative-cache miss, never an error: Service.Avatar always
+// falls back to the generated avatar for that case. A non-nil err means
+// the fetch attempt itself failed unexpectedly (network, decode); it is
+// also never negative-cached, so the next call retries. Mail never
+// implements this capability: it gets no network lookup, ever (see
+// odd/tasks/tui-avatars.md's privacy decision).
+type AvatarProvider interface {
+	Avatar(ctx context.Context, thread string) (AvatarSource, bool, error)
 }
 
 // Outgoing is a message to send or reply with, channel-agnostic.

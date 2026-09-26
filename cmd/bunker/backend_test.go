@@ -13,6 +13,8 @@ type fakeBackend struct {
 
 	listErr, getErr, fetchErr, readErr, countsErr error
 	replyErr, sendErr, organizeErr, statusErr     error
+	downloadErr                                   error
+	avatarErr                                     error
 
 	counts map[core.Channel]map[string]int
 
@@ -21,9 +23,26 @@ type fakeBackend struct {
 	organizeCalls []organizeCall
 	statusCalls   []statusCall
 	readCalls     []readCall
+	downloadCalls []downloadCall
+	avatarCalls   []avatarCall
 
-	receipt  core.Receipt
-	sendPlan core.Plan // overrides Send's default Plan when Action != ""
+	receipt        core.Receipt
+	sendPlan       core.Plan // overrides Send's default Plan when Action != ""
+	downloadResult core.DownloadResult
+	avatarResult   core.AvatarResult
+}
+
+type downloadCall struct {
+	ID       string
+	Index    int
+	DestPath string
+	Opts     core.DownloadOptions
+}
+
+type avatarCall struct {
+	Channel core.Channel
+	Account string
+	Thread  string
 }
 
 type readCall struct {
@@ -141,6 +160,25 @@ func (f *fakeBackend) PostStatus(ctx context.Context, channel core.Channel, acco
 		return plan, core.Receipt{}, nil
 	}
 	return plan, f.receipt, nil
+}
+
+func (f *fakeBackend) Download(ctx context.Context, id string, index int, destPath string, opts core.DownloadOptions) (core.DownloadResult, error) {
+	f.downloadCalls = append(f.downloadCalls, downloadCall{ID: id, Index: index, DestPath: destPath, Opts: opts})
+	if f.downloadErr != nil {
+		return core.DownloadResult{}, f.downloadErr
+	}
+	if f.downloadResult.Path != "" {
+		return f.downloadResult, nil
+	}
+	return core.DownloadResult{Path: destPath}, nil
+}
+
+func (f *fakeBackend) Avatar(ctx context.Context, channel core.Channel, account, thread string) (core.AvatarResult, error) {
+	f.avatarCalls = append(f.avatarCalls, avatarCall{Channel: channel, Account: account, Thread: thread})
+	if f.avatarErr != nil {
+		return core.AvatarResult{}, f.avatarErr
+	}
+	return f.avatarResult, nil
 }
 
 var _ Backend = (*fakeBackend)(nil)

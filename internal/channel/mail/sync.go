@@ -153,7 +153,7 @@ func (a *Adapter) runOnce(ctx context.Context, sink core.Sink, reconciled *bool)
 		*reconciled = true
 	}
 
-	lastUID, err := a.syncFrom(ctx, client, sink, folders, mbox.UIDValidity, 0, tracker)
+	lastUID, err := a.syncFrom(ctx, client, sink, folders, mbox.UIDValidity, 0, tracker, mbox.NumMessages)
 	if err != nil {
 		return err
 	}
@@ -196,7 +196,7 @@ func (a *Adapter) runOnce(ctx context.Context, sink core.Sink, reconciled *bool)
 					}
 				}
 			}
-		case <-existsCh:
+		case numMessages := <-existsCh:
 			if err := idleCmd.Close(); err != nil {
 				return fmt.Errorf("mail: stop idle for %q: %w", a.cfg.Name, err)
 			}
@@ -204,7 +204,7 @@ func (a *Adapter) runOnce(ctx context.Context, sink core.Sink, reconciled *bool)
 				return fmt.Errorf("mail: idle wait for %q: %w", a.cfg.Name, err)
 			}
 
-			lastUID, err = a.syncFrom(ctx, client, sink, folders, mbox.UIDValidity, lastUID, tracker)
+			lastUID, err = a.syncFrom(ctx, client, sink, folders, mbox.UIDValidity, lastUID, tracker, numMessages)
 			if err != nil {
 				return err
 			}
@@ -224,13 +224,14 @@ func cursorKey(account, name string) string {
 }
 
 // syncFrom fetches and upserts every message after sinceUID (or, when
-// sinceUID is 0, the last initialSyncLimit messages), returning the
+// sinceUID is 0, the last initialSyncLimit of the numMessages in the
+// selected mailbox), returning the
 // highest UID it saw so the caller can pick up from there next time.
 // UIDValidity is folded into the persisted cursor so a server-side
 // UIDVALIDITY change (mailbox recreated) is detected instead of silently
 // mismatching UIDs; on that mismatch this resets to a fresh initial
 // sync.
-func (a *Adapter) syncFrom(ctx context.Context, client *imapclient.Client, sink core.Sink, folders *FolderMap, uidValidity uint32, sinceUID imap.UID, tracker *seqTracker) (imap.UID, error) {
+func (a *Adapter) syncFrom(ctx context.Context, client *imapclient.Client, sink core.Sink, folders *FolderMap, uidValidity uint32, sinceUID imap.UID, tracker *seqTracker, numMessages uint32) (imap.UID, error) {
 	validityKey := cursorKey(a.cfg.Name, "inbox.uidvalidity")
 	lastUIDKey := cursorKey(a.cfg.Name, "inbox.last_uid")
 
@@ -248,8 +249,11 @@ func (a *Adapter) syncFrom(ctx context.Context, client *imapclient.Client, sink 
 		}
 	}
 
-	mbox := client.Mailbox()
-	if mbox == nil || mbox.NumMessages == 0 {
+	// numMessages comes from the caller (the SELECT result or an EXISTS
+	// update), never from client.Mailbox(): go-imap v2 releases
+	// Select().Wait() before it stores the mailbox, so that cache can
+	// still be nil here, which silently skipped the initial sync.
+	if numMessages == 0 {
 		if err := sink.SetCursor(ctx, validityKey, fmt.Sprint(uidValidity)); err != nil {
 			return sinceUID, fmt.Errorf("mail: persist uidvalidity cursor: %w", err)
 		}
@@ -261,8 +265,8 @@ func (a *Adapter) syncFrom(ctx context.Context, client *imapclient.Client, sink 
 		uidSet.AddRange(sinceUID+1, 0)
 	} else {
 		start := uint32(1)
-		if mbox.NumMessages > a.initialSyncLimit {
-			start = mbox.NumMessages - a.initialSyncLimit + 1
+		if numMessages > a.initialSyncLimit {
+			start = numMessages - a.initialSyncLimit + 1
 		}
 		var seqSet imap.SeqSet
 		seqSet.AddRange(start, 0)

@@ -41,11 +41,12 @@ type Adapter struct {
 }
 
 var (
-	_ core.Adapter     = (*Adapter)(nil)
-	_ core.Fetcher     = (*Adapter)(nil)
-	_ core.Sender      = (*Adapter)(nil)
-	_ core.Organizer   = (*Adapter)(nil)
-	_ core.FolderMover = (*Adapter)(nil)
+	_ core.Adapter              = (*Adapter)(nil)
+	_ core.Fetcher              = (*Adapter)(nil)
+	_ core.Sender               = (*Adapter)(nil)
+	_ core.Organizer            = (*Adapter)(nil)
+	_ core.FolderMover          = (*Adapter)(nil)
+	_ core.AttachmentDownloader = (*Adapter)(nil)
 )
 
 // NewAdapter builds the mail Adapter for one configured account. It

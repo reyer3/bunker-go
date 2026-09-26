@@ -78,6 +78,33 @@ func TestConfigPathJoinsConfigDir(t *testing.T) {
 	}
 }
 
+func TestCacheDirRespectsEnvOverride(t *testing.T) {
+	t.Setenv("BUNKER_CACHE_DIR", "/tmp/bunker-test-cache")
+	if got := config.CacheDir(); got != "/tmp/bunker-test-cache" {
+		t.Fatalf("CacheDir() = %q, want override", got)
+	}
+}
+
+func TestCacheDirDefaultsUnderHome(t *testing.T) {
+	t.Setenv("BUNKER_CACHE_DIR", "")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home dir available: %v", err)
+	}
+	want := filepath.Join(home, ".cache", "bunker-go")
+	if got := config.CacheDir(); got != want {
+		t.Fatalf("CacheDir() = %q, want %q", got, want)
+	}
+}
+
+func TestAvatarCacheDirJoinsCacheDir(t *testing.T) {
+	t.Setenv("BUNKER_CACHE_DIR", "/tmp/bunker-test-cache")
+	want := filepath.Join("/tmp/bunker-test-cache", "avatars")
+	if got := config.AvatarCacheDir(); got != want {
+		t.Fatalf("AvatarCacheDir() = %q, want %q", got, want)
+	}
+}
+
 func TestConfigDirDefaultsUnderHome(t *testing.T) {
 	t.Setenv("BUNKER_CONFIG_DIR", "")
 	home, err := os.UserHomeDir()
@@ -87,6 +114,34 @@ func TestConfigDirDefaultsUnderHome(t *testing.T) {
 	want := filepath.Join(home, ".config", "bunker-go")
 	if got := config.ConfigDir(); got != want {
 		t.Fatalf("ConfigDir() = %q, want %q", got, want)
+	}
+}
+
+func TestLoadDefaultsTuiNotifyToNilMeaningEnabled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[[account]]\nchannel = \"mail\"\nname = \"cl\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Tui.Notify != nil {
+		t.Errorf("Tui.Notify = %v, want nil (unset means the default, enabled)", cfg.Tui.Notify)
+	}
+}
+
+func TestLoadReadsTuiNotifyFalse(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[tui]\nnotify = false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Tui.Notify == nil || *cfg.Tui.Notify {
+		t.Errorf("Tui.Notify = %v, want an explicit false", cfg.Tui.Notify)
 	}
 }
 

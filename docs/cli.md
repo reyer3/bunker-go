@@ -30,6 +30,116 @@ against an empty store.
 No flags produce `--json` output; this command prints plain status lines
 to stdout as it starts and as adapters stop.
 
+## `bunker` (no arguments): interactive side panel
+
+Running `bunker` with no arguments on a TTY opens a Bubble Tea side panel
+(a tmux split or popup, typically) instead of printing usage: a small
+interactive client over the same RPC connection every subcommand uses. It
+never starts the daemon itself — it dials the existing socket exactly like
+`bunker list` does, and prints the same "cannot reach bunker daemon" hint
+and exits 1 if nothing is listening. Piped/non-interactive stdin (no TTY)
+keeps today's behavior: usage text on stderr and exit 2, unchanged.
+
+It lists unread items across every channel/account, grouped by
+`(Channel, Account, Thread)` (an item's own id is the group key when it
+carries no thread), polls for new ones every 5 seconds with one query in
+flight at a time, and lets you read and reply to an item or mark it read
+— all without ever touching `internal/store` or a channel adapter
+directly; it only ever calls through the same small RPC client interface
+`bunker`'s other commands use.
+
+**Layout.** The inbox is one clearly separated section per channel, in a
+fixed order (Mail, WhatsApp, Matrix): each section header shows that
+channel's brand-color glyph, name, and total unread count, followed by a
+thin rule in the same brand color (mail blue, WhatsApp green, Matrix
+green — the same accents `bunker render --tmux`/`--ansi` use, including
+any `[render.glyphs]` override). A channel with more than one configured
+account shows the account as a dim tag on its rows instead of splitting
+into more sections. Every conversation is two lines: a bold title (the
+thread name, then the subject, then the sender — never a raw Matrix room
+id or bare WhatsApp JID, which are shortened and dimmed instead) with its
+relative time (`HH:MM` today, "ayer" yesterday, else `dd-mmm`) and an
+unread badge on the right, and a dim "Sender: body" preview of the newest
+message underneath. The selected row gets a full-width highlight and a
+colored left bar. An empty section still shows its header and one dim
+"sin pendientes" line. The overview shows all three sections at once,
+each getting a fair share of the pane's height; a section with more
+conversations than fit ends in a dim "+N más" line rather than pushing
+another section off screen. `?` opens a full-keymap help overlay; `Esc`
+closes it. At terminal widths under ~30 columns the two-line row
+collapses to one line (no preview). Setting `NO_COLOR` disables all
+color, same as everywhere else in bunker.
+
+**Mouse.** The wheel moves the selection (like `j`/`k`); a click on a
+conversation selects it, and a click on the already-selected row opens
+it, matching `Enter`; a click on a section header, its rule, or a
+"+N más" notice focuses that section, matching `1`/`2`/`3`. The mouse
+never sends or marks anything by itself — it can only select, open, or
+focus, the same three things clicking is allowed to do from the
+keyboard — and it is ignored entirely outside the plain inbox (while
+reading, composing, previewing, marking, or with the help overlay open).
+
+**Desktop notifications.** When a poll finds unread conversations that
+were not part of the previous snapshot — never for the initial backlog
+on first open — and the panel is not the focused terminal pane (via
+`tea.FocusMsg`/`BlurMsg`; needs tmux's `focus-events on`), it emits an
+OSC 777 desktop notification (`sender`/first 60 characters of the body
+for one new item, or a generic "bunker"/"N new" once more than one
+arrives), sanitized the same way everything else from the daemon is.
+Notifications are rate-limited to at most one per 10 seconds; arrivals
+inside that window are coalesced into the next one instead of being
+dropped. Under tmux (`$TMUX` set) the sequence is wrapped in tmux's DCS
+passthrough so it reaches the real terminal instead of being swallowed.
+Opt out with `[tui] notify = false` in `config.toml` or
+`BUNKER_TUI_NOTIFY=0` in the environment; either alone disables it.
+
+**Hyperlinks.** In the detail view (`Enter` on an item), URLs in the
+body and the sender's address become OSC 8 hyperlinks (`mailto:` for
+mail, a `matrix.to` link for Matrix, `wa.me` for a WhatsApp contact — a
+WhatsApp group has no such link and stays plain text): Ctrl/Cmd-clicking
+the visible text opens it, in a terminal that supports OSC 8 (tmux needs
+`terminal-features ",xterm-ghostty:hyperlinks"`, or whatever matches your
+outer terminal, in `~/.tmux.conf`). The escape sequences never count
+toward the panel's width/wrap math, and only ever wrap text the panel has
+already run through its terminal-escape sanitizer — a message body or
+sender name can never inject its own escape sequence this way.
+
+Two safety properties hold regardless of what the daemon or a message's
+own text says:
+
+- **Opening an item never marks it read.** Reading in the panel calls
+  `Read(id, markReceipt=false)`; only the explicit `m` key marks
+  something read, and even that goes through a dry-run preview first
+  (below). The panel also never starts, stops, or restarts the daemon,
+  and never generates a reply on its own — a human reads and decides.
+- **Every reply and every mark-read is preview-then-confirm.** The panel
+  always asks the daemon to plan the action first (`dryRun=true`, e.g. a
+  Matrix attachment policy check still happens, so a dry-run answering
+  "no" is a real network round trip, not evidence of being offline) and
+  shows channel/account/recipient/attachments before doing anything for
+  real. There is no auto-retry on an uncertain result, and a send/organize
+  already in flight blocks every key (including quit and cancel) until it
+  resolves, so nothing can be sent or marked twice from one confirm.
+  Editing a draft after a preview always requires a fresh preview before
+  the next send.
+
+Keys: `j`/`k`/arrows move (in the overview they walk across section
+boundaries), `Enter` opens the selected item, `Esc` goes back (or closes
+the help overlay, or returns from a focused section to the overview),
+`1`/`2`/`3` focus the Mail/WhatsApp/Matrix section alone at full height
+with scrolling, `0` returns to the overview, `Tab`/`Shift+Tab` cycle
+overview → Mail → WhatsApp → Matrix → overview, `r` starts a reply to the
+selected/open item, `m` marks it read (dry-run preview, then `Enter` to
+confirm), `g` refreshes the inbox now, `?` opens the help overlay, `q`
+quits (asks again first if a reply preview/send is in flight).
+Composing a reply: every other key is literal draft text, `Ctrl+A` adds a
+local file attachment by path (spaces allowed; never a shell), `Ctrl+X`
+drops the most recently added attachment, `Ctrl+S` requests the dry-run
+preview, and `Enter` inserts a newline rather than sending. Terminal
+control sequences in anything the daemon returns (a message body, an
+attachment name, a sender's display name) are stripped before they ever
+reach your terminal.
+
 ## `bunker list [flags]`
 
 Lists items.
@@ -358,6 +468,97 @@ Unread item counts per channel and account.
 {"counts": {"mail": {"cl": 3}, "whatsapp": {"personal": 5}, "matrix": {"work": 2}}}
 ```
 
+## `bunker download <id> [-n index] -o path [--force] [--json]`
+
+Saves one attachment of a stored item to disk, so Alice (and Claude Code)
+can open a file bunker-go only ever described in `list`/`read` output.
+
+- `<id>` is the item's id, exactly as `list`/`read` print it.
+- `-n index` selects which attachment when the item carries more than
+  one (`0`-based; defaults to `0`).
+- `-o path` is the output file — **required**, there is no default. The
+  path is used literally: no shell, no `~` expansion, no directory
+  auto-creation.
+- `--force` allows overwriting an existing file at `path`. Without it,
+  `download` refuses and exits non-zero rather than silently clobbering
+  something already there.
+
+The daemon writes the file itself (it and the CLI always run as the same
+user on the same machine), through a temp file plus rename in `path`'s
+own directory, at mode `0600`, capped at 100 MB by default; when the
+attachment's declared size is known, the actual byte count must match it
+exactly or the download is rejected and no partial file is left behind.
+
+Mail re-fetches the MIME part by UID over IMAP (`BODY.PEEK`, so this
+never marks anything `\Seen` either) — it works for any mail item
+already stored, with no extra state kept around for it. WhatsApp looks up
+the download descriptor (`DirectPath`/`MediaKey`/`FileSHA256`/
+`FileEncSHA256`) it privately persisted when the message first arrived
+and calls whatsmeow's `Download`; an item stored before this feature
+existed has no descriptor and fails with a clear error ("no media key
+stored; re-download from the phone") instead of a panic. Matrix has no
+`AttachmentDownloader` yet (its adapter does not record attachments
+today) and returns an unsupported-capability error.
+
+```json
+{"result": {"Path": "/home/alice/manual.pdf", "Bytes": 483921, "Name": "manual.pdf", "MIME": "application/pdf"}}
+```
+
+Non-JSON output: `saved manual.pdf (application/pdf, 483921 bytes) to /home/alice/manual.pdf`.
+
+## `bunker avatar <channel> <account> <thread> [--json]`
+
+Prints the local PNG path for one conversation's avatar — a debugging/
+scripting entry point ahead of the TUI rendering it (a later task; see
+`odd/tasks/tui-avatars.md`).
+
+- `<channel>`/`<account>` identify the adapter, exactly like `send`'s
+  positionals.
+- `<thread>` is the same value as the conversation's `Item.Thread` (a
+  WhatsApp JID, a Matrix room id).
+
+The daemon fetches the picture through the adapter's `AvatarProvider`
+capability when it has one (WhatsApp contacts/groups, Matrix rooms/DMs),
+resizes it to at most 96x96 and caches it at
+`~/.cache/bunker-go/avatars` (`0700` directory, `0600` files, overridable
+via `BUNKER_CACHE_DIR`) for 24h; a "no picture"/"not authorized" result is
+itself cached as a negative for 24h. Fetches are on demand and
+rate-limited per adapter, so a burst of `avatar` calls across many
+conversations never turns into a burst of profile-picture requests.
+
+Mail has no `AvatarProvider` — it never fetches a picture over the
+network, ever — and any account without a real picture (rate-limited, no
+picture, unauthorized, or the fetch itself failing) falls back to a
+generated avatar: a circle in the channel's brand color (mail blue,
+WhatsApp green, Matrix green) with the conversation's initial letter in
+white, deterministic from (channel, display name).
+
+WhatsApp fetches the preview-size picture via whatsmeow's
+`GetProfilePictureInfo` for both contacts (`<thread>` a `@s.whatsapp.net`/
+`@lid` JID) and groups (`@g.us`), then downloads it with a plain HTTPS
+GET — profile pictures are not part of WhatsApp's end-to-end encrypted
+media, unlike message attachments (see `download` above). No picture set
+or a contact who hid theirs from Alice
+(`ErrProfilePictureNotSet`/`ErrProfilePictureUnauthorized`) is a negative
+cache miss, not an error.
+
+Matrix (`<thread>` a room id) prefers the room's own `m.room.avatar`
+state event; when the room has none set and it looks like a plain DM
+(exactly one sync-summary hero — the same heuristic the room's
+`ThreadName` fallback uses), it falls back to that member's own global
+profile avatar instead. Either way the picture is downloaded through
+mautrix's authenticated media endpoint (`Client.DownloadBytes`) — room
+avatars are not end-to-end encrypted even in an encrypted room, so no
+decryption is needed. Neither the room nor (for a DM) the hero having an
+avatar set (`M_NOT_FOUND` from both lookups) is a negative cache miss,
+not an error.
+
+```json
+{"result": {"Path": "/home/alice/.cache/bunker-go/avatars/3f2a....png", "Generated": false}}
+```
+
+Non-JSON output is just the path on its own line.
+
 ## `bunker render [--tmux] [--json]`
 
 Renders the tmux status segment: one glyph and unread count per channel,
@@ -396,6 +597,15 @@ Any styled glyph can be overridden in `config.toml`, for example with a codepoin
 ```toml
 [render.glyphs]
 matrix = "\U00100000"   # keys: mail, whatsapp, matrix
+```
+
+The interactive panel's desktop notifications (see above) can be turned
+off in `config.toml` too, independently of the `BUNKER_TUI_NOTIFY=0`
+environment opt-out:
+
+```toml
+[tui]
+notify = false
 ```
 
 ## `bunker link whatsapp <account>`

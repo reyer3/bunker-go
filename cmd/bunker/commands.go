@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -53,6 +54,8 @@ func (s *stringSliceFlag) Set(v string) error {
 
 const topLevelUsage = `bunker <command> [flags]
 
+Run without a command in a terminal to open the interactive UI.
+
 Commands:
   daemon [--fake]                                          run the daemon
   list [--channel c] [--account a] [--unread] [--label l]  list items
@@ -73,6 +76,11 @@ Commands:
   status post <channel> <account> <text>
        [--media path] [--dry-run] [--json]                 publish a status
   counts [--json]                                          unread counts
+  download <id> [-n index] -o path [--force] [--json]      save an attachment
+                                                             to disk (index
+                                                             defaults to 0)
+  avatar <channel> <account> <thread> [--json]              conversation avatar
+                                                             PNG path (debug)
   render [--tmux] [--json]                                 tmux status segment
   link whatsapp <account>                                  QR-pair WhatsApp
   link matrix <account> [--recovery-key|--recovery-key-stdin]
@@ -107,6 +115,10 @@ func runWithBackend(ctx context.Context, backend Backend, args []string, stdin i
 		return cmdStatus(ctx, backend, args[1:], stdin, stdout, stderr)
 	case "counts":
 		return cmdCounts(ctx, backend, args[1:], stdout, stderr)
+	case "download":
+		return cmdDownload(ctx, backend, args[1:], stdout, stderr)
+	case "avatar":
+		return cmdAvatar(ctx, backend, args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n%s", args[0], topLevelUsage)
 		return 2
@@ -457,6 +469,76 @@ func cmdCounts(ctx context.Context, backend Backend, args []string, stdout, stde
 			fmt.Fprintf(stdout, "%s/%s: %d\n", channel, account, n)
 		}
 	}
+	return 0
+}
+
+// cmdDownload saves one attachment of a stored item to disk. -n selects
+// which attachment when an item carries more than one (default 0); -o is
+// required (there is no default output path — the CLI never guesses
+// where Alice or Claude Code wants a file written). The backend (daemon
+// over RPC, or an in-process core.Service) does the actual write, so this
+// function only builds the call and renders its result.
+func cmdDownload(ctx context.Context, backend Backend, args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("download", stderr)
+	index := fs.Int("n", 0, "attachment index (default 0)")
+	out := fs.String("o", "", "output file path (required)")
+	force := fs.Bool("force", false, "overwrite an existing file at the output path")
+	jsonOut := fs.Bool("json", false, "emit JSON")
+	positionals, err := parseInterspersed(fs, args)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if len(positionals) < 1 || *out == "" {
+		fmt.Fprintln(stderr, "usage: bunker download <id> [-n index] -o path [--force] [--json]")
+		return 2
+	}
+
+	// The daemon writes the file from its own working directory, so a
+	// relative -o is resolved here, against the caller's.
+	dest, err := filepath.Abs(*out)
+	if err != nil {
+		return fail(*jsonOut, stdout, stderr, fmt.Errorf("resolve output path: %w", err))
+	}
+
+	res, err := backend.Download(ctx, positionals[0], *index, dest, core.DownloadOptions{Force: *force})
+	if err != nil {
+		return fail(*jsonOut, stdout, stderr, err)
+	}
+	if *jsonOut {
+		writeJSON(stdout, map[string]any{"result": res})
+		return 0
+	}
+	fmt.Fprintf(stdout, "saved %s (%s, %d bytes) to %s\n", res.Name, res.MIME, res.Bytes, res.Path)
+	return 0
+}
+
+// cmdAvatar prints the local PNG path for one conversation's avatar,
+// fetching and caching it (or generating the brand-color/initial
+// fallback) through the backend exactly as V4's TUI will. It exists as a
+// debugging/scripting entry point ahead of that TUI work landing.
+func cmdAvatar(ctx context.Context, backend Backend, args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("avatar", stderr)
+	jsonOut := fs.Bool("json", false, "emit JSON")
+	positionals, err := parseInterspersed(fs, args)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if len(positionals) < 3 {
+		fmt.Fprintln(stderr, "usage: bunker avatar <channel> <account> <thread> [--json]")
+		return 2
+	}
+
+	res, err := backend.Avatar(ctx, core.Channel(positionals[0]), positionals[1], positionals[2])
+	if err != nil {
+		return fail(*jsonOut, stdout, stderr, err)
+	}
+	if *jsonOut {
+		writeJSON(stdout, map[string]any{"result": res})
+		return 0
+	}
+	fmt.Fprintln(stdout, res.Path)
 	return 0
 }
 

@@ -24,7 +24,12 @@ type Client struct {
 
 // Dial connects to the server listening on socketPath.
 func Dial(socketPath string) (*Client, error) {
-	conn, err := net.Dial("unix", socketPath)
+	return DialContext(context.Background(), socketPath)
+}
+
+// DialContext bounds connection setup by the caller's query deadline.
+func DialContext(ctx context.Context, socketPath string) (*Client, error) {
+	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", socketPath)
 	if err != nil {
 		return nil, fmt.Errorf("rpc: dial %s: %w", socketPath, err)
 	}
@@ -189,4 +194,32 @@ func (c *Client) PostStatus(ctx context.Context, channel core.Channel, account s
 		return core.Plan{}, core.Receipt{}, err
 	}
 	return res.Plan, res.Receipt, nil
+}
+
+// Download saves item id's attachment at index to destPath on the
+// machine the daemon runs on: the daemon writes the file itself (see
+// downloadParams), so this call never streams the attachment's bytes
+// back over the socket. opts.MaxBytes is not carried over the wire (the
+// CLI exposes no flag for it); the daemon's own DefaultMaxDownloadBytes
+// cap always applies remotely.
+func (c *Client) Download(ctx context.Context, id string, index int, destPath string, opts core.DownloadOptions) (core.DownloadResult, error) {
+	var res downloadResult
+	err := c.call(ctx, MethodDownload, downloadParams{ID: id, Index: index, Path: destPath, Force: opts.Force}, &res)
+	if err != nil {
+		return core.DownloadResult{}, err
+	}
+	return res.Result, nil
+}
+
+// Avatar returns a local PNG path for (channel, account, thread)'s
+// conversation avatar, written by the daemon itself (see avatarResult and
+// core.Service.Avatar) — like Download, the bytes never travel over the
+// socket.
+func (c *Client) Avatar(ctx context.Context, channel core.Channel, account, thread string) (core.AvatarResult, error) {
+	var res avatarResult
+	err := c.call(ctx, MethodAvatar, avatarParams{Channel: channel, Account: account, Thread: thread}, &res)
+	if err != nil {
+		return core.AvatarResult{}, err
+	}
+	return res.Result, nil
 }

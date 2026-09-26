@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/reyer3/bunker-go/internal/core"
+	"github.com/reyer3/bunker-go/internal/style"
 )
 
 // renderStyle selects how render prints its segment line.
@@ -16,24 +17,19 @@ const (
 	renderANSI                     // 24-bit ANSI colors and Nerd Font glyphs
 )
 
-// styledGlyphs are Nerd Font icons (md-email, md-whatsapp, md-matrix; all from the Material
-// Design set so they render from the same font range) used by
-// the colored styles; plain output keeps channelGlyphs.
-var styledGlyphs = map[core.Channel]string{
-	core.ChannelMail:     "\U000f01ee",
-	core.ChannelWhatsApp: "\U000f05a3",
-	core.ChannelMatrix:   "\U000f0628",
-}
+// styledGlyphs are Nerd Font icons (md-email, md-whatsapp, md-matrix; all
+// from the Material Design set so they render from the same font range)
+// used by the colored styles; plain output keeps channelGlyphs. Shared
+// with internal/tui via internal/style so both surfaces use the same
+// icons.
+var styledGlyphs = style.Glyphs
 
 // channelColors are the per-channel accents: the tmux theme's blue for mail,
 // WhatsApp green, Element green for Matrix. zeroColor dims empty channels.
-var channelColors = map[core.Channel]string{
-	core.ChannelMail:     "#4db0ff",
-	core.ChannelWhatsApp: "#25d366",
-	core.ChannelMatrix:   "#0dbd8b",
-}
+// Shared with internal/tui via internal/style.
+var channelColors = style.ChannelColors
 
-const zeroColor = "#a3a09e"
+const zeroColor = style.ColorDim
 
 // formatRender renders segments in style. With hideEmpty, it returns ""
 // when no channel has unread items, so a status line can disappear.
@@ -79,17 +75,8 @@ func hexRGB(hex string) (r, g, b int) {
 }
 
 // resolveGlyphs returns the styled glyphs with config overrides applied
-// (keys: "mail", "whatsapp", "matrix"); unknown keys are ignored.
+// (keys: "mail", "whatsapp", "matrix"); unknown keys are ignored. Delegates
+// to internal/style, shared with internal/tui.
 func resolveGlyphs(overrides map[string]string) map[core.Channel]string {
-	out := make(map[core.Channel]string, len(styledGlyphs))
-	for ch, g := range styledGlyphs {
-		out[ch] = g
-	}
-	for key, g := range overrides {
-		ch := core.Channel(key)
-		if _, known := out[ch]; known && g != "" {
-			out[ch] = g
-		}
-	}
-	return out
+	return style.ResolveGlyphs(overrides)
 }

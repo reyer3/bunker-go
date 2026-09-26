@@ -55,6 +55,14 @@ type waClient interface {
 
 	GetQRChannel(ctx context.Context) (<-chan whatsmeow.QRChannelItem, error)
 
+	// GetProfilePictureInfo fetches the URL a contact or group's profile/
+	// group picture can be downloaded from (see Adapter.Avatar,
+	// core.AvatarProvider). It returns whatsmeow.ErrProfilePictureNotSet
+	// or whatsmeow.ErrProfilePictureUnauthorized when jid has no picture
+	// Alice can see — both a negative-cache miss for Avatar, never a hard
+	// error.
+	GetProfilePictureInfo(ctx context.Context, jid types.JID, params *whatsmeow.GetProfilePictureParams) (*types.ProfilePictureInfo, error)
+
 	// ParseWebMessage turns one history-sync WebMessageInfo into the same
 	// *events.Message shape a live message arrives as, so handleHistorySync
 	// can reuse toItem and enrichItem unchanged.
