@@ -37,7 +37,7 @@ func mailboxUIDValidity(t *testing.T, addr, mailbox string) uint32 {
 
 // TestAdapterRunDropsStaleStoredItemOnStartup covers T9(c): a stored
 // INBOX item whose UID no longer exists on the server — exactly the
-// live regression row kept on purpose, mail:cl:1725567930.13809, after
+// live regression row kept on purpose, mail:cl:1700000000.100, after
 // the first live MOVE test on 2026-09-25 — must be gone once Run has
 // started, and counts must drop with it.
 func TestAdapterRunDropsStaleStoredItemOnStartup(t *testing.T) {

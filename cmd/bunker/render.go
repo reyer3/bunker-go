@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/reyer3/bunker-go/internal/config"
@@ -43,10 +42,9 @@ type renderSegment struct {
 func cmdRender(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("render", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	// --tmux is accepted for forward compatibility: the default output is
-	// already the compact, tmux-safe segment line documented in
-	// docs/cli.md, so it does not currently change the format.
-	fs.Bool("tmux", false, "tmux-friendly compact output (currently the default)")
+	tmux := fs.Bool("tmux", false, "tmux #[fg] colors with Nerd Font glyphs")
+	ansi := fs.Bool("ansi", false, "24-bit ANSI colors with Nerd Font glyphs (e.g. a Claude Code statusline)")
+	hideEmpty := fs.Bool("hide-empty", false, "print nothing when no channel has unread items")
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -79,11 +77,20 @@ func cmdRender(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		return 0
 	}
 
-	parts := make([]string, 0, len(segments))
-	for _, seg := range segments {
-		parts = append(parts, fmt.Sprintf("%s %d", seg.Glyph, seg.Unread))
+	style := renderPlain
+	switch {
+	case *tmux:
+		style = renderTmux
+	case *ansi:
+		style = renderANSI
 	}
-	fmt.Fprintln(stdout, strings.Join(parts, "  "))
+	var overrides map[string]string
+	if cfg, err := config.LoadDefault(); err == nil {
+		overrides = cfg.Render.Glyphs
+	}
+	if line := formatRender(segments, style, *hideEmpty, resolveGlyphs(overrides)); line != "" {
+		fmt.Fprintln(stdout, line)
+	}
 	return 0
 }
 

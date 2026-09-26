@@ -384,9 +384,19 @@ hanging:
 - plain: `bunker: dead`
 - json: `{"dead": true}`
 
-`--tmux` is accepted for forward compatibility. The default output above
-is already the compact, tmux-safe segment line, so `--tmux` does not
-currently change the format.
+Styles:
+
+- default: plain `✉ 3  💬 5  ⌘ 2`.
+- `--tmux`: tmux `#[fg=…]` colors with Nerd Font glyphs (mail `󰇮` #4db0ff, WhatsApp `󰖣` #25d366, Matrix `󰘨` #0dbd8b). Channels at 0 are dimmed to #a3a09e.
+- `--ansi`: the same glyphs and colors as 24-bit ANSI escapes, for a Claude Code statusline or a shell prompt.
+- `--hide-empty`: print nothing when no channel has unread items, so a status line can disappear.
+
+Any styled glyph can be overridden in `config.toml`, for example with a codepoint from a locally installed icon font:
+
+```toml
+[render.glyphs]
+matrix = "\U00100000"   # keys: mail, whatsapp, matrix
+```
 
 ## `bunker link whatsapp <account>`
 

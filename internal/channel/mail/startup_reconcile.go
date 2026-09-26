@@ -26,7 +26,7 @@ type storeLister interface {
 // for this account against the server, keyed by UIDVALIDITY. A stored
 // item whose UID is no longer present is dropped (its message was moved
 // or deleted elsewhere while the daemon wasn't running — mirroring the
-// stale row kept live on 2026-09-25, mail:cl:1725567930.13809); one
+// stale row kept live on 2026-09-25, mail:cl:1700000000.100); one
 // still present has its \Seen state refreshed via a FETCH bounded to
 // just the stored items, so a read done elsewhere before startup isn't
 // left stale. If UIDVALIDITY itself changed (the mailbox was

@@ -1,4 +1,4 @@
-.PHONY: build test vet race fmt-check
+.PHONY: build test vet race fmt-check release release-test
 
 # All targets always build with -tags goolm for the pure-Go Matrix
 # adapter (mautrix-go built with goolm, no libolm/CGO). build additionally
@@ -24,3 +24,12 @@ fmt-check:
 		gofmt -l .; \
 		exit 1; \
 	fi
+
+# release publishes a sanitized snapshot to the public repo; see
+# scripts/release.sh. Usage: make release VERSION=v0.2.0 [PUSH=--push]
+release:
+	@test -n "$(VERSION)" || { echo "usage: make release VERSION=vX.Y.Z [PUSH=--push]"; exit 1; }
+	scripts/release.sh $(VERSION) $(PUSH)
+
+release-test:
+	scripts/release_test.sh

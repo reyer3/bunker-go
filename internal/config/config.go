@@ -24,10 +24,22 @@ type Account struct {
 // Config is the parsed contents of config.toml.
 type Config struct {
 	Accounts []Account
+	Render   Render
+}
+
+// Render holds optional status-line presentation settings.
+type Render struct {
+	// Glyphs overrides the styled render glyph per channel ("mail",
+	// "whatsapp", "matrix"), e.g. a codepoint from a locally installed
+	// icon font.
+	Glyphs map[string]string
 }
 
 type rawConfig struct {
 	Account []map[string]interface{} `toml:"account"`
+	Render  struct {
+		Glyphs map[string]string `toml:"glyphs"`
+	} `toml:"render"`
 }
 
 // Load parses the TOML file at path into a Config.
@@ -37,7 +49,7 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: load %s: %w", path, err)
 	}
 
-	cfg := &Config{Accounts: make([]Account, 0, len(raw.Account))}
+	cfg := &Config{Accounts: make([]Account, 0, len(raw.Account)), Render: Render{Glyphs: raw.Render.Glyphs}}
 	for _, entry := range raw.Account {
 		acc := Account{Options: make(map[string]interface{})}
 		for k, v := range entry {

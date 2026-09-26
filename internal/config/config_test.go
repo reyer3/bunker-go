@@ -89,3 +89,21 @@ func TestConfigDirDefaultsUnderHome(t *testing.T) {
 		t.Fatalf("ConfigDir() = %q, want %q", got, want)
 	}
 }
+
+func TestLoadReadsRenderGlyphOverrides(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	body := "[render.glyphs]\nmatrix = \"\\U00100000\"\n\n[[account]]\nchannel = \"mail\"\nname = \"cl\"\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.Render.Glyphs["matrix"]; got != "\U00100000" {
+		t.Errorf("Render.Glyphs[matrix] = %q, want U+100000", got)
+	}
+	if len(cfg.Accounts) != 1 {
+		t.Errorf("accounts = %d, want 1 (render section must not disturb accounts)", len(cfg.Accounts))
+	}
+}
