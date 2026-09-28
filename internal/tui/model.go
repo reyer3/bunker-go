@@ -50,35 +50,39 @@ type Model struct {
 	// own chatScroll/threadScroll give a long body: j/k, arrows,
 	// PgUp/PgDown, "G" and the mouse wheel scroll it; it resets to 0
 	// whenever a new item is opened (see openItem).
-	detailScroll    int
-	width           int
-	height          int
-	polling         bool
-	refreshPending  bool
-	pollToken       uint64
-	composing       bool
-	previewing      bool
-	sending         bool
-	quitConfirm     bool
-	draftID         string
-	composer        textarea.Model
-	attachments     []string
-	attaching       bool
-	attachInput     string
-	previewPlan     core.Plan
-	replyErr        error
-	replyToken      uint64
-	marking         bool
-	markLoading     bool
-	markConfirm     bool
-	markSending     bool
-	markID          string
-	markPlan        core.Plan
-	markErr         error
-	markToken       uint64
-	activeTab       int
-	tabSelected     [numTabs]int
-	helpOpen        bool
+	detailScroll   int
+	width          int
+	height         int
+	polling        bool
+	refreshPending bool
+	pollToken      uint64
+	composing      bool
+	previewing     bool
+	sending        bool
+	quitConfirm    bool
+	draftID        string
+	composer       textarea.Model
+	attachments    []string
+	attaching      bool
+	attachInput    string
+	previewPlan    core.Plan
+	replyErr       error
+	replyToken     uint64
+	marking        bool
+	markLoading    bool
+	markConfirm    bool
+	markSending    bool
+	markID         string
+	markPlan       core.Plan
+	markErr        error
+	markToken      uint64
+	activeTab      int
+	tabSelected    [numTabs]int
+	helpOpen       bool
+	// helpCtx and helpScroll are the help overlay's section (the view
+	// it was opened from) and scroll offset (issue #36).
+	helpCtx         string
+	helpScroll      int
 	glyphs          map[core.Channel]string
 	render          *lipgloss.Renderer
 	now             func() time.Time

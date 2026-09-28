@@ -145,7 +145,16 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.composing {
 		return m.updateComposeMouse(msg)
 	}
-	if m.helpOpen || m.previewing || m.marking {
+	if m.helpOpen {
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			return m.updateHelp("k"), nil
+		case tea.MouseButtonWheelDown:
+			return m.updateHelp("j"), nil
+		}
+		return m, nil
+	}
+	if m.previewing || m.marking {
 		return m, nil
 	}
 	if m.viewer != nil {

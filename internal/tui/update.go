@@ -332,11 +332,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.startPoll()
 	case tea.KeyMsg:
 		if m.helpOpen {
-			switch msg.String() {
-			case "esc", "?":
-				m.helpOpen = false
-			}
-			return m, nil
+			return m.updateHelp(msg.String()), nil
+		}
+		if msg.String() == "f1" {
+			return m.openHelp(), nil
 		}
 		if m.picker != nil {
 			return m.updatePicker(msg)
@@ -372,7 +371,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q":
 			return m, tea.Quit
 		case "?":
-			m.helpOpen = true
+			m = m.openHelp()
 		case "esc":
 			if m.detail {
 				m.detail = false
@@ -893,6 +892,8 @@ func (m Model) scrollChatUp(amount int) (tea.Model, tea.Cmd) {
 // leaves the thread view.
 func (m Model) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
+	case "?":
+		return m.openHelp(), nil
 	case "esc":
 		m.detail = false
 		m.threadMode = false
