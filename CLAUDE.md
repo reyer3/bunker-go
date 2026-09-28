@@ -77,4 +77,5 @@ betterleaks and the denylist check.
 Use conventional commits (`feat:`, `fix:`, `docs:`, `test:`, `build:`,
 `chore:`): release-please turns them into the next version and the
 changelog. Merging the release PR it maintains publishes the release
-(`.github/workflows/release.yml`). Never tag or bump versions by hand.
+(`.github/workflows/release.yml`, which needs the `RELEASE_PLEASE_TOKEN`
+secret). Never tag or bump versions by hand.
