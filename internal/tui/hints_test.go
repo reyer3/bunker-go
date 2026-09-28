@@ -61,3 +61,41 @@ func TestHelpListsChatKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestCtrlSSendsLikeEnterEverywhere(t *testing.T) {
+	// Chat: Ctrl+S previews like Enter, and confirms like Enter.
+	model, client := openedChat(t)
+	model = typeIntoChat(t, model, "hola")
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	if cmd == nil {
+		t.Fatal("Ctrl+S in a chat should preview the send")
+	}
+	updated, _ = updated.(Model).Update(cmd())
+	if !updated.(Model).chatConfirm {
+		t.Fatal("the preview should wait for a confirm")
+	}
+	_, cmd = updated.(Model).Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	if cmd == nil {
+		t.Fatal("Ctrl+S should also confirm")
+	}
+	runCmds(cmd)
+	real := 0
+	for _, c := range client.calls {
+		if !c.dryRun {
+			real++
+		}
+	}
+	if real != 1 {
+		t.Fatalf("real sends = %d, want 1", real)
+	}
+}
+
+func TestComposerHintsUseOneNotation(t *testing.T) {
+	for _, hints := range [][]keyHint{inboxHints, chatHints, threadHints, composeHints, confirmSendHints, mailEditorHints} {
+		for _, h := range hints {
+			if strings.Contains(h.key, "Enter") || strings.Contains(h.label, " to ") {
+				t.Errorf("hint %+v breaks the notation (↵, Spanish labels)", h)
+			}
+		}
+	}
+}

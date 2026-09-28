@@ -65,7 +65,7 @@ func (m Model) writeCompose(out *strings.Builder) {
 	if m.replyErr != nil {
 		fmt.Fprintf(out, "\nError: %s\n", humanError(m.replyErr))
 	}
-	out.WriteString("\nCtrl+S vista previa · Ctrl+A adjuntar · Ctrl+X quitar el último · Esc cancelar\n")
+	out.WriteString("\n" + hintLine(m.width, composeHints...) + "\n")
 }
 
 func (m Model) writePreview(out *strings.Builder) {
@@ -92,7 +92,7 @@ func (m Model) writePreview(out *strings.Builder) {
 	if m.quitConfirm {
 		out.WriteString("\nPulsa q otra vez para descartar el borrador y salir\n")
 	}
-	out.WriteString("\n↵ enviar · Esc editar · q salir\n")
+	out.WriteString("\n" + hintLine(m.width, confirmSendHints...) + "\n")
 }
 
 func (m Model) writeMark(out *strings.Builder) {
