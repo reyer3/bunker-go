@@ -202,6 +202,18 @@ func (c *queryClient) ReadThread(ctx context.Context, channel string, account, t
 	return client.ReadThread(ctx, channel, account, thread, receipt)
 }
 
+// Health is an idempotent query; it errors with core.ErrUnsupported when
+// the connection underneath has no health listing.
+func (c *queryClient) Health(ctx context.Context) ([]core.AdapterHealth, error) {
+	return query(c, ctx, func(client Client) ([]core.AdapterHealth, error) {
+		hc, ok := client.(HealthClient)
+		if !ok {
+			return nil, fmt.Errorf("tui: health: %w", core.ErrUnsupported)
+		}
+		return hc.Health(ctx)
+	})
+}
+
 // Contacts is an idempotent query; it errors with core.ErrUnsupported when
 // the connection underneath has no contact listing.
 func (c *queryClient) Contacts(ctx context.Context, filter core.ContactFilter) ([]core.Contact, error) {

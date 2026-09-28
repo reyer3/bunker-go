@@ -32,12 +32,17 @@ type Model struct {
 	selected     int
 	loaded       bool
 	loadErr      error
-	detail       bool
-	reading      bool
-	readID       string
-	readItem     core.Item
-	readErr      error
-	readToken    uint64
+	// loadedAt is when the inbox last loaded successfully, so the status
+	// line can say how old the data is while the daemon is unreachable.
+	loadedAt time.Time
+	// adapterHealth is the daemon's last adapter health snapshot.
+	adapterHealth []core.AdapterHealth
+	detail        bool
+	reading       bool
+	readID        string
+	readItem      core.Item
+	readErr       error
+	readToken     uint64
 	// detailScroll is the index of the first visible line within the
 	// plain single-item detail view's scrollable body (Subject/From/
 	// Channel stay fixed above it, "Esc to inbox · q to quit" fixed
