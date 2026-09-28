@@ -14,6 +14,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 	"github.com/reyer3/bunker-go/internal/core"
 	"github.com/reyer3/bunker-go/internal/kittygfx"
 	"github.com/reyer3/bunker-go/internal/secfile"
@@ -29,8 +30,11 @@ const (
 	// thumbMaxRows caps a thumbnail's height so one image never takes
 	// over the conversation.
 	thumbMaxRows = 10
-	// mediaMaxBytes bounds what the TUI downloads just to preview.
+	// mediaMaxBytes bounds what the TUI downloads just to preview an
+	// image; videoMaxBytes bounds a video downloaded for its thumbnail or
+	// to play.
 	mediaMaxBytes = 25 << 20
+	videoMaxBytes = 64 << 20
 	// mediaFetchTimeout bounds one download+decode.
 	mediaFetchTimeout = 60 * time.Second
 )
@@ -92,8 +96,18 @@ func isImageAttachment(a core.Attachment) bool {
 	return strings.HasPrefix(strings.ToLower(a.MIME), "image/")
 }
 
-// chatImageKeys lists the open conversation's image attachments, oldest
-// first, matching the order they render in.
+// isVideoAttachment reports a video (issue #6): it previews as a frame
+// grabbed with ffmpeg and plays with mpv.
+func isVideoAttachment(a core.Attachment) bool {
+	return strings.HasPrefix(strings.ToLower(a.MIME), "video/")
+}
+
+func isPreviewable(a core.Attachment) bool {
+	return isImageAttachment(a) || isVideoAttachment(a)
+}
+
+// chatImageKeys lists the open conversation's image and video
+// attachments, oldest first, matching the order they render in.
 func (m Model) chatImageKeys() []string {
 	var keys []string
 	for _, item := range m.chatItems {
@@ -101,12 +115,26 @@ func (m Model) chatImageKeys() []string {
 			continue
 		}
 		for i, a := range item.Attachments {
-			if isImageAttachment(a) {
+			if isPreviewable(a) {
 				keys = append(keys, mediaKey(item.ID, i))
 			}
 		}
 	}
 	return keys
+}
+
+// chatAttachment returns the attachment key names in the open chat.
+func (m Model) chatAttachment(key string) (itemID string, index int, a core.Attachment, ok bool) {
+	itemID, index, ok = splitMediaKey(strings.TrimSuffix(key, "#full"))
+	if !ok {
+		return "", 0, core.Attachment{}, false
+	}
+	for _, item := range m.chatItems {
+		if item.ID == itemID && index < len(item.Attachments) {
+			return itemID, index, item.Attachments[index], true
+		}
+	}
+	return "", 0, core.Attachment{}, false
 }
 
 // mediaReadyMsg carries one fetched, re-encoded image back to Update.
@@ -121,15 +149,25 @@ type mediaReadyMsg struct {
 // fetchMediaCmd downloads item's attachment at index into the media
 // cache (once: a cached file is reused) through the daemon's own
 // Download, and fits it into maxCols×maxRows cells.
-func fetchMediaCmd(client Client, dir, key, itemID string, index int, name string, maxCols, maxRows int) tea.Cmd {
+func fetchMediaCmd(client Client, dir, key, itemID string, index int, a core.Attachment, maxCols, maxRows int) tea.Cmd {
+	video := isVideoAttachment(a)
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), mediaFetchTimeout)
 		defer cancel()
-		path, err := cachedMedia(ctx, client, dir, itemID, index, name)
+		limit := int64(mediaMaxBytes)
+		if video {
+			limit = videoMaxBytes
+		}
+		path, err := cachedMedia(ctx, client, dir, itemID, index, a.Name, limit)
 		if err != nil {
 			return mediaReadyMsg{key: key, err: err}
 		}
-		data, err := os.ReadFile(path)
+		var data []byte
+		if video {
+			data, err = videoFrame(ctx, path)
+		} else {
+			data, err = os.ReadFile(path)
+		}
 		if err != nil {
 			return mediaReadyMsg{key: key, err: err}
 		}
@@ -142,7 +180,7 @@ func fetchMediaCmd(client Client, dir, key, itemID string, index int, name strin
 // downloading it first when it is not cached yet. The file name is a
 // hash of the item and index (never a remote-controlled name), keeping
 // only a sanitized extension.
-func cachedMedia(ctx context.Context, client Client, dir, itemID string, index int, name string) (string, error) {
+func cachedMedia(ctx context.Context, client Client, dir, itemID string, index int, name string, maxBytes int64) (string, error) {
 	if err := secfile.EnsureDir(dir); err != nil {
 		return "", fmt.Errorf("media cache: %w", err)
 	}
@@ -155,7 +193,7 @@ func cachedMedia(ctx context.Context, client Client, dir, itemID string, index i
 	if info, err := os.Stat(path); err == nil && info.Size() > 0 {
 		return path, nil
 	}
-	if _, err := client.Download(ctx, itemID, index, path, core.DownloadOptions{Force: true, MaxBytes: mediaMaxBytes}); err != nil {
+	if _, err := client.Download(ctx, itemID, index, path, core.DownloadOptions{Force: true, MaxBytes: maxBytes}); err != nil {
 		return "", err
 	}
 	return path, nil
@@ -191,11 +229,11 @@ func (m Model) requestChatMedia() tea.Cmd {
 		}
 		for i, a := range item.Attachments {
 			key := mediaKey(item.ID, i)
-			if !isImageAttachment(a) || m.media.thumbs[key] != nil {
+			if !isPreviewable(a) || m.media.thumbs[key] != nil {
 				continue
 			}
 			m.media.thumbs[key] = &mediaThumb{state: thumbLoading}
-			cmds = append(cmds, fetchMediaCmd(m.client, m.mediaDir, key, item.ID, i, a.Name, maxCols, thumbMaxRows))
+			cmds = append(cmds, fetchMediaCmd(m.client, m.mediaDir, key, item.ID, i, a, maxCols, thumbMaxRows))
 		}
 	}
 	return tea.Batch(cmds...)
@@ -239,7 +277,7 @@ func (m Model) readyThumb(key string) (*mediaThumb, bool) {
 
 // thumbBubbleLines renders a ready thumbnail as bubble lines: the
 // placeholder cells, then bubble-colored padding to the bubble width.
-func thumbBubbleLines(t *mediaThumb, bodyStyle lipgloss.Style, bubbleWidth, width int, right bool) []string {
+func thumbBubbleLines(t *mediaThumb, bodyStyle lipgloss.Style, bubbleWidth, width int, right bool, caption string) []string {
 	cols := t.cols
 	if cols > bubbleWidth {
 		return nil
@@ -249,7 +287,16 @@ func thumbBubbleLines(t *mediaThumb, bodyStyle lipgloss.Style, bubbleWidth, widt
 	for i, line := range lines {
 		lines[i] = alignBubbleLine(line+pad, bubbleWidth, width, right)
 	}
+	if caption != "" {
+		text := padTo(runewidth.Truncate(caption, bubbleWidth, "…"), bubbleWidth)
+		lines = append(lines, alignBubbleLine(bodyStyle.Render(text), bubbleWidth, width, right))
+	}
 	return lines
+}
+
+// videoCaption is the line under a video thumbnail.
+func videoCaption(a core.Attachment) string {
+	return "▶ " + safeLine(a.Name) + " · clic para reproducir"
 }
 
 // openViewer opens the full-size overlay on key (or the newest image
@@ -279,14 +326,12 @@ func (m Model) requestFull(key string) tea.Cmd {
 	if !ok {
 		return nil
 	}
-	name := ""
-	for _, item := range m.chatItems {
-		if item.ID == itemID && index < len(item.Attachments) {
-			name = item.Attachments[index].Name
-		}
+	_, _, a, found := m.chatAttachment(key)
+	if !found {
+		a = core.Attachment{Name: "", MIME: "image/"}
 	}
 	m.media.thumbs[fk] = &mediaThumb{state: thumbLoading}
-	return fetchMediaCmd(m.client, m.mediaDir, fk, itemID, index, name, max(m.width-2, 4), max(m.height-3, 2))
+	return fetchMediaCmd(m.client, m.mediaDir, fk, itemID, index, a, max(m.width-2, 4), max(m.height-3, 2))
 }
 
 func splitMediaKey(key string) (itemID string, index int, ok bool) {
@@ -327,6 +372,10 @@ func (m Model) updateViewer(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q", "v":
 		return m.closeViewer()
+	case "enter", " ":
+		if _, _, a, ok := m.chatAttachment(m.viewer.keys[m.viewer.index]); ok && isVideoAttachment(a) {
+			return m, m.playVideo(m.viewer.keys[m.viewer.index])
+		}
 	case "left", "h", "up", "k":
 		if m.viewer.index > 0 {
 			m.viewer = &imageViewer{keys: m.viewer.keys, index: m.viewer.index - 1}
@@ -346,7 +395,13 @@ func (m Model) updateViewer(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) viewerView() string {
 	v := m.viewer
 	header := fmt.Sprintf("Imagen %d/%d · ←/→ anterior/siguiente · Esc cerrar", v.index+1, len(v.keys))
+	if _, _, a, ok := m.chatAttachment(v.keys[v.index]); ok && isVideoAttachment(a) {
+		header = fmt.Sprintf("Video %d/%d · Enter reproducir · ←/→ anterior/siguiente · Esc cerrar", v.index+1, len(v.keys))
+	}
 	lines := []string{safeLine(header)}
+	if m.mediaErr != nil {
+		lines = append(lines, "Error: "+safeLine(m.mediaErr.Error()))
+	}
 	t := m.media.thumbs[fullKey(v.keys[v.index])]
 	switch {
 	case t == nil || t.state == thumbLoading:

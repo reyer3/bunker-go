@@ -218,6 +218,9 @@ func (m Model) updateChatMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		lines := strings.Split(m.View(), "\n")
 		if msg.Y >= 0 && msg.Y < len(lines) {
 			if key, ok := m.imageKeyAt(lines[msg.Y]); ok {
+				if _, _, a, found := m.chatAttachment(key); found && isVideoAttachment(a) {
+					return m, m.playVideo(key)
+				}
 				return m.openViewer(key)
 			}
 		}

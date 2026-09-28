@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/reyer3/bunker-go/internal/core"
+	"github.com/reyer3/bunker-go/internal/kittygfx"
 )
 
 // Update is the tea.Model entry point. After every step it also starts
@@ -39,6 +40,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.addChatAttachments(msg.path), nil
 	case mediaReadyMsg:
 		return m.handleMediaReady(msg)
+	case videoReadyMsg:
+		return m.handleVideoReady(msg)
+	case videoDoneMsg:
+		return m.handleVideoDone(msg)
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -755,8 +760,16 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.chatScroll = clampScroll(m.chatScroll-m.chatScrollBudget(), len(m.chatBodyLines()), m.chatScrollBudget())
 		return m, nil
 	case "ctrl+o":
-		// Open the newest image full size (issue #4): like Ctrl+D, a
-		// control key, since the composer has focus.
+		// Open the newest image or video full size (issues #4/#6): like
+		// Ctrl+D, a control key, since the composer has focus. Without
+		// kitty graphics there is no viewer, but the newest video still
+		// plays (in mpv's own window).
+		if m.gfx != kittygfx.Kitty {
+			if key, ok := m.newestVideoKey(); ok {
+				return m, m.playVideo(key)
+			}
+			return m, nil
+		}
 		return m.openViewer("")
 	case "ctrl+d":
 		// The composer always has focus in the chat view, so a plain "d"
