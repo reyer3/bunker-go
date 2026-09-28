@@ -98,6 +98,8 @@ func runCommandLine(args []string, stdin *os.File, stdout, stderr io.Writer) int
 		return cmdRender(context.Background(), args[1:], stdout, stderr)
 	case "app":
 		return cmdApp(args[1:], stdout, stderr, defaultAppDeps)
+	case "mcp":
+		return cmdMCP(args[1:], stderr)
 	case "link":
 		cfg, err := config.LoadDefault()
 		if err != nil {

@@ -120,6 +120,10 @@ Commands:
   render [--tmux] [--json]                                 tmux status segment
   app [--dry-run]                                          open the TUI in its
                                                              own terminal window
+  mcp [--allow-send]                                       MCP server on stdio
+                                                             for AI agents (sends
+                                                             are plans unless
+                                                             --allow-send)
   link whatsapp <account>                                  QR-pair WhatsApp
   link matrix <account> [--recovery-key|--recovery-key-stdin]
                                                              Matrix SSO login,
