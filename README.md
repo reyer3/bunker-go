@@ -53,9 +53,13 @@ The full command reference and JSON shapes are in [docs/cli.md](docs/cli.md).
 make test   # go test -tags goolm ./...
 make race
 make vet
+make dev    # install to ~/.local/bin and restart the daemon service
+make hooks  # pre-commit check against your private denylist
 ```
 
 Tests never touch real servers. They use in-process fakes for IMAP, SMTP, the Matrix homeserver and the WhatsApp client.
+
+Releases are automated: commits follow [Conventional Commits](https://www.conventionalcommits.org/), release-please keeps a release PR with the next version and changelog, and merging it publishes the binaries.
 
 ## Notes
 

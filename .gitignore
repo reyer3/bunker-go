@@ -4,9 +4,9 @@
 *.db-wal
 *.db-shm
 .DS_Store
-/.codegraph/
-# Local AI runtime state
-.atl/
-.atl/
-.codegraph/
 dist/
+# Local-only working notes and AI runtime state: never committed.
+/odd/
+/.atl/
+/.codegraph/
+/.engram/
