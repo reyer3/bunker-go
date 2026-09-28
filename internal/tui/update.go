@@ -15,6 +15,12 @@ import (
 // cache does not hold yet (a no-op without kitty graphics).
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
+	if _, resized := msg.(tea.WindowSizeMsg); resized {
+		// A resize can leave the old frame on screen: a terminal that
+		// re-wraps or keeps the previous cells confuses the renderer's
+		// line diff. A full clear makes the next frame start clean.
+		cmd = tea.Batch(cmd, tea.ClearScreen)
+	}
 	nm, ok := next.(Model)
 	if !ok {
 		return next, cmd
