@@ -3,12 +3,15 @@ name: release
 # Releases are fully automated. Every push to main updates a "release PR"
 # (release-please) with the next version, computed from conventional
 # commits (feat: -> minor, fix: -> patch while below 1.0), and its
-# CHANGELOG. Merging that PR tags the release and publishes it; goreleaser
-# then attaches the linux amd64/arm64 binaries.
+# CHANGELOG. Merging that PR tags the release; the tag push then runs
+# goreleaser, which attaches the linux amd64/arm64 binaries.
 #
-# goreleaser runs in this same workflow on purpose: a tag pushed with the
-# default GITHUB_TOKEN never triggers another workflow. A tag pushed by
-# hand still releases through the tags trigger.
+# release-please runs with RELEASE_PLEASE_TOKEN (a fine-grained token with
+# contents and pull-requests write on this repo), not the default
+# GITHUB_TOKEN: GitHub never triggers workflows for a PR or tag created by
+# GITHUB_TOKEN, so the release PR would get no CI (and main requires it),
+# and its tag would never reach the goreleaser job below. A tag pushed by
+# hand releases the same way.
 
 on:
   push:
@@ -23,28 +26,19 @@ jobs:
   release-please:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    outputs:
-      release_created: ${{ steps.rp.outputs.release_created }}
-      tag_name: ${{ steps.rp.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@v4
-        id: rp
         with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
   goreleaser:
-    needs: release-please
-    if: >-
-      !cancelled() && (
-        needs.release-please.outputs.release_created == 'true' ||
-        startsWith(github.ref, 'refs/tags/v')
-      )
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.release-please.outputs.tag_name || github.ref }}
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
