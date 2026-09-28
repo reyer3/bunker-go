@@ -333,6 +333,11 @@ func chatItemsContainID(items []core.Item, id string) bool {
 // always visible, never part of the scrollable window.
 func (m Model) chatTailLines() []string {
 	lines := []string{""} // the blank line separating the body from the composer
+	if completion, ok := m.emojiCompletionLine(); ok {
+		// Issue #7: the emoji completion list sits right above the
+		// composer, replacing the blank separator line.
+		lines[0] = completion
+	}
 	lines = append(lines, strings.Split(m.composerBox(), "\n")...)
 	switch {
 	case m.chatPreviewPending:

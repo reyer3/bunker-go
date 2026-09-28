@@ -965,6 +965,20 @@ chat shows as a thumbnail inside its bubble, instead of the
   inside tmux (`$TMUX`), which does not forward the protocol by default.
   `BUNKER_GRAPHICS=kitty` or `BUNKER_GRAPHICS=none` overrides detection.
   With images off, the TUI renders exactly as before.
+## Emoji completion in the TUI's chat composer
+
+Typing `:` followed by at least two letters at the end of a chat draft
+lists up to six matching emoji just above the composer, for example
+`:risa` → 😂 and `:thumbs` → 👍. Shortcodes and English and Spanish
+keywords all match, with or without accents (`:corazon`, `:corazón`).
+
+- **Keys:** `Tab`/`Shift+Tab` move through the list and `Enter` inserts
+  the highlighted emoji. That `Enter` never sends the message. `Esc`
+  hides the list until the draft changes, and a second `Esc` leaves the
+  chat as usual.
+- **When it opens:** only at the draft's end, and only when the `:`
+  starts the draft or follows a space. Times (`12:30`) and URLs
+  (`http://`) never open it.
 
 ## `bunker render [--tmux] [--json]`
 
