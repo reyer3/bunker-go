@@ -70,6 +70,28 @@ var chatHints = []keyHint{
 	{"F1", "ayuda", true},
 }
 
+// composeHints, confirmSendHints and mailEditorHints (issue #38): every
+// composer sends with Ctrl+S (a chat also with ↵), and every send is then
+// confirmed with ↵ (or Ctrl+S again) from its preview.
+var composeHints = []keyHint{
+	{"Ctrl+S", "enviar", false},
+	{"Ctrl+A", "adjuntar", false},
+	{"Ctrl+X", "quitar adjunto", false},
+	{"Esc", "cerrar", true},
+}
+
+var confirmSendHints = []keyHint{
+	{"↵", "enviar", true},
+	{"Esc", "editar", true},
+	{"q", "salir", false},
+}
+
+var mailEditorHints = []keyHint{
+	{"Tab", "campo", false},
+	{"Ctrl+S", "enviar", false},
+	{"Esc", "cerrar", true},
+}
+
 var threadHints = []keyHint{
 	{"j/k", "mover", false},
 	{"↵", "expandir", false},
@@ -109,7 +131,7 @@ var helpSections = []helpSection{
 		{"q", "salir"},
 	}},
 	{"chat", "En un chat", [][2]string{
-		{"↵", "enviar (con vista previa)"},
+		{"↵ o Ctrl+S", "enviar (con vista previa)"},
 		{"Alt+↵", "salto de línea"},
 		{"PgUp/PgDn", "ver mensajes anteriores/siguientes"},
 		{"Ctrl+O", "ver imagen / reproducir video"},
@@ -131,11 +153,12 @@ var helpSections = []helpSection{
 		{"PgUp/PgDn", "desplazar"},
 		{"Esc", "volver"},
 	}},
-	{"editor", "Redactar correo", [][2]string{
+	{"editor", "Redactar (correo o respuesta)", [][2]string{
 		{"Tab/⇧Tab", "siguiente/anterior campo"},
-		{"Ctrl+S", "vista previa"},
-		{"↵", "enviar (en la vista previa)"},
-		{"Esc", "cancelar"},
+		{"Ctrl+S", "enviar (primero la vista previa)"},
+		{"↵ o Ctrl+S", "confirmar el envío en la vista previa"},
+		{"Ctrl+A/X", "adjuntar / quitar adjunto (respuesta)"},
+		{"Esc", "cerrar y guardar el borrador"},
 	}},
 	{"picker", "Nuevo mensaje (n)", [][2]string{
 		{"escribir", "filtrar contactos"},
@@ -153,7 +176,7 @@ func (m Model) helpContext() string {
 	switch {
 	case m.chatMode:
 		return "chat"
-	case m.mailComposing:
+	case m.mailComposing, m.composing, m.previewing:
 		return "editor"
 	case m.threadMode:
 		return "thread"

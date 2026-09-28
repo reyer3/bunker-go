@@ -663,7 +663,7 @@ func (m Model) updatePreview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.previewing = false
 		m.composing = true
 		return m, nil
-	case "enter":
+	case "enter", "ctrl+s":
 		if err := validateAttachments(m.attachments); err != nil {
 			m.replyErr = err
 			return m, nil
@@ -721,7 +721,7 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "esc":
 			m.chatConfirm = false
 			return m, nil
-		case "enter":
+		case "enter", "ctrl+s":
 			draft := m.composer.Value()
 			// K10: clear the confirm state as the send starts (it was
 			// previously left true for the whole in-flight send, which
@@ -766,7 +766,7 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "alt+enter":
 		m.composer.InsertRune('\n')
 		return m.resizeChatComposer(), nil
-	case "enter":
+	case "enter", "ctrl+s":
 		body := strings.TrimSpace(m.composer.Value())
 		if body == "" && len(m.chatAttachments) == 0 {
 			return m, nil
@@ -1109,7 +1109,7 @@ func (m Model) updateMailPreview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.mailPreviewing = false
 		return m, nil
-	case "enter":
+	case "enter", "ctrl+s":
 		m.mailSending = true
 		out := m.buildMailOutgoing()
 		return m, sendMailSend(m.client, out, m.mailToken)

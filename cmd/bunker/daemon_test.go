@@ -11,11 +11,17 @@ import (
 	"github.com/reyer3/bunker-go/internal/rpc"
 )
 
+// daemonStartBudget bounds how long a test waits for the daemon. It is
+// generous because the pure-Go SQLite store opens slowly under -race on a
+// CI runner busy with every other package; polling keeps the usual case
+// as fast as the daemon itself.
+const daemonStartBudget = 15 * time.Second
+
 // dialUntilReady polls until socket accepts a connection or the test's
 // budget runs out, so tests never sleep a fixed guess.
 func dialUntilReady(t *testing.T, socket string) *rpc.Client {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(daemonStartBudget)
 	for time.Now().Before(deadline) {
 		if c, err := rpc.Dial(socket); err == nil {
 			return c
@@ -42,7 +48,7 @@ func TestRunDaemonFakeSeedsDemoItemsAndServesRPC(t *testing.T) {
 	// socket accepting connections does not by itself mean every seed has
 	// landed yet: poll Counts until all three demo items show up.
 	var counts map[core.Channel]map[string]int
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(daemonStartBudget)
 	for time.Now().Before(deadline) {
 		var err error
 		counts, err = client.Counts(context.Background())
@@ -64,7 +70,7 @@ func TestRunDaemonFakeSeedsDemoItemsAndServesRPC(t *testing.T) {
 		if err != nil {
 			t.Fatalf("runDaemon returned error after cancel: %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(daemonStartBudget):
 		t.Fatal("runDaemon did not shut down after ctx cancel")
 	}
 }

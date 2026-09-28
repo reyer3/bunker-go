@@ -213,11 +213,11 @@ func (m Model) writeMailEditor(out *strings.Builder) {
 		} else if m.mailSendErr != nil {
 			fmt.Fprintf(out, "\nNo se pudo enviar: %s\n", humanError(m.mailSendErr))
 		}
-		out.WriteString("\n↵ enviar · Esc editar\n")
+		out.WriteString("\n" + hintLine(m.width, confirmSendHints[:2]...) + "\n")
 		return
 	}
 	if m.mailSendErr != nil {
 		fmt.Fprintf(out, "\nError: %s\n", humanError(m.mailSendErr))
 	}
-	out.WriteString("\nTab siguiente campo · Ctrl+S previsualizar · Esc cancelar\n")
+	out.WriteString("\n" + hintLine(m.width, mailEditorHints...) + "\n")
 }

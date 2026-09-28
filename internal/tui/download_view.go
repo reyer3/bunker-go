@@ -13,7 +13,7 @@ func (m Model) writeDownload(out *strings.Builder) {
 	out.WriteString("Descargar adjunto\n\n")
 
 	if m.downloadResult.Path != "" && m.downloadErr == nil {
-		fmt.Fprintf(out, "Guardado: %s (%d bytes)\n\nEsc para volver\n", safeLine(m.downloadResult.Path), m.downloadResult.Bytes)
+		fmt.Fprintf(out, "Guardado: %s (%d bytes)\n\nEsc volver\n", safeLine(m.downloadResult.Path), m.downloadResult.Bytes)
 		return
 	}
 
@@ -32,7 +32,7 @@ func (m Model) writeDownload(out *strings.Builder) {
 	}
 
 	if m.downloadOverwrite {
-		fmt.Fprintf(out, "Destino: %s\n\n¿Sobrescribir? Enter/Esc\n", safeLine(m.downloadPath))
+		fmt.Fprintf(out, "Destino: %s\n\n¿Sobrescribir? ↵ sí · Esc no\n", safeLine(m.downloadPath))
 		return
 	}
 	if m.downloadSending {
@@ -43,5 +43,5 @@ func (m Model) writeDownload(out *strings.Builder) {
 	if m.downloadErr != nil {
 		fmt.Fprintf(out, "\nError: %s\n", humanError(m.downloadErr))
 	}
-	out.WriteString("\nEnter confirmar · Esc cancelar\n")
+	out.WriteString("\n↵ confirmar · Esc cancelar\n")
 }

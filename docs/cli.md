@@ -242,9 +242,10 @@ reports unfocused on `Esc`/blur/quit, and the daemon's own 60s timeout
 covers a hard quit) and the header shows the other side's live presence
 ("en línea"/"escribiendo…"/"grabando audio…"/"últ. vez HH:MM", or
 nothing for a channel without presence data). Composing: every key is
-literal draft text; `Enter` requests a dry-run preview and then shows an
-inline "¿Enviar a …? Enter/Esc" confirm — a second `Enter` sends for
-real, `Esc` cancels back to editing with the draft kept, and typing your
+literal draft text; `Enter` (or `Ctrl+S`, the send key of every other
+composer) requests a dry-run preview and then shows an inline "¿Enviar a
+…? ↵ enviar · Esc cancelar" confirm — a second `Enter` or `Ctrl+S` sends
+for real, `Esc` cancels back to editing with the draft kept, and typing your
 own composing state is reported to the other side, throttled to at most
 once every 5s and cleared after 5s idle, on send, or on leave. `Alt+Enter`
 inserts a newline (plain `Enter` is reserved for send/confirm here, unlike
