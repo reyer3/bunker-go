@@ -60,6 +60,7 @@ const (
 	MethodCallControl       = "call_control"
 	MethodCalls             = "calls"
 	MethodContacts          = "contacts"
+	MethodMarkUnread        = "mark_unread"
 )
 
 type listParams struct {
@@ -154,6 +155,13 @@ type planCallResult struct {
 
 type callsResult struct {
 	Calls []core.Call `json:"calls"`
+}
+
+type markUnreadParams struct {
+	ID string `json:"id"`
+}
+type markUnreadResult struct {
+	LocalOnly bool `json:"local_only"`
 }
 
 type contactsParams struct {

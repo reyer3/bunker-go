@@ -231,12 +231,21 @@ func TestReplyEscCancelsWithoutSendingAtAnyStage(t *testing.T) {
 	model = typeRunes(updated.(Model), "draft text")
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	model = updated.(Model)
-	if model.composing || model.composer.Value() != "" {
-		t.Fatalf("esc from compose did not discard the draft: %+v", model)
+	if model.composing {
+		t.Fatalf("esc from compose did not close it: %+v", model)
+	}
+	if !strings.Contains(model.View(), "borrador guardado") {
+		t.Fatalf("closing a non-empty draft should say it was kept:\n%s", model.View())
 	}
 
+	// Reopening the same reply restores the kept draft (issue #37).
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
-	model = typeRunes(updated.(Model), "second draft")
+	model = updated.(Model)
+	if model.composer.Value() != "draft text" {
+		t.Fatalf("reopened draft = %q, want the kept one", model.composer.Value())
+	}
+	model.composer.Reset()
+	model = typeRunes(model, "second draft")
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
 	updated, _ = updated.(Model).Update(cmd())
 	model = updated.(Model)

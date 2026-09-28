@@ -215,6 +215,17 @@ func (c *Client) Calls(ctx context.Context) ([]core.Call, error) {
 	return res.Calls, nil
 }
 
+// MarkUnread puts an item back in the unread inbox; localOnly reports
+// that the channel could not, so only bunker changed (see
+// core.Service.MarkUnread).
+func (c *Client) MarkUnread(ctx context.Context, id string) (localOnly bool, err error) {
+	var res markUnreadResult
+	if err := c.call(ctx, MethodMarkUnread, markUnreadParams{ID: id}, &res); err != nil {
+		return false, err
+	}
+	return res.LocalOnly, nil
+}
+
 // Contacts lists the contacts matching filter (see core.Service.Contacts).
 func (c *Client) Contacts(ctx context.Context, filter core.ContactFilter) ([]core.Contact, error) {
 	var res contactsResult

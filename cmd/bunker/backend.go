@@ -49,6 +49,9 @@ type Backend interface {
 	// Contacts lists address-book entries and conversations matching a
 	// filter: `bunker contacts`, and names given to send/call.
 	Contacts(ctx context.Context, filter core.ContactFilter) ([]core.Contact, error)
+	// MarkUnread puts an item back in the unread inbox (`bunker unread`);
+	// localOnly reports that only bunker's store changed.
+	MarkUnread(ctx context.Context, id string) (localOnly bool, err error)
 }
 
 var (

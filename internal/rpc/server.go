@@ -282,6 +282,17 @@ func (s *Server) call(ctx context.Context, req Request) (any, error) {
 		}
 		return callsResult{Calls: calls}, nil
 
+	case MethodMarkUnread:
+		var p markUnreadParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		local, err := s.svc.MarkUnread(ctx, p.ID)
+		if err != nil {
+			return nil, err
+		}
+		return markUnreadResult{LocalOnly: local}, nil
+
 	case MethodContacts:
 		var p contactsParams
 		if len(req.Params) > 0 {

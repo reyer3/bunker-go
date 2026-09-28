@@ -13,6 +13,9 @@ type fakeBackend struct {
 	items map[string]core.Item
 
 	sendDryRuns   []bool
+	unreadCalls   []string
+	unreadLocal   bool
+	unreadErr     error
 	contacts      []core.Contact
 	contactsErr   error
 	contactsCalls []core.ContactFilter
@@ -96,6 +99,11 @@ func (f *fakeBackend) ControlCall(ctx context.Context, id string, action core.Ca
 
 func (f *fakeBackend) Calls(ctx context.Context) ([]core.Call, error) {
 	return f.calls, f.callErr
+}
+
+func (f *fakeBackend) MarkUnread(ctx context.Context, id string) (bool, error) {
+	f.unreadCalls = append(f.unreadCalls, id)
+	return f.unreadLocal, f.unreadErr
 }
 
 func (f *fakeBackend) Contacts(ctx context.Context, filter core.ContactFilter) ([]core.Contact, error) {
