@@ -32,6 +32,7 @@ type Adapter struct {
 	cli             waClient
 	minSendInterval time.Duration
 	names           NameResolver
+	directory       ContactDirectory
 	historyLimit    int
 	fanout          core.FanoutPolicy
 

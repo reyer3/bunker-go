@@ -12,6 +12,10 @@ import (
 type fakeBackend struct {
 	items map[string]core.Item
 
+	contacts      []core.Contact
+	contactsErr   error
+	contactsCalls []core.ContactFilter
+
 	listErr, getErr, fetchErr, readErr, countsErr error
 	replyErr, sendErr, organizeErr, statusErr     error
 	downloadErr                                   error
@@ -91,6 +95,24 @@ func (f *fakeBackend) ControlCall(ctx context.Context, id string, action core.Ca
 
 func (f *fakeBackend) Calls(ctx context.Context) ([]core.Call, error) {
 	return f.calls, f.callErr
+}
+
+func (f *fakeBackend) Contacts(ctx context.Context, filter core.ContactFilter) ([]core.Contact, error) {
+	f.contactsCalls = append(f.contactsCalls, filter)
+	if f.contactsErr != nil {
+		return nil, f.contactsErr
+	}
+	var out []core.Contact
+	for _, c := range f.contacts {
+		if filter.Channel != "" && c.Channel != filter.Channel {
+			continue
+		}
+		if filter.Account != "" && c.Account != filter.Account {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out, nil
 }
 
 type backfillCall struct {

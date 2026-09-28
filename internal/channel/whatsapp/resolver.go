@@ -37,4 +37,14 @@ func (r *storeNameResolver) GroupInfo(ctx context.Context, jid types.JID) (*type
 	return r.cli.GetGroupInfo(ctx, jid)
 }
 
-var _ NameResolver = (*storeNameResolver)(nil)
+func (r *storeNameResolver) AllContacts(ctx context.Context) (map[types.JID]types.ContactInfo, error) {
+	if r.cli.Store == nil || r.cli.Store.Contacts == nil {
+		return nil, nil
+	}
+	return r.cli.Store.Contacts.GetAllContacts(ctx)
+}
+
+var (
+	_ NameResolver     = (*storeNameResolver)(nil)
+	_ ContactDirectory = (*storeNameResolver)(nil)
+)

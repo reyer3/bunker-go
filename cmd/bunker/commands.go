@@ -82,6 +82,11 @@ Commands:
   call answer|reject|hangup <call-id|latest>
        [--dry-run] [--json]                                 control a live call
   calls [--json]                                           list live calls
+  contacts [query] [--channel c] [--account a]
+       [--limit n] [--json]                                 address books and
+                                                             conversations; send
+                                                             and call also take
+                                                             a contact's name
   counts [--json]                                          unread counts
   health [--json]                                          per-adapter connection
                                                              state, since when,
@@ -166,6 +171,8 @@ func runWithBackend(ctx context.Context, backend Backend, args []string, stdin i
 		return cmdCall(ctx, backend, args[1:], stdout, stderr)
 	case "calls":
 		return cmdCalls(ctx, backend, args[1:], stdout, stderr)
+	case "contacts":
+		return cmdContacts(ctx, backend, args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n%s", args[0], topLevelUsage)
 		return 2
@@ -397,6 +404,11 @@ func cmdSend(ctx context.Context, backend Backend, args []string, stdin io.Reade
 	to := splitRecipients(positionals[2])
 	if len(to) == 0 {
 		return fail(*jsonOut, stdout, stderr, fmt.Errorf("no recipient given in %q", positionals[2]))
+	}
+	for i, recipient := range to {
+		if to[i], err = resolveRecipient(ctx, backend, core.Channel(positionals[0]), positionals[1], recipient, stderr, *jsonOut); err != nil {
+			return fail(*jsonOut, stdout, stderr, err)
+		}
 	}
 	body, err := textOrStdin(positionals[3], stdin)
 	if err != nil {
