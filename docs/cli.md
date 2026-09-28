@@ -602,11 +602,13 @@ ringing, `ConnectedAt` when media started flowing (zero until then) and
 `EndedAt` when it ended (zero while live). The call's duration counts from
 `ConnectedAt`, so ringing time is not included.
 
-## `bunker call answer|reject|hangup <call-id> [--dry-run] [--json]`
+## `bunker call answer|reject|hangup <call-id|latest> [--dry-run] [--json]`
 
 Answers or rejects a ringing incoming call, or hangs up any live call.
 `<call-id>` comes from `bunker calls`; whichever account owns it acts, so
-no channel/account is needed. An unknown id is `not_found`. `--dry-run`
+no channel/account is needed. `latest` stands for the newest ringing
+incoming call (`answer`/`reject`) or the newest live call (`hangup`),
+and is an error when there is none; it is what tmux key bindings use. An unknown id is `not_found`. `--dry-run`
 returns the plan and the call's current state without changing it.
 
 Incoming calls are never answered on their own. Each one is also written
@@ -1032,7 +1034,7 @@ in this fixed order:
 Plain output: `✉ 3  💬 5  ⌘ 2` (two spaces between segments).
 
 ```json
-{"segments": [{"channel":"mail","glyph":"✉","unread":3}, ...], "daemonUp": true, "allConnected": true}
+{"segments": [{"channel":"mail","glyph":"✉","unread":3}, ...], "daemonUp": true, "allConnected": true, "calls": []}
 ```
 
 `render` never blocks tmux: it gives itself a 200ms budget. It tries the
@@ -1060,6 +1062,32 @@ Styles:
 - `--tmux`: tmux `#[fg=…]` colors with Nerd Font glyphs (mail `󰇮` #4db0ff, WhatsApp `󰖣` #25d366, Matrix `󰘨` #0dbd8b). Channels at 0 are dimmed to #a3a09e.
 - `--ansi`: the same glyphs and colors as 24-bit ANSI escapes, for a Claude Code statusline or a shell prompt.
 - `--hide-empty`: print nothing when no channel has unread items, so a status line can disappear.
+
+**Calls:** when the daemon reports a call, it leads the segment. JSON's
+`calls` carries the same objects as `bunker calls --json`.
+
+| Situation | Segment |
+|---|---|
+| Incoming call ringing | `📞 Ana` (bold and blinking with `--tmux`) |
+| Call connected | `📞 Ana 2:35`, with its connected time |
+| Your own call still ringing | `📞 → Ana` |
+
+`--hide-empty` never hides a call. The caller's name is stripped of `#`
+and control characters before it reaches the status line. Calls come
+only from the live daemon, never from the store fallback.
+
+A ready-to-paste `~/.tmux.conf` snippet. `latest` picks the newest
+ringing call for `answer`/`reject` and the newest live call for `hangup`
+(see `bunker call`):
+
+```tmux
+set -g status-interval 2
+set -g status-right '#(bunker render --tmux) '
+bind-key a run-shell 'bunker call answer latest'
+bind-key R run-shell 'bunker call reject latest'
+bind-key H run-shell 'bunker call hangup latest'
+bind-key m display-popup -E -w 80% -h 80% bunker
+```
 
 Any styled glyph can be overridden in `config.toml`, for example with a codepoint from a locally installed icon font:
 

@@ -10,7 +10,7 @@ import (
 )
 
 const callUsage = `usage: bunker call <channel> <account> <to> [--dry-run] [--json]
-       bunker call answer|reject|hangup <call-id> [--dry-run] [--json]`
+       bunker call answer|reject|hangup <call-id|latest> [--dry-run] [--json]`
 
 // cmdCall places a voice call, or answers/rejects/hangs up a live one.
 // Audio runs on the machine the daemon runs on (its microphone and
@@ -32,7 +32,15 @@ func cmdCall(ctx context.Context, backend Backend, args []string, stdout, stderr
 	)
 	switch {
 	case len(positionals) == 2 && isCallAction(positionals[0]):
-		plan, call, err = backend.ControlCall(ctx, positionals[1], core.CallAction(positionals[0]), *dryRun)
+		action := core.CallAction(positionals[0])
+		id := positionals[1]
+		if id == "latest" {
+			id, err = latestCallID(ctx, backend, action)
+			if err != nil {
+				return fail(*jsonOut, stdout, stderr, err)
+			}
+		}
+		plan, call, err = backend.ControlCall(ctx, id, action, *dryRun)
 	case len(positionals) == 3:
 		plan, call, err = backend.PlaceCall(ctx, core.Channel(positionals[0]), positionals[1], positionals[2], *dryRun)
 	default:
@@ -80,6 +88,27 @@ func cmdCalls(ctx context.Context, backend Backend, args []string, stdout, stder
 		fmt.Fprintln(stdout, formatCall(c))
 	}
 	return 0
+}
+
+// latestCallID resolves "latest" for a call action, so a tmux key binding
+// needs no id (issue #15): answer and reject pick the newest ringing
+// incoming call, hangup the newest live call of any kind.
+func latestCallID(ctx context.Context, backend Backend, action core.CallAction) (string, error) {
+	calls, err := backend.Calls(ctx)
+	if err != nil {
+		return "", err
+	}
+	for i := len(calls) - 1; i >= 0; i-- {
+		c := calls[i]
+		ringing := c.Direction == core.CallIncoming && c.State == core.CallStateRinging
+		if action == core.CallHangup && c.State != core.CallStateEnded || action != core.CallHangup && ringing {
+			return c.ID, nil
+		}
+	}
+	if action == core.CallHangup {
+		return "", fmt.Errorf("no hay ninguna llamada en curso")
+	}
+	return "", fmt.Errorf("no hay ninguna llamada entrante sonando")
 }
 
 func isCallAction(s string) bool {

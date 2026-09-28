@@ -53,7 +53,7 @@ func cmdRender(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	budgetCtx, cancel := context.WithTimeout(ctx, renderBudget)
 	defer cancel()
 
-	counts, daemonUp, allConnected, err := renderCounts(budgetCtx)
+	counts, daemonUp, allConnected, calls, err := renderCounts(budgetCtx)
 	if err != nil {
 		if *jsonOut {
 			writeJSON(stdout, map[string]any{"dead": true})
@@ -73,7 +73,10 @@ func cmdRender(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	}
 
 	if *jsonOut {
-		writeJSON(stdout, map[string]any{"segments": segments, "daemonUp": daemonUp, "allConnected": allConnected})
+		if calls == nil {
+			calls = []core.Call{}
+		}
+		writeJSON(stdout, map[string]any{"segments": segments, "daemonUp": daemonUp, "allConnected": allConnected, "calls": calls})
 		return 0
 	}
 
@@ -88,7 +91,18 @@ func cmdRender(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	if cfg, err := config.LoadDefault(); err == nil {
 		overrides = cfg.Render.Glyphs
 	}
-	if line := formatRender(segments, style, *hideEmpty, resolveGlyphs(overrides)); line != "" {
+	callSeg := formatCallSegment(calls, style, time.Now())
+	line := formatRender(segments, style, *hideEmpty && callSeg == "", resolveGlyphs(overrides))
+	if callSeg != "" {
+		// Issue #15: a ringing or live call leads the segment, so it is
+		// the first thing seen in the status line.
+		if line != "" {
+			line = callSeg + "  " + line
+		} else {
+			line = callSeg
+		}
+	}
+	if line != "" {
 		// R4: a "!" marker warns that at least one adapter is not
 		// connected, but only when the daemon actually answered within
 		// renderBudget (daemonUp) -- render stays exactly as before both
@@ -115,11 +129,14 @@ const notConnectedMarker = "!"
 // whenever health isn't known one way or the other -- the daemon being
 // down, or its health call itself not answering within ctx's remaining
 // budget -- so a slow/partial health check never invents a false alarm.
-func renderCounts(ctx context.Context) (counts map[core.Channel]map[string]int, daemonUp, allConnected bool, err error) {
+func renderCounts(ctx context.Context) (counts map[core.Channel]map[string]int, daemonUp, allConnected bool, calls []core.Call, err error) {
 	allConnected = true
 	if client, dialErr := rpc.Dial(rpc.DefaultSocketPath()); dialErr == nil {
 		defer client.Close()
 		if counts, err = client.Counts(ctx); err == nil {
+			// Live calls only exist in the daemon; like health, a slow or
+			// failed answer just leaves them out of the segment.
+			calls, _ = client.Calls(ctx)
 			if adapters, healthErr := client.Health(ctx); healthErr == nil {
 				for _, a := range adapters {
 					if a.State != core.AdapterConnected {
@@ -128,18 +145,18 @@ func renderCounts(ctx context.Context) (counts map[core.Channel]map[string]int, 
 					}
 				}
 			}
-			return counts, true, allConnected, nil
+			return counts, true, allConnected, calls, nil
 		}
 	}
 
 	st, err := store.Open(config.StoreDBPath())
 	if err != nil {
-		return nil, false, true, fmt.Errorf("render: store fallback: %w", err)
+		return nil, false, true, nil, fmt.Errorf("render: store fallback: %w", err)
 	}
 	defer st.Close()
 	counts, err = st.Counts(ctx)
 	if err != nil {
-		return nil, false, true, fmt.Errorf("render: store counts: %w", err)
+		return nil, false, true, nil, fmt.Errorf("render: store counts: %w", err)
 	}
-	return counts, false, true, nil
+	return counts, false, true, nil, nil
 }
