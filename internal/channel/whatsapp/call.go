@@ -105,7 +105,11 @@ func (a *Adapter) PlaceCall(ctx context.Context, to string) (core.Call, error) {
 		a.callMu.Unlock()
 	}()
 
-	live, err := engine.Call(ctx, strings.TrimPrefix(strings.TrimSpace(to), "+"))
+	number, err := callNumber(to)
+	if err != nil {
+		return core.Call{}, err
+	}
+	live, err := engine.Call(ctx, number)
 	if err != nil {
 		return core.Call{}, fmt.Errorf("whatsapp: call %s: %w", to, err)
 	}
@@ -357,3 +361,21 @@ func (a *Adapter) hangupAll() {
 }
 
 var _ core.Caller = (*Adapter)(nil)
+
+// callNumber turns a call target into the phone number the call engine
+// dials: a number (with or without "+"), or a contact's phone-number JID
+// as "bunker contacts" lists it. Groups and other JIDs cannot be called.
+func callNumber(to string) (string, error) {
+	to = strings.TrimSpace(to)
+	if !strings.Contains(to, "@") {
+		return strings.TrimPrefix(to, "+"), nil
+	}
+	jid, err := types.ParseJID(to)
+	if err != nil {
+		return "", fmt.Errorf("whatsapp: call %q: %w", to, err)
+	}
+	if jid.Server != types.DefaultUserServer || jid.User == "" {
+		return "", fmt.Errorf("whatsapp: call %q: only a person can be called, not a group or a %s address: %w", to, jid.Server, core.ErrUnsupported)
+	}
+	return jid.User, nil
+}

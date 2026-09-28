@@ -59,6 +59,7 @@ const (
 	MethodCall              = "call"
 	MethodCallControl       = "call_control"
 	MethodCalls             = "calls"
+	MethodContacts          = "contacts"
 )
 
 type listParams struct {
@@ -153,6 +154,13 @@ type planCallResult struct {
 
 type callsResult struct {
 	Calls []core.Call `json:"calls"`
+}
+
+type contactsParams struct {
+	Filter core.ContactFilter `json:"filter"`
+}
+type contactsResult struct {
+	Contacts []core.Contact `json:"contacts"`
 }
 
 type planResult struct {

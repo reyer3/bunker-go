@@ -42,7 +42,13 @@ func cmdCall(ctx context.Context, backend Backend, args []string, stdout, stderr
 		}
 		plan, call, err = backend.ControlCall(ctx, id, action, *dryRun)
 	case len(positionals) == 3:
-		plan, call, err = backend.PlaceCall(ctx, core.Channel(positionals[0]), positionals[1], positionals[2], *dryRun)
+		channel, account := core.Channel(positionals[0]), positionals[1]
+		var to string
+		to, err = resolveRecipient(ctx, backend, channel, account, positionals[2], stderr, *jsonOut)
+		if err != nil {
+			return fail(*jsonOut, stdout, stderr, err)
+		}
+		plan, call, err = backend.PlaceCall(ctx, channel, account, to, *dryRun)
 	default:
 		fmt.Fprintln(stderr, callUsage)
 		return 2

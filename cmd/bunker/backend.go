@@ -46,6 +46,9 @@ type Backend interface {
 	PlaceCall(ctx context.Context, channel core.Channel, account, to string, dryRun bool) (core.Plan, core.Call, error)
 	ControlCall(ctx context.Context, id string, action core.CallAction, dryRun bool) (core.Plan, core.Call, error)
 	Calls(ctx context.Context) ([]core.Call, error)
+	// Contacts lists address-book entries and conversations matching a
+	// filter: `bunker contacts`, and names given to send/call.
+	Contacts(ctx context.Context, filter core.ContactFilter) ([]core.Contact, error)
 }
 
 var (

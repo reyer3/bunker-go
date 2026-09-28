@@ -215,6 +215,15 @@ func (c *Client) Calls(ctx context.Context) ([]core.Call, error) {
 	return res.Calls, nil
 }
 
+// Contacts lists the contacts matching filter (see core.Service.Contacts).
+func (c *Client) Contacts(ctx context.Context, filter core.ContactFilter) ([]core.Contact, error) {
+	var res contactsResult
+	if err := c.call(ctx, MethodContacts, contactsParams{Filter: filter}, &res); err != nil {
+		return nil, err
+	}
+	return res.Contacts, nil
+}
+
 // PostStatus publishes a status/story on channel/account.
 func (c *Client) PostStatus(ctx context.Context, channel core.Channel, account string, status core.Status, dryRun bool) (core.Plan, core.Receipt, error) {
 	var res planReceiptResult

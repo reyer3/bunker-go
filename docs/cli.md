@@ -629,6 +629,55 @@ none). A connected call also shows how long it has been connected:
 ```
  `--json` returns `{"calls": [...]}` with the shape above.
 
+## `bunker contacts [query] [--channel c] [--account a] [--limit n] [--json]`
+
+Lists who you can write to or call, merged across accounts:
+
+- **WhatsApp:** the account's contact store (the saved name, else the push
+  name). Only people with a phone-number JID are listed.
+- **Every channel:** the conversations already in the store: WhatsApp
+  chats and groups, Matrix rooms, and mail senders (never the account's
+  own address).
+
+Entries are deduplicated by address. `query` matches the name or the
+address, ignoring case and accents (`jose` finds `José`), ranking exact
+names first, then prefixes. The default limit is 50.
+
+```
+whatsapp/wa	Ana Díaz	51999999999@s.whatsapp.net
+mail/cl	Ana Soto	ana@example.cl
+```
+
+`--json` returns `{"contacts": [{"channel", "account", "name", "address",
+"thread"}]}`. `address` is what `send` and `call` take. `thread` is the
+existing conversation, empty when there is none yet.
+
+### Names in `send` and `call`
+
+`bunker send` and `bunker call` also take a contact's name where they take
+an address:
+
+```sh
+bunker call whatsapp wa "Ana Díaz" --dry-run
+bunker send whatsapp wa jose "hola"
+```
+
+- **What counts as a name:** a recipient with a letter and none of the
+  marks addresses carry (`@`, or a leading `!` or `#`). A phone number is
+  never treated as a name.
+- **Where it resolves:** only among that channel/account's contacts. An
+  exact name wins, otherwise a single partial match.
+- **Failures:** no match, or several, is an error listing the candidates
+  (`Ana Díaz <…>; Ana Soto <…>`), so nothing is sent to a guessed
+  recipient.
+- **Output:** the resolution is printed to stderr (`jose → José Pérez
+  <…>`), except with `--json`.
+- **Dry run:** resolving only reads the daemon's contacts, so it works
+  under `--dry-run`.
+
+`bunker call` also accepts a contact's phone-number JID directly. A group
+cannot be called.
+
 ## `bunker counts [--json]`
 
 Unread item counts per channel and account.

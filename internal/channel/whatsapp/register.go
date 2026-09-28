@@ -100,7 +100,9 @@ func NewFromAccount(acc config.Account) (core.Adapter, error) {
 	}
 	interval := durationOption(acc.Options, "min_send_interval_seconds", defaultMinSendInterval)
 	adapter := NewAdapter(acc.Name, cli, interval)
-	adapter.SetNameResolver(newStoreNameResolver(cli.Client))
+	resolver := newStoreNameResolver(cli.Client)
+	adapter.SetNameResolver(resolver)
+	adapter.SetContactDirectory(resolver)
 	adapter.SetHistoryLimit(intOption(acc.Options, "history_messages_per_chat", defaultHistoryMessagesPerChat))
 	// Fan-out limits (T13a) are read straight through, left at zero when
 	// unconfigured: core.Service.Send/Reply already fall back to its own
