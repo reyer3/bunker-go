@@ -49,10 +49,13 @@ func demoAdapter(channel core.Channel, account string) *fake.Adapter {
 		ID:      fmt.Sprintf("%s:%s:1", channel, account),
 		Channel: channel,
 		Account: account,
-		Subject: fmt.Sprintf("Demo %s item", channel),
-		Body:    fmt.Sprintf("This is a fake %s message from bunker-go's demo mode.", channel),
-		From:    core.Address{ID: "demo", Name: "bunker-go demo"},
-		Unread:  true,
+		// Chats open by thread: without one the demo chat would open empty.
+		Thread:     "demo",
+		ThreadName: fmt.Sprintf("Demo %s", channel),
+		Subject:    fmt.Sprintf("Demo %s item", channel),
+		Body:       fmt.Sprintf("This is a fake %s message from bunker-go's demo mode.", channel),
+		From:       core.Address{ID: "demo", Name: "bunker-go demo"},
+		Unread:     true,
 	}
 	return fake.New(channel, account, item)
 }

@@ -336,7 +336,10 @@ func footerLine(styles rowStyles, width int) string {
 
 // emptySectionLine renders a section's single dim placeholder line when
 // it has no unread conversations.
-func emptySectionLine(styles rowStyles, width int) string {
+func (m Model) emptySectionLine(styles rowStyles, width int) string {
+	if m.filterQuery != "" {
+		return styles.dim.Render(truncatePlain("sin coincidencias", width))
+	}
 	return styles.dim.Render(truncatePlain("sin pendientes", width))
 }
 

@@ -353,6 +353,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.picker != nil {
 			return m.updatePicker(msg)
 		}
+		if m.filtering {
+			return m.updateFilter(msg)
+		}
 		if m.composing {
 			if m.attaching {
 				return m.updateAttach(msg)
@@ -385,7 +388,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "?":
 			m = m.openHelp()
+		case "/":
+			if !m.detail {
+				return m.startFilter(), nil
+			}
 		case "esc":
+			if !m.detail && m.filterQuery != "" {
+				return m.clearFilter(), nil
+			}
 			if m.detail {
 				m.detail = false
 				m.reading = false

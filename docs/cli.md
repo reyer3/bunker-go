@@ -185,6 +185,13 @@ instead opens its own chat/thread view below) scrolls a long body with
 wheel, the footer keymap hint always keeps `q` visible even at a narrow
 (40-column) terminal width.
 
+`/` filters the inbox: typing narrows it to conversations whose name,
+sender, subject or text contains the query, ignoring case and accents.
+`Enter` keeps the filter and returns to the list, and `Esc` clears it. A
+section the filter empties says `sin coincidencias`. An opened chat says
+`cargando mensajes…` while it loads and `sin mensajes todavía` when there
+is no history yet.
+
 Drafts are kept for the session. Leaving a chat, or closing the reply
 composer or the mail editor with `Esc`, keeps the unsent text (the status
 line says `borrador guardado`), and reopening the same conversation or

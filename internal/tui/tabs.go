@@ -44,8 +44,9 @@ func (m Model) currentChannelFilter() (core.Channel, bool) {
 // any Mail sender wrapping.
 func (m Model) threadGroups(channel core.Channel) []inboxGroup {
 	out := make([]inboxGroup, 0, len(m.groups))
+	query := m.foldedFilter()
 	for _, g := range m.groups {
-		if len(g.items) > 0 && g.items[0].Channel == channel {
+		if len(g.items) > 0 && g.items[0].Channel == channel && groupMatches(g, query) {
 			out = append(out, g)
 		}
 	}
