@@ -56,6 +56,9 @@ const (
 	MethodHealth            = "health"
 	MethodBackfill          = "backfill"
 	MethodSearch            = "search"
+	MethodCall              = "call"
+	MethodCallControl       = "call_control"
+	MethodCalls             = "calls"
 )
 
 type listParams struct {
@@ -126,6 +129,30 @@ type organizeParams struct {
 	ID     string          `json:"id"`
 	Op     core.OrganizeOp `json:"op"`
 	DryRun bool            `json:"dryRun"`
+}
+
+// callParams is MethodCall's params.
+type callParams struct {
+	Channel core.Channel `json:"channel"`
+	Account string       `json:"account"`
+	To      string       `json:"to"`
+	DryRun  bool         `json:"dryRun"`
+}
+
+// callControlParams is MethodCallControl's params.
+type callControlParams struct {
+	ID     string          `json:"id"`
+	Action core.CallAction `json:"action"`
+	DryRun bool            `json:"dryRun"`
+}
+
+type planCallResult struct {
+	Plan core.Plan `json:"plan"`
+	Call core.Call `json:"call"`
+}
+
+type callsResult struct {
+	Calls []core.Call `json:"calls"`
 }
 
 type planResult struct {

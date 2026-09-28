@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/purpshell/meowcaller"
 	"go.mau.fi/whatsmeow"
 	_ "modernc.org/sqlite" // pure-Go sqlite driver, registered as "sqlite"
 
@@ -110,6 +111,15 @@ func NewFromAccount(acc config.Account) (core.Adapter, error) {
 		PauseMin:      durationOption(acc.Options, "broadcast_pause_min_seconds", 0),
 		PauseMax:      durationOption(acc.Options, "broadcast_pause_max_seconds", 0),
 	})
+	// Voice calls are opt-in: meowcaller hooks whatsmeow's raw call
+	// signaling, so it is only installed (and must be installed before
+	// Run connects) when the account asks for it.
+	if boolOption(acc.Options, "calls", false) {
+		adapter.EnableCalls(meowEngine{meowcaller.NewClient(cli.Client)}, commandAudio{
+			capture:  stringSliceOption(acc.Options, "call_capture_command", defaultCaptureCommand),
+			playback: stringSliceOption(acc.Options, "call_playback_command", defaultPlaybackCommand),
+		})
+	}
 	return adapter, nil
 }
 
@@ -134,6 +144,41 @@ func stringOption(opts map[string]interface{}, key, def string) string {
 		}
 	}
 	return def
+}
+
+// boolOption reads a boolean option, falling back to def when absent or
+// of the wrong type.
+func boolOption(opts map[string]interface{}, key string, def bool) bool {
+	if v, ok := opts[key].(bool); ok {
+		return v
+	}
+	return def
+}
+
+// stringSliceOption reads a TOML string array option (decoded as
+// []interface{}), falling back to def when absent or when any element is
+// not a string. An explicitly empty array yields an empty slice.
+func stringSliceOption(opts map[string]interface{}, key string, def []string) []string {
+	v, ok := opts[key]
+	if !ok {
+		return def
+	}
+	switch arr := v.(type) {
+	case []string:
+		return arr
+	case []interface{}:
+		out := make([]string, 0, len(arr))
+		for _, e := range arr {
+			s, ok := e.(string)
+			if !ok {
+				return def
+			}
+			out = append(out, s)
+		}
+		return out
+	default:
+		return def
+	}
 }
 
 // intOption reads an integer option from a config.Account.Options map,

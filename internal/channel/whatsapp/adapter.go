@@ -66,6 +66,15 @@ type Adapter struct {
 	// handleHistorySync already persist media descriptors through. It is
 	// nil until Run has been called at least once.
 	sink core.Sink
+
+	// callMu guards the voice-call fields below (see call.go); it is
+	// separate from mu so a slow sink write never blocks call signaling.
+	// calls is nil unless the account opted in (see EnableCalls).
+	callMu      sync.Mutex
+	calls       callEngine
+	callAudio   callAudio
+	liveCalls   map[string]*callRecord
+	placingCall bool
 }
 
 var (
@@ -171,6 +180,7 @@ func (a *Adapter) Run(ctx context.Context, sink core.Sink) error {
 		return fmt.Errorf("whatsapp: connect: %w", err)
 	}
 	defer a.cli.Disconnect()
+	defer a.hangupAll()
 
 	select {
 	case <-ctx.Done():

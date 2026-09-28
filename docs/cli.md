@@ -568,6 +568,55 @@ behavior.
 Publishes a channel status/story. `<text>` can be `-` to read from stdin.
 Same shape as `reply`/`send`.
 
+## `bunker call <channel> <account> <to> [--dry-run] [--json]`
+
+Places a voice call. Only WhatsApp implements it (`core.Caller`), and only
+on an account with `calls = true` (see `docs/config.example.toml`); any
+other account fails with `core: capability not supported`, dry-run
+included. `<to>` is a `+E164` phone number or a JID. The command returns as
+soon as the offer is on the wire: audio runs inside the daemon, on the
+machine it runs on, and starts only once the peer answers and media flows,
+so nothing is recorded while the call is still ringing. The daemon holds
+one call at a time.
+
+```
+$ bunker call whatsapp personal +51999999999 --dry-run
+[dry-run] would call via whatsapp/personal: +51999999999
+$ bunker call whatsapp personal +51999999999
+call ok: 3EB0C4... whatsapp/personal outgoing +51999999999@s.whatsapp.net calling
+```
+
+`--json` returns `{"dryRun", "plan", "call"}`, where `call` is:
+
+```json
+{"ID": "3EB0C4...", "Channel": "whatsapp", "Account": "personal",
+ "Peer": "51999999999@s.whatsapp.net", "PeerName": "Ana",
+ "Direction": "outgoing", "State": "calling",
+ "StartedAt": "2026-09-28T10:00:00Z", "EndReason": ""}
+```
+
+`Direction` is `incoming` or `outgoing`; `State` moves `ringing`/`calling`
+→ `connecting` → `active` → `ended`.
+
+## `bunker call answer|reject|hangup <call-id> [--dry-run] [--json]`
+
+Answers or rejects a ringing incoming call, or hangs up any live call.
+`<call-id>` comes from `bunker calls`; whichever account owns it acts, so
+no channel/account is needed. An unknown id is `not_found`. `--dry-run`
+returns the plan and the call's current state without changing it.
+
+Incoming calls are never answered on their own. Each one is also written
+to its conversation as an item, so it shows in `list`, `counts` and the
+tmux segment: `📞 Llamada entrante` (unread) while ringing, then
+`📞 Llamada perdida` (still unread) if nobody answered, or
+`📞 Llamada finalizada (m:ss)` once an answered call ends. Its `Meta`
+carries `wa_call_id`, `wa_call` (direction) and `wa_state`.
+
+## `bunker calls [--json]`
+
+Lists every live call, oldest first (`no active calls` when there are
+none). `--json` returns `{"calls": [...]}` with the shape above.
+
 ## `bunker counts [--json]`
 
 Unread item counts per channel and account.
