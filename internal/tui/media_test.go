@@ -200,3 +200,16 @@ func TestLockOutputKeepsTerminalFile(t *testing.T) {
 		t.Error("locked writer lost a write")
 	}
 }
+
+// TestResizeClearsScreen pins the fix for a resize leaving the previous
+// frame on screen: every size change asks for a full clear.
+func TestResizeClearsScreen(t *testing.T) {
+	model := NewModel(&mediaClient{})
+	_, cmd := model.Update(tea.WindowSizeMsg{Width: 40, Height: 20})
+	for _, msg := range runCmds(cmd) {
+		if msg == tea.ClearScreen() {
+			return
+		}
+	}
+	t.Fatal("a resize should clear the screen before the next frame")
+}

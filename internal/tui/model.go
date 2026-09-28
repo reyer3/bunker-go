@@ -311,6 +311,9 @@ func Run(client Client, input io.Reader, output io.Writer) error {
 		model.media = newMediaCache()
 		model.mediaDir = mediaCacheDir()
 	}
-	_, err := tea.NewProgram(model, tea.WithInput(input), tea.WithOutput(output), tea.WithMouseCellMotion(), tea.WithReportFocus()).Run()
+	// The alternate screen: the panel owns the whole pane, so a resize
+	// redraws from the top instead of diffing against lines the terminal
+	// has already re-wrapped, and quitting restores what was there.
+	_, err := tea.NewProgram(model, tea.WithInput(input), tea.WithOutput(output), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithReportFocus()).Run()
 	return err
 }
