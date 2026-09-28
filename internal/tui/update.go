@@ -44,6 +44,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.chatTempFiles = append(m.chatTempFiles, msg.path)
 		return m.addChatAttachments(msg.path), nil
+	case contactsLoadedMsg:
+		return m.handleContactsLoaded(msg)
 	case mediaReadyMsg:
 		return m.handleMediaReady(msg)
 	case videoReadyMsg:
@@ -334,6 +336,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.picker != nil {
+			return m.updatePicker(msg)
+		}
 		if m.composing {
 			if m.attaching {
 				return m.updateAttach(msg)
@@ -467,6 +472,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.attachInput = ""
 				m.replyErr = nil
 				m.previewPlan = core.Plan{}
+			}
+		case "n":
+			if !m.detail {
+				return m.openPicker()
 			}
 		case "m":
 			if id, ok := m.selectedItemID(); ok && m.client != nil {
@@ -711,7 +720,7 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m.resizeChatComposer(), nil
 			}
 			m.chatOptimistic.attachments = attachmentNames(m.chatAttachments)
-			return m, sendChatReply(m.client, m.chatDraftID, draft, m.chatAttachments, m.chatReplyToken)
+			return m, m.chatSendCmd(draft, false)
 		}
 		return m, nil
 	}
@@ -743,7 +752,7 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.chatSendErr = nil
 		m.chatReplyToken++
 		m.chatPreviewPending = true
-		return m, previewChatReply(m.client, m.chatDraftID, m.composer.Value(), m.chatAttachments, m.chatReplyToken)
+		return m, m.chatSendCmd(m.composer.Value(), true)
 	case "ctrl+v":
 		// Issue #5: paste an image (e.g. a screenshot) from the clipboard
 		// as an attachment. Text is pasted by the terminal itself

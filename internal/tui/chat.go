@@ -171,6 +171,40 @@ type chatSendReloadMsg struct {
 	err       error
 }
 
+// chatSendCmd previews (dryRun) or sends the chat draft: a reply to the
+// conversation's newest item, or, for a chat opened from the contact
+// picker (no item to reply to), a fresh send to its thread and address.
+func (m Model) chatSendCmd(body string, dryRun bool) tea.Cmd {
+	if m.chatDraftID != "" || m.chatNewTo == "" {
+		if dryRun {
+			return previewChatReply(m.client, m.chatDraftID, body, m.chatAttachments, m.chatReplyToken)
+		}
+		return sendChatReply(m.client, m.chatDraftID, body, m.chatAttachments, m.chatReplyToken)
+	}
+	out := core.Outgoing{
+		Channel:     m.chatChannel,
+		Account:     m.chatAccount,
+		To:          []string{m.chatNewTo},
+		Thread:      m.chatThread,
+		Body:        body,
+		Attachments: append([]string(nil), m.chatAttachments...),
+	}
+	client, token := m.client, m.chatReplyToken
+	return func() tea.Msg {
+		timeout := sendTimeout
+		if dryRun {
+			timeout = previewTimeout
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		plan, receipt, err := client.Send(ctx, out, dryRun)
+		if dryRun {
+			return chatReplyPreviewMsg{token: token, plan: plan, err: err}
+		}
+		return chatReplySentMsg{token: token, receipt: receipt, err: err}
+	}
+}
+
 func previewChatReply(client Client, id, body string, attachments []string, token uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), previewTimeout)
