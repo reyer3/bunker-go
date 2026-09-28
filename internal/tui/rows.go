@@ -331,7 +331,7 @@ func separatorLine(styles rowStyles, width int) string {
 // recorded (a 40-column terminal used to lose "q to quit" entirely, since
 // this line never even mentioned it).
 func footerLine(styles rowStyles, width int) string {
-	return styles.dim.Render(truncatePlain("q salir  ↵ leer  r responder  m leído  ? ayuda", width))
+	return styles.dim.Render(hintLine(width, inboxHints...))
 }
 
 // emptySectionLine renders a section's single dim placeholder line when

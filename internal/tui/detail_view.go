@@ -13,7 +13,7 @@ import (
 // fixed block in the chat/thread views, so a narrow terminal wrapping it
 // onto two physical rows is already accounted for in the height budget.
 func detailTailLines(width int) []string {
-	return wrapLines([]string{"", "Esc volver · q salir"}, width)
+	return wrapLines([]string{"", hintLine(width, detailHints...)}, width)
 }
 
 // detailHeadLines renders the always-visible Subject/From/Channel block

@@ -130,7 +130,7 @@ func TestWalkthroughNarrowListReadReplyCancel(t *testing.T) {
 	rec := &sessionRecorder{r: tm.Output()}
 
 	rec.waitForText(t, "Cargando bandeja de entrada", 3*time.Second)
-	rec.waitForText(t, "leer", 3*time.Second)
+	rec.waitForText(t, "abrir", 3*time.Second)
 	// Mail wraps this conversation under a collapsible sender row
 	// (mail-sender-groups.md): expand it and move onto the nested thread
 	// row before Enter opens it, matching what a user sees.
@@ -149,7 +149,7 @@ func TestWalkthroughNarrowListReadReplyCancel(t *testing.T) {
 	tm.Send(tea.KeyMsg{Type: tea.KeyEsc}) // editor -> discard draft, back to the thread
 	rec.waitForText(t, "Please review", 3*time.Second)
 	tm.Send(tea.KeyMsg{Type: tea.KeyEsc}) // thread -> back to inbox
-	rec.waitForText(t, "leer", 3*time.Second)
+	rec.waitForText(t, "abrir", 3*time.Second)
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 
 	// WaitFinished only returns once the real tea.Program has torn itself
@@ -197,7 +197,7 @@ func TestWalkthroughWideListReadReplySend(t *testing.T) {
 	rec := &sessionRecorder{r: tm.Output()}
 
 	rec.waitForText(t, "Cargando bandeja de entrada", 3*time.Second)
-	rec.waitForText(t, "leer", 3*time.Second)
+	rec.waitForText(t, "abrir", 3*time.Second)
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}}) // reply directly from the list
 	rec.typeSettled(tm, "see attached notes")
 	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlA}) // attach
@@ -209,7 +209,7 @@ func TestWalkthroughWideListReadReplySend(t *testing.T) {
 	rec.waitForText(t, "#general:example.org", 3*time.Second)
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter}) // explicit confirm: real send
 	rec.waitForText(t, "Enviando…", 3*time.Second)
-	rec.waitForText(t, "leer", 3*time.Second)
+	rec.waitForText(t, "abrir", 3*time.Second)
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 
 	tm.WaitFinished(t, teatest.WithFinalTimeout(3*time.Second))

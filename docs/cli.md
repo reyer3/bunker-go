@@ -76,8 +76,18 @@ colored left bar. An empty section still shows its header and one dim
 "sin pendientes" line. The overview shows all three sections at once,
 each getting a fair share of the pane's height; a section with more
 conversations than fit ends in a dim "+N más" line rather than pushing
-another section off screen. `?` opens a full-keymap help overlay; `Esc`
-closes it. At terminal widths under ~30 columns the two-line row
+another section off screen.
+
+Every view ends in a one-line key hint in the same notation (`key
+label`, joined by ` · `). When it does not fit the width, the
+lowest-priority keys are dropped instead of wrapping, and how to leave
+and how to get help always stay.
+
+`?` (or `F1`, which also works in a chat, where `?` is text) opens the
+help overlay on the section for the current view: inbox, chat, mail
+thread, mail editor or contact picker. It scrolls with `j`/`k`, the
+arrows, `PgUp`/`PgDn` or the wheel. `Esc`, `?` or `F1` close it. At
+terminal widths under ~30 columns the two-line row
 collapses to one line (no preview). Setting `NO_COLOR` disables all
 color, same as everywhere else in bunker.
 

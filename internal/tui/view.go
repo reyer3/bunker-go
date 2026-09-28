@@ -50,44 +50,6 @@ func (m Model) View() string {
 	return m.inboxView()
 }
 
-// helpView renders the full-keymap overlay ("?"); Esc or "?" again
-// closes it (handled in Update), returning to whatever was on screen.
-func (m Model) helpView() string {
-	lines := []string{
-		"Ayuda",
-		"",
-		"j/k, ↑/↓    mover selección",
-		"↵           leer",
-		"r           responder",
-		"n           nuevo mensaje (elegir contacto)",
-		"m           marcar leído",
-		"g           refrescar",
-		"1/2/3       enfocar Mail/WhatsApp/Matrix",
-		"0           volver a la vista general",
-		"Tab/⇧Tab     siguiente/anterior sección",
-		"?           esta ayuda",
-		"Esc         cerrar / volver",
-		"q           salir",
-		"",
-		"En un chat",
-		"↵           enviar (con vista previa)",
-		"Alt+↵       salto de línea",
-		"Ctrl+O      ver imagen / reproducir video",
-		"clic        abrir la imagen o video bajo el cursor",
-		"Ctrl+V      adjuntar imagen del portapapeles",
-		"arrastrar   soltar archivos para adjuntarlos",
-		"⌫ vacío     quitar el último adjunto",
-		":risa       emoji (Tab elige, ↵ inserta)",
-		"Ctrl+D      descargar el último adjunto",
-	}
-	if m.width > 0 {
-		for i, line := range lines {
-			lines[i] = runewidth.Truncate(line, m.width, "…")
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
 func (m Model) writeCompose(out *strings.Builder) {
 	out.WriteString("Responder\n\n")
 	out.WriteString(m.composer.View())
