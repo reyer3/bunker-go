@@ -93,12 +93,12 @@ func TestChatBubbleAlignmentOwnRightIncomingLeft(t *testing.T) {
 	width := 40
 	bubbleWidth := chatBubbleWidth(width)
 
-	incoming := chatBubbleLines(r, core.Item{Body: "hi", Timestamp: now}, width, false, now, false, "")
+	incoming := chatBubbleLines(r, core.Item{Body: "hi", Timestamp: now}, width, false, now, false, "", nil)
 	if !strings.HasPrefix(incoming[0], "hi") {
 		t.Fatalf("incoming bubble body line = %q, want it flush with the left edge", incoming[0])
 	}
 
-	own := chatBubbleLines(r, core.Item{Body: "hi", FromMe: true, Channel: core.ChannelWhatsApp, Timestamp: now}, width, false, now, false, "")
+	own := chatBubbleLines(r, core.Item{Body: "hi", FromMe: true, Channel: core.ChannelWhatsApp, Timestamp: now}, width, false, now, false, "", nil)
 	wantPad := strings.Repeat(" ", width-bubbleWidth)
 	if !strings.HasPrefix(own[0], wantPad+"hi") {
 		t.Fatalf("own bubble body line = %q, want %d leading spaces then the text (right edge)", own[0], width-bubbleWidth)
@@ -117,9 +117,9 @@ func TestChatBubbleBackgroundColorsDifferByOwnershipAndChannel(t *testing.T) {
 	r.SetColorProfile(termenv.TrueColor)
 	now := time.Now()
 
-	incoming := chatBubbleLines(r, core.Item{Body: "hi", Timestamp: now}, 40, false, now, false, "")[0]
-	ownWA := chatBubbleLines(r, core.Item{Body: "hi", FromMe: true, Channel: core.ChannelWhatsApp, Timestamp: now}, 40, false, now, false, "")[0]
-	ownMatrix := chatBubbleLines(r, core.Item{Body: "hi", FromMe: true, Channel: core.ChannelMatrix, Timestamp: now}, 40, false, now, false, "")[0]
+	incoming := chatBubbleLines(r, core.Item{Body: "hi", Timestamp: now}, 40, false, now, false, "", nil)[0]
+	ownWA := chatBubbleLines(r, core.Item{Body: "hi", FromMe: true, Channel: core.ChannelWhatsApp, Timestamp: now}, 40, false, now, false, "", nil)[0]
+	ownMatrix := chatBubbleLines(r, core.Item{Body: "hi", FromMe: true, Channel: core.ChannelMatrix, Timestamp: now}, 40, false, now, false, "", nil)[0]
 
 	if incoming == ownWA {
 		t.Fatal("incoming and own bubbles rendered identically; want distinct backgrounds")

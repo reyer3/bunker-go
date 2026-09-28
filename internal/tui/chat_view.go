@@ -291,7 +291,7 @@ func (m Model) chatBodyLines() []string {
 		if dim {
 			status = m.chatOptimisticStatusText()
 		}
-		lines = append(lines, chatBubbleLines(r, item, m.width, showName, now, dim, status)...)
+		lines = append(lines, chatBubbleLines(r, item, m.width, showName, now, dim, status, m.readyThumb)...)
 	}
 	return wrapLines(lines, m.width)
 }
@@ -418,7 +418,7 @@ func presenceHeaderText(p core.Presence, now time.Time) string {
 // the bubble's colors for the dim optimistic palette, and a non-empty
 // status replaces the trailing "HH:MM" time line with that text (e.g.
 // "enviando…"/"no enviado") instead.
-func chatBubbleLines(r *lipgloss.Renderer, item core.Item, width int, showName bool, now time.Time, dim bool, status string) []string {
+func chatBubbleLines(r *lipgloss.Renderer, item core.Item, width int, showName bool, now time.Time, dim bool, status string, thumb func(key string) (*mediaThumb, bool)) []string {
 	bubbleWidth := chatBubbleWidth(width)
 	bgHex := bubbleIncomingBg
 	fgHex := bubbleIncomingFg
@@ -460,7 +460,17 @@ func chatBubbleLines(r *lipgloss.Renderer, item core.Item, width int, showName b
 			padded := padTo(text, bubbleWidth)
 			lines = append(lines, alignBubbleLine(bodyStyle.Render(padded), bubbleWidth, width, item.FromMe))
 		}
-		for _, attachment := range item.Attachments {
+		for i, attachment := range item.Attachments {
+			// Issue #4: an image already uploaded to a kitty-graphics
+			// terminal renders as its thumbnail instead of a text row.
+			if thumb != nil {
+				if t, ok := thumb(mediaKey(item.ID, i)); ok {
+					if tl := thumbBubbleLines(t, bodyStyle, bubbleWidth, width, item.FromMe); tl != nil {
+						lines = append(lines, tl...)
+						continue
+					}
+				}
+			}
 			text := fmt.Sprintf("📎 %s (%d bytes)", safeLine(attachment.Name), attachment.Size)
 			text = runewidth.Truncate(text, bubbleWidth, "…")
 			padded := padTo(text, bubbleWidth)
