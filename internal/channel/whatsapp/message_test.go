@@ -61,6 +61,30 @@ func TestToItemPlainConversation(t *testing.T) {
 	}
 }
 
+func TestToItemFromMeReflectsIsFromMe(t *testing.T) {
+	chat := mustJID(t, "1234@s.whatsapp.net")
+	own := mustJID(t, "5511999999999@s.whatsapp.net")
+
+	received := toItem("personal", &events.Message{
+		Info:    types.MessageInfo{MessageSource: types.MessageSource{Chat: chat, Sender: chat, IsFromMe: false}, ID: "MSG1"},
+		Message: &waE2E.Message{Conversation: strPtr("hola")},
+	})
+	if received.FromMe {
+		t.Errorf("FromMe = true for an incoming message, want false")
+	}
+	if received.Unread != true {
+		t.Errorf("Unread = %v for an incoming message, want true", received.Unread)
+	}
+
+	sent := toItem("personal", &events.Message{
+		Info:    types.MessageInfo{MessageSource: types.MessageSource{Chat: chat, Sender: own, IsFromMe: true}, ID: "MSG2"},
+		Message: &waE2E.Message{Conversation: strPtr("hola de vuelta")},
+	})
+	if !sent.FromMe {
+		t.Errorf("FromMe = false for an own message (IsFromMe), want true")
+	}
+}
+
 func TestToItemExtendedText(t *testing.T) {
 	chat := mustJID(t, "1234@s.whatsapp.net")
 	evt := &events.Message{

@@ -3,6 +3,7 @@ package mail
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/reyer3/bunker-go/internal/config"
 )
@@ -89,6 +90,74 @@ func TestParseAccountConfigMissingHost(t *testing.T) {
 	}
 }
 
+func TestParseAccountConfigDefaultsSeenReconcileInterval(t *testing.T) {
+	acc := config.Account{
+		Channel: "mail",
+		Name:    "cl",
+		Options: map[string]interface{}{"imap_host": "mail.example.cl", "username": "x"},
+	}
+	cfg, err := ParseAccountConfig(acc)
+	if err != nil {
+		t.Fatalf("ParseAccountConfig() error = %v", err)
+	}
+	if cfg.SeenReconcileInterval != defaultSeenReconcileInterval {
+		t.Errorf("SeenReconcileInterval = %v, want default %v", cfg.SeenReconcileInterval, defaultSeenReconcileInterval)
+	}
+}
+
+func TestParseAccountConfigCustomSeenReconcileInterval(t *testing.T) {
+	acc := config.Account{
+		Channel: "mail",
+		Name:    "cl",
+		Options: map[string]interface{}{
+			"imap_host":      "mail.example.cl",
+			"username":       "x",
+			"seen_reconcile": "45s",
+		},
+	}
+	cfg, err := ParseAccountConfig(acc)
+	if err != nil {
+		t.Fatalf("ParseAccountConfig() error = %v", err)
+	}
+	if cfg.SeenReconcileInterval != 45*time.Second {
+		t.Errorf("SeenReconcileInterval = %v, want 45s", cfg.SeenReconcileInterval)
+	}
+}
+
+func TestParseAccountConfigSeenReconcileIntervalZeroDisables(t *testing.T) {
+	acc := config.Account{
+		Channel: "mail",
+		Name:    "cl",
+		Options: map[string]interface{}{
+			"imap_host":      "mail.example.cl",
+			"username":       "x",
+			"seen_reconcile": "0",
+		},
+	}
+	cfg, err := ParseAccountConfig(acc)
+	if err != nil {
+		t.Fatalf("ParseAccountConfig() error = %v", err)
+	}
+	if cfg.SeenReconcileInterval != 0 {
+		t.Errorf("SeenReconcileInterval = %v, want 0 (disabled)", cfg.SeenReconcileInterval)
+	}
+}
+
+func TestParseAccountConfigInvalidSeenReconcileInterval(t *testing.T) {
+	acc := config.Account{
+		Channel: "mail",
+		Name:    "cl",
+		Options: map[string]interface{}{
+			"imap_host":      "mail.example.cl",
+			"username":       "x",
+			"seen_reconcile": "banana",
+		},
+	}
+	if _, err := ParseAccountConfig(acc); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("ParseAccountConfig() error = %v, want ErrInvalidConfig", err)
+	}
+}
+
 func TestParseAccountConfigUnknownAuth(t *testing.T) {
 	acc := config.Account{
 		Channel: "mail",
@@ -97,6 +166,77 @@ func TestParseAccountConfigUnknownAuth(t *testing.T) {
 			"imap_host": "mail.example.cl",
 			"username":  "x",
 			"auth":      "carrier-pigeon",
+		},
+	}
+	if _, err := ParseAccountConfig(acc); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("ParseAccountConfig() error = %v, want ErrInvalidConfig", err)
+	}
+}
+
+// TestParseAccountConfigInitialSyncLimitDefault: mail-history H4. No
+// initial_sync_limit option set must keep the existing 200-message
+// default (defaultInitialSyncLimit), so a config.toml written before H4
+// keeps behaving exactly as before.
+func TestParseAccountConfigInitialSyncLimitDefault(t *testing.T) {
+	acc := config.Account{
+		Channel: "mail",
+		Name:    "cl",
+		Options: map[string]interface{}{
+			"imap_host": "mail.example.cl",
+			"username":  "x",
+		},
+	}
+	cfg, err := ParseAccountConfig(acc)
+	if err != nil {
+		t.Fatalf("ParseAccountConfig() error = %v", err)
+	}
+	if cfg.InitialSyncLimit != defaultInitialSyncLimit {
+		t.Errorf("InitialSyncLimit = %d, want the default %d", cfg.InitialSyncLimit, defaultInitialSyncLimit)
+	}
+}
+
+func TestParseAccountConfigInitialSyncLimitCustom(t *testing.T) {
+	acc := config.Account{
+		Channel: "mail",
+		Name:    "cl",
+		Options: map[string]interface{}{
+			"imap_host":          "mail.example.cl",
+			"username":           "x",
+			"initial_sync_limit": int64(500),
+		},
+	}
+	cfg, err := ParseAccountConfig(acc)
+	if err != nil {
+		t.Fatalf("ParseAccountConfig() error = %v", err)
+	}
+	if cfg.InitialSyncLimit != 500 {
+		t.Errorf("InitialSyncLimit = %d, want 500", cfg.InitialSyncLimit)
+	}
+}
+
+func TestParseAccountConfigInitialSyncLimitZeroIsInvalid(t *testing.T) {
+	acc := config.Account{
+		Channel: "mail",
+		Name:    "cl",
+		Options: map[string]interface{}{
+			"imap_host":          "mail.example.cl",
+			"username":           "x",
+			"initial_sync_limit": int64(0),
+		},
+	}
+	if _, err := ParseAccountConfig(acc); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("ParseAccountConfig() error = %v, want ErrInvalidConfig", err)
+	}
+}
+
+func TestParseAccountConfigInitialSyncLimitNegativeIsInvalid(t *testing.T) {
+	acc := config.Account{
+		Channel: "mail",
+		Name:    "cl",
+		Options: map[string]interface{}{
+			"imap_host":          "mail.example.cl",
+			"username":           "x",
+			"initial_sync_limit": int64(-1),
 		},
 	}
 	if _, err := ParseAccountConfig(acc); !errors.Is(err, ErrInvalidConfig) {

@@ -271,3 +271,42 @@ func TestServiceDownloadFetchesWhenStoredItemLacksAttachments(t *testing.T) {
 		t.Errorf("DownloadAttachment got item with %d attachments, want the fetched item (1)", len(spy.lastItem.Attachments))
 	}
 }
+
+// TestServiceDownloadFetchesFromServerWhenStoreLacksItem: mail-history
+// H1 follow-up. An id older than the store's first synced UID is not in
+// the store at all; Download must go through Fetch's server fallback
+// (which also upserts it) instead of failing on store.Get.
+func TestServiceDownloadFetchesFromServerWhenStoreLacksItem(t *testing.T) {
+	data := []byte("xlsx bytes")
+	fetched := itemWithAttachment("mail:cl:5", core.Attachment{Name: "carga.xlsx", MIME: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", Size: int64(len(data)), Ref: "part-1"})
+	reg := core.NewRegistry()
+	spy := &spyFetchingDownloaderAdapter{
+		spyDownloaderAdapter: spyDownloaderAdapter{spyAdapter: spyAdapter{channel: core.ChannelMail, account: "cl"}, data: data},
+		fetched:              fetched,
+	}
+	reg.Register(spy)
+	store := newMemStore() // empty: mail:cl:5 was never synced
+	svc := core.NewService(store, reg)
+
+	dest := filepath.Join(t.TempDir(), "carga.xlsx")
+	res, err := svc.Download(context.Background(), "mail:cl:5", 0, dest, core.DownloadOptions{})
+	if err != nil {
+		t.Fatalf("Download() error = %v, want the server-fetched attachment", err)
+	}
+	if res.Name != "carga.xlsx" || res.Bytes != int64(len(data)) {
+		t.Errorf("result = %+v, want carga.xlsx with %d bytes", res, len(data))
+	}
+	if _, err := store.Get(context.Background(), "mail:cl:5"); err != nil {
+		t.Errorf("store.Get after Download error = %v, want the fetched item upserted", err)
+	}
+}
+
+// TestServiceDownloadUnknownIDStaysErrNotFound: with no adapter for the
+// id's account, the missing-from-store case is still ErrNotFound.
+func TestServiceDownloadUnknownIDStaysErrNotFound(t *testing.T) {
+	svc := core.NewService(newMemStore(), core.NewRegistry())
+	_, err := svc.Download(context.Background(), "mail:nope:5", 0, filepath.Join(t.TempDir(), "x"), core.DownloadOptions{})
+	if !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("Download() error = %v, want ErrNotFound", err)
+	}
+}

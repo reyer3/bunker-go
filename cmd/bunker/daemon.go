@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -30,7 +31,7 @@ func cmdDaemonMain(args []string, stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := runDaemon(ctx, config.StateDir(), config.AvatarCacheDir(), rpc.DefaultSocketPath(), *fakeMode, stdout); err != nil {
+	if err := runDaemon(ctx, config.StateDir(), config.AvatarCacheDir(), rpc.DefaultSocketPath(), *fakeMode, stdout, stderr); err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
@@ -43,7 +44,7 @@ func cmdDaemonMain(args []string, stdout, stderr io.Writer) int {
 // shutdown. avatarCacheDir is passed explicitly (like stateDir/
 // socketPath) rather than read from config internally, so tests always
 // point it at their own temp dir and never a real ~/.cache.
-func runDaemon(ctx context.Context, stateDir, avatarCacheDir, socketPath string, fakeMode bool, stdout io.Writer) error {
+func runDaemon(ctx context.Context, stateDir, avatarCacheDir, socketPath string, fakeMode bool, stdout, stderr io.Writer) error {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return fmt.Errorf("daemon: create state dir %s: %w", stateDir, err)
 	}
@@ -61,13 +62,20 @@ func runDaemon(ctx context.Context, stateDir, avatarCacheDir, socketPath string,
 
 	svc := core.NewService(st, reg)
 	svc.SetAvatarCacheDir(avatarCacheDir)
+	health := core.NewHealthTracker()
+	svc.SetHealthTracker(health)
 	srv := rpc.NewServer(svc)
 
-	wg := startAdapters(ctx, reg, st, stdout)
+	wg := startAdapters(ctx, reg, st, stdout, stderr, health)
 
 	fmt.Fprintf(stdout, "bunker: daemon listening on %s\n", socketPath)
 	serveErr := srv.Serve(ctx, socketPath)
 	wg.Wait()
+
+	// K3's availability lease reverts on daemon shutdown, same as an
+	// explicit blur: a WhatsApp account left "available" must not stay
+	// that way after the daemon (and therefore every chat view) is gone.
+	svc.ShutdownPresence()
 
 	if ctx.Err() != nil {
 		return nil
@@ -75,30 +83,40 @@ func runDaemon(ctx context.Context, stateDir, avatarCacheDir, socketPath string,
 	return serveErr
 }
 
-// startAdapters launches every registered adapter's Run loop in its own
-// goroutine, feeding st, and returns the *sync.WaitGroup the caller waits
-// on for a clean shutdown. Before an adapter's Run starts, if it
-// implements core.Retrier (currently only the matrix adapter), it gets
-// one chance to re-fetch and decrypt items it previously stored
-// undecryptable -- covering both "the daemon runs it at startup" and
-// "after an import" (a `bunker link matrix --recovery-key` or `bunker
-// import-keys` run followed by a daemon restart reaches this same path).
-// A retry failure is logged, never fatal: Run still starts, and the next
-// daemon restart tries again.
-func startAdapters(ctx context.Context, reg *core.Registry, st core.Store, stdout io.Writer) *sync.WaitGroup {
+// startAdapters launches every registered adapter under an
+// adapterSupervisor, in its own goroutine, feeding st, and returns the
+// *sync.WaitGroup the caller waits on for a clean shutdown. Before an
+// adapter's Run starts, if it implements core.Retrier (currently only the
+// matrix adapter), it gets one chance to re-fetch and decrypt items it
+// previously stored undecryptable -- covering both "the daemon runs it at
+// startup" and "after an import" (a `bunker link matrix --recovery-key`
+// or `bunker import-keys` run followed by a daemon restart reaches this
+// same path). A retry failure is logged, never fatal: Run still starts,
+// and the next daemon restart tries again.
+//
+// R1: unlike a one-shot goroutine, the supervisor restarts Run for as
+// long as ctx is live whenever it returns (capped exponential backoff
+// with jitter, reset after a run lasting at least adapterHealthyRun), so
+// a Matrix sync error or a mail reconnect loop giving up no longer
+// silently drops that channel for the rest of the process's life.
+// Adapter lifecycle is logged via slog to stderr with channel/account
+// attributes, so journald carries every restart even though the process
+// itself keeps running.
+func startAdapters(ctx context.Context, reg *core.Registry, st core.Store, stdout, stderr io.Writer, health *core.HealthTracker) *sync.WaitGroup {
+	logger := slog.New(slog.NewTextHandler(stderr, nil))
+	return startAdaptersWithSupervisor(ctx, reg, st, newAdapterSupervisor(logger, health))
+}
+
+// startAdaptersWithSupervisor is startAdapters' testable core: it takes
+// an already-built adapterSupervisor, so tests can inject a fake clock
+// and backoff to prove the restart policy deterministically.
+func startAdaptersWithSupervisor(ctx context.Context, reg *core.Registry, st core.Store, sup *adapterSupervisor) *sync.WaitGroup {
 	var wg sync.WaitGroup
 	for _, adapter := range reg.List() {
 		wg.Add(1)
 		go func(a core.Adapter) {
 			defer wg.Done()
-			if retrier, ok := a.(core.Retrier); ok {
-				if err := retrier.RetryUndecryptable(ctx, st); err != nil {
-					fmt.Fprintf(stdout, "bunker: adapter %s/%s retry undecryptable: %v\n", a.Channel(), a.Account(), err)
-				}
-			}
-			if err := a.Run(ctx, st); err != nil && ctx.Err() == nil {
-				fmt.Fprintf(stdout, "bunker: adapter %s/%s stopped: %v\n", a.Channel(), a.Account(), err)
-			}
+			sup.supervise(ctx, a, st)
 		}(adapter)
 	}
 	return &wg

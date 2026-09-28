@@ -143,6 +143,43 @@ func TestServiceSendFanoutCallsAdapterOncePerRecipient(t *testing.T) {
 	}
 }
 
+// TestServiceSendFanoutStoresOneItemPerRecipient covers K7b's fan-out
+// clause (conversation-view.md, Usability pass): each successful recipient
+// of a broadcast gets its own stored FromMe item, keyed by its own
+// receipt id and grouped under its own Thread; a failed recipient must
+// not store anything (it never actually sent).
+func TestServiceSendFanoutStoresOneItemPerRecipient(t *testing.T) {
+	store := newMemStore()
+	reg := core.NewRegistry()
+	spy := &spyFanoutAdapter{channel: core.ChannelWhatsApp, account: "wa", errFor: map[string]error{"+51222": errors.New("boom")}}
+	reg.Register(spy)
+	svc := core.NewService(store, reg)
+	var sleeps []time.Duration
+	svc.SetSleeper(fixedSleeper(t, &sleeps))
+	svc.SetPauseChooser(fixedChooser(time.Millisecond))
+
+	out := core.Outgoing{Channel: core.ChannelWhatsApp, Account: "wa", To: []string{"+51111", "+51222", "+51333"}, Body: "hola a todos"}
+	if _, _, err := svc.Send(context.Background(), out, false); err != nil {
+		t.Fatalf("Send returned error: %v", err)
+	}
+	for _, to := range []string{"+51111", "+51333"} {
+		id := fmt.Sprintf("r-%s", to)
+		stored, ok := store.items[id]
+		if !ok {
+			t.Fatalf("recipient %s: no stored item under id %q; store = %+v", to, id, store.items)
+		}
+		if !stored.FromMe || len(stored.To) != 1 || stored.To[0].ID != to || stored.Thread != to {
+			t.Fatalf("recipient %s stored item = %+v", to, stored)
+		}
+	}
+	if _, ok := store.items["r-+51222"]; ok {
+		t.Fatal("the failed recipient must not have a stored sent item")
+	}
+	if len(store.items) != 2 {
+		t.Fatalf("store has %d items, want exactly 2 (one per successful recipient): %+v", len(store.items), store.items)
+	}
+}
+
 // TestServiceSendFanoutPausesBetweenRecipientsWithinPolicyBounds covers
 // T13(a)'s 3-8s (default) randomized pause between recipients, using the
 // injected chooser so the test never sleeps for real (T13f).

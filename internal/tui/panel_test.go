@@ -24,11 +24,17 @@ func TestInboxFitsSidePanel(t *testing.T) {
 	base := time.Date(2026, 9, 26, 10, 0, 0, 0, time.UTC)
 	for i := 0; i < 30; i++ {
 		items = append(items, core.Item{
-			ID:        fmt.Sprintf("mail:cl:%d", i),
-			Channel:   core.ChannelMail,
-			Account:   "cl",
-			Thread:    fmt.Sprintf("t%d", i),
-			Subject:   fmt.Sprintf("Subject %02d with a very long title that cannot fit in a side panel", i),
+			ID:      fmt.Sprintf("mail:cl:%d", i),
+			Channel: core.ChannelMail,
+			Account: "cl",
+			Thread:  fmt.Sprintf("t%d", i),
+			Subject: fmt.Sprintf("Subject %02d with a very long title that cannot fit in a side panel", i),
+			// A distinct sender per item (mail-sender-groups.md merges by
+			// From address): 30 separately collapsed sender rows, each
+			// one line, instead of one merged sender absorbing every
+			// thread — reproducing the same "too many rows for the pane"
+			// scenario at the new sender-row granularity.
+			From:      core.Address{ID: fmt.Sprintf("sender%02d@example.com", i), Name: fmt.Sprintf("Sender %02d", i)},
 			Unread:    true,
 			Timestamp: base.Add(-time.Duration(i) * time.Minute),
 		})
@@ -68,8 +74,8 @@ func TestInboxFitsSidePanel(t *testing.T) {
 	if !strings.Contains(raw, "sin pendientes") {
 		t.Error("an empty section is missing its placeholder line")
 	}
-	if !strings.Contains(raw, "Subject 20") {
-		t.Errorf("selected row (Subject 20) is not visible:\n%s", raw)
+	if !strings.Contains(raw, "Sender 20") {
+		t.Errorf("selected row (Sender 20) is not visible:\n%s", raw)
 	}
 	if !strings.Contains(raw, "más") {
 		t.Error("the truncated Mail section is missing its \"+N más\" notice")

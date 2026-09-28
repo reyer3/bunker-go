@@ -3,6 +3,7 @@ package mail
 import (
 	"context"
 	"crypto/tls"
+	"log/slog"
 	"time"
 
 	"github.com/reyer3/bunker-go/internal/config"
@@ -14,6 +15,15 @@ import (
 // defaultInitialSyncLimit bounds how many of the most recent INBOX
 // messages Adapter.Run backfills on startup.
 const defaultInitialSyncLimit = 200
+
+// mailHealthySession is how long one runOnce call (R2) must have lasted
+// for Run to treat the connection as healthy and reset its attempt
+// count, mirroring the daemon adapter supervisor's own reset threshold
+// (cmd/bunker's adapterHealthyRun): without this, attempt only ever grew,
+// so after enough reconnects over the account's lifetime every
+// subsequent reconnect waited the 5-minute cap even right after a long,
+// otherwise-healthy IDLE session.
+const mailHealthySession = 2 * time.Minute
 
 // dialFunc opens an authenticated IMAP connection for cfg. It exists so
 // tests can substitute a plaintext dial against imapmemserver for the
@@ -34,6 +44,12 @@ type Adapter struct {
 	now              func() time.Time
 	backoff          func(attempt int) time.Duration
 	initialSyncLimit uint32
+
+	// logger receives Run's lifecycle logging (R2): a runOnce failure,
+	// previously discarded, is logged at error level with channel/
+	// account attributes. It defaults to slog.Default() (stderr), same
+	// as every other channel's adapter supervision logging.
+	logger *slog.Logger
 
 	// gmailTLSConfig is nil in production (default TLS verification);
 	// tests set it to skip verifying a fake server's self-signed cert.
@@ -80,9 +96,13 @@ func NewAdapter(acc config.Account) (core.Adapter, error) {
 }
 
 // newAdapter is the fully-injectable constructor tests use to swap in a
-// fake dialer, credential sources and clocks.
+// fake dialer, credential sources and clocks. cfg.InitialSyncLimit
+// overrides the 200-message default (H4) when it is set (> 0); most
+// existing tests build an AccountConfig by hand without going through
+// ParseAccountConfig, so its zero value must keep meaning "use the
+// default", never "sync nothing".
 func newAdapter(cfg AccountConfig, passwordSource PasswordSource, tokenSource TokenSource, dial dialFunc) *Adapter {
-	return &Adapter{
+	a := &Adapter{
 		cfg:              cfg,
 		passwordSource:   passwordSource,
 		tokenSource:      tokenSource,
@@ -91,7 +111,12 @@ func newAdapter(cfg AccountConfig, passwordSource PasswordSource, tokenSource To
 		now:              time.Now,
 		backoff:          defaultBackoff,
 		initialSyncLimit: defaultInitialSyncLimit,
+		logger:           slog.Default(),
 	}
+	if cfg.InitialSyncLimit > 0 {
+		a.initialSyncLimit = uint32(cfg.InitialSyncLimit)
+	}
+	return a
 }
 
 // Channel implements core.Adapter.

@@ -169,3 +169,22 @@ func settle(t *testing.T) {
 	t.Helper()
 	time.Sleep(150 * time.Millisecond)
 }
+
+func TestHistorySyncSkipsNewsletterConversation(t *testing.T) {
+	cli := newFakeWAClient()
+	cli.linked = true
+	sink := newSpySink()
+	a := newTestAdapter("personal", cli)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go a.Run(ctx, sink)
+	waitFor(t, func() bool { return cli.IsConnected() })
+
+	emitHistorySync(cli, syntheticConversation("120363000000000001@newsletter", 3, false, "a", "b", "c"))
+
+	settle(t)
+	if got := len(sink.items()); got != 0 {
+		t.Fatalf("items imported = %d, want 0 for a newsletter conversation", got)
+	}
+}

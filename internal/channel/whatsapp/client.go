@@ -42,6 +42,14 @@ type waClient interface {
 	IsOnWhatsApp(ctx context.Context, phones []string) ([]types.IsOnWhatsAppResponse, error)
 	MarkRead(ctx context.Context, ids []types.MessageID, timestamp time.Time, chat, sender types.JID) error
 
+	// GetAltJID resolves jid's LID/PN counterpart through the device
+	// store's LID mapping (types.EmptyJID, nil when jid has no known
+	// counterpart or is neither a PN nor a LID address, e.g. a group).
+	// handleEvent uses it to try both address forms a read receipt's chat
+	// might use, since an item's Thread key is whichever form the
+	// message that created the conversation first arrived in.
+	GetAltJID(ctx context.Context, jid types.JID) (types.JID, error)
+
 	// SendPresence and SendChatPresence drive the human-emulation
 	// choreography every send and read performs (T13b/c): a linked device
 	// that stays "available" suppresses the phone's own push
@@ -50,6 +58,12 @@ type waClient interface {
 	// composing/paused around the real delivery.
 	SendPresence(ctx context.Context, state types.Presence) error
 	SendChatPresence(ctx context.Context, jid types.JID, state types.ChatPresence, media types.ChatPresenceMedia) error
+
+	// SubscribePresence asks the server to deliver jid's presence updates
+	// (events.Presence) to this client — only effective while this
+	// account is itself "available" (see SetPresenceAvailable, K3's
+	// privacy-critical availability lease).
+	SubscribePresence(ctx context.Context, jid types.JID) error
 	Download(ctx context.Context, msg whatsmeow.DownloadableMessage) ([]byte, error)
 	Upload(ctx context.Context, plaintext []byte, appInfo whatsmeow.MediaType) (whatsmeow.UploadResponse, error)
 

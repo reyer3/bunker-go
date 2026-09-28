@@ -22,13 +22,24 @@ back to reading the store directly, and `daemon` itself.
 
 Runs the daemon: opens the SQLite store, wires one adapter per configured
 `[[account]]` (or three in-memory demo adapters under `--fake`, one per
-channel), starts each adapter's receive loop, and serves the RPC socket
-until it receives `SIGINT`/`SIGTERM`. A missing config file is not an
-error — the daemon starts with no accounts, so `list`/`counts` still work
-against an empty store.
+channel), starts each adapter's receive loop under a supervisor, and
+serves the RPC socket until it receives `SIGINT`/`SIGTERM`. A missing
+config file is not an error — the daemon starts with no accounts, so
+`list`/`counts` still work against an empty store.
 
 No flags produce `--json` output; this command prints plain status lines
-to stdout as it starts and as adapters stop.
+to stdout as it starts.
+
+If an adapter's `Run` returns while the daemon is still live (a dropped
+IMAP/WhatsApp/Matrix connection, a sync error), the supervisor restarts
+it with a capped exponential backoff (1s, doubling, up to 5 minutes,
+with jitter), resetting back to the base delay once a run has stayed up
+for at least 2 minutes — the process itself never exits just because one
+channel disconnected. Every restart, and every discarded store-write
+error that used to be silently lost, is logged via `log/slog` to
+**stderr** (not stdout) with `channel`/`account` attributes, so `journald`
+carries them under a normal systemd unit. See `bunker health` below for
+querying the resulting per-adapter state instead of grepping logs.
 
 ## `bunker` (no arguments): interactive side panel
 
@@ -70,14 +81,37 @@ closes it. At terminal widths under ~30 columns the two-line row
 collapses to one line (no preview). Setting `NO_COLOR` disables all
 color, same as everywhere else in bunker.
 
+**Mail sender groups.** The Mail section groups its conversations under
+one collapsible row per sender, so a sender with many mails takes one
+line until expanded: a chevron (`▸` collapsed, `▾` expanded), the
+sender's display name (its newest thread's newest non-empty `From.Name`,
+else the address), a dim account tag when Mail has more than one
+account, the sender's newest time, and an unread badge summing every one
+of that sender's loaded unread items. The sender key is the lower-cased
+`From` address (never the display name), so two display names for the
+same address merge; a sender with exactly one thread still gets its own
+row, for consistency. Senders are ordered by their newest mail, and
+threads under a sender are ordered newest first. Collapsed by default:
+`Enter`, `→`, or a click on a sender row toggles it; `←` collapses it
+(and, with the cursor on one of its threads, jumps up to the sender row
+first, so the selection is never left pointing at a row that just
+disappeared). `Enter` on a thread row still opens it, same as before.
+Expanded threads render with the existing two-line row design, indented
+by 2 cells. The expand state is kept per sender address across polls,
+and resets when the TUI exits. WhatsApp and Matrix are unaffected: every
+row there is still one conversation.
+
 **Mouse.** The wheel moves the selection (like `j`/`k`); a click on a
 conversation selects it, and a click on the already-selected row opens
-it, matching `Enter`; a click on a section header, its rule, or a
-"+N más" notice focuses that section, matching `1`/`2`/`3`. The mouse
-never sends or marks anything by itself — it can only select, open, or
-focus, the same three things clicking is allowed to do from the
-keyboard — and it is ignored entirely outside the plain inbox (while
-reading, composing, previewing, marking, or with the help overlay open).
+it (or, for a Mail sender row, toggles it), matching `Enter`; a click on
+a section header, its rule, or a "+N más" notice focuses that section,
+matching `1`/`2`/`3`. The mouse never sends or marks anything by itself
+— it can only select, open, toggle, or focus, the same things clicking
+is allowed to do from the keyboard. Clicking is ignored entirely outside
+the plain inbox (while composing, previewing, marking, or with the help
+overlay open); the wheel is the one exception — while reading a
+detail view or composing a reply it instead scrolls that view's long
+body/draft, the same as `PgUp`/`PgDown` (below).
 
 **Desktop notifications.** When a poll finds unread conversations that
 were not part of the previous snapshot — never for the initial backlog
@@ -131,14 +165,88 @@ with scrolling, `0` returns to the overview, `Tab`/`Shift+Tab` cycle
 overview → Mail → WhatsApp → Matrix → overview, `r` starts a reply to the
 selected/open item, `m` marks it read (dry-run preview, then `Enter` to
 confirm), `g` refreshes the inbox now, `?` opens the help overlay, `q`
-quits (asks again first if a reply preview/send is in flight).
-Composing a reply: every other key is literal draft text, `Ctrl+A` adds a
-local file attachment by path (spaces allowed; never a shell), `Ctrl+X`
-drops the most recently added attachment, `Ctrl+S` requests the dry-run
-preview, and `Enter` inserts a newline rather than sending. Terminal
-control sequences in anything the daemon returns (a message body, an
-attachment name, a sender's display name) are stripped before they ever
-reach your terminal.
+quits (asks again first if a reply preview/send is in flight). A directly
+opened single-item detail view (kept for parity; every current channel
+instead opens its own chat/thread view below) scrolls a long body with
+`j`/`k`, arrows, `PgUp`/`PgDown`, `G` (jump to the end) and the mouse
+wheel, the footer keymap hint always keeps `q` visible even at a narrow
+(40-column) terminal width.
+Composing a reply: the draft is a real multi-line text editor (a shared
+[bubbles](https://github.com/charmbracelet/bubbles) textarea), so arrows,
+Home/End, word motions and paste move and edit the cursor position instead
+of only ever appending at the end; `PgUp`/`PgDown` and the mouse wheel
+page through a long draft the same way, since every letter (including
+`j`/`k`) is literal draft text here. `Ctrl+A` adds a local file attachment
+by path (spaces allowed; never a shell), `Ctrl+X` drops the most recently
+added attachment, `Ctrl+S` requests the dry-run preview, and `Enter`
+inserts a newline rather than sending — no key sends without that explicit
+preview-then-confirm step, sending never double-fires, and an error keeps
+the draft exactly as typed with no automatic retry. Terminal control
+sequences in anything the daemon returns (a message body, an attachment
+name, a sender's display name) are stripped before they ever reach your
+terminal.
+
+Opening a WhatsApp/Matrix item now opens its chat view instead of the
+plain single-item detail: a header shows the channel glyph and the
+contact/group name in bold, with live presence on the line under it. The
+conversation renders as real colored chat bubbles (a dark neutral
+background for incoming messages, WhatsApp's own dark green — or
+Matrix's brand teal — for your own), each up to ~75% of the terminal
+width, with a dim "HH:MM" at the bottom-right of every bubble; own
+messages align right and others' align left, a sender name appears once
+per run of consecutive messages from the same person (colored stably per
+sender in a group), a day separator ("hoy"/"ayer"/"dd-mmm") renders as a
+centered dim pill, and attachments show as "📎 name (size)" chips inside
+the bubble. The composer is docked at the bottom in a rounded box with
+the placeholder "Escribe un mensaje…", growing up to 3 lines as the draft
+gains lines. A message you send for real is stored immediately as your
+own (right-aligned) bubble even before the channel echoes it back (most
+channels never do, for your own linked-device sends) — a fan-out
+broadcast stores one such item per successful recipient; mail relies on
+its own Sent-folder sync instead, so this never double-stores for mail.
+Opening it
+marks the conversation read with a receipt (this replaces the plain
+detail view's "opening never marks read" default for these two
+channels — mail keeps that default). While the chat is open the daemon
+is told you are focused (a keepalive renews that lease every 20s; it
+reports unfocused on `Esc`/blur/quit, and the daemon's own 60s timeout
+covers a hard quit) and the header shows the other side's live presence
+("en línea"/"escribiendo…"/"grabando audio…"/"últ. vez HH:MM", or
+nothing for a channel without presence data). Composing: every key is
+literal draft text; `Enter` requests a dry-run preview and then shows an
+inline "¿Enviar a …? Enter/Esc" confirm — a second `Enter` sends for
+real, `Esc` cancels back to editing with the draft kept, and typing your
+own composing state is reported to the other side, throttled to at most
+once every 5s and cleared after 5s idle, on send, or on leave. `Alt+Enter`
+inserts a newline (plain `Enter` is reserved for send/confirm here, unlike
+the mail reply composer). `Up` at the top of an empty draft loads an
+older page of the conversation instead of moving the cursor. `Esc` leaves
+the chat view and returns to the inbox.
+
+Opening a mail item now opens its thread view instead of the plain
+single-item detail: the Subject renders as a bold title, every message in
+the conversation stacks, the newest expanded with full headers
+(From/To/Date). An expanded message's full body is fetched on demand
+(`Read` with no receipt, cached per message so re-expanding it never
+re-fetches) — mail sync only stores headers, so a synced item's body is
+otherwise empty until you open it — and quoted (`>`) lines within it
+render dimmed. Older messages collapse to "sender · date · snippet",
+where the snippet comes from the fetched body (or the Subject when no
+body has been fetched yet), never the sender's name again; toggled with
+`Enter`. Opening it marks the
+thread `\Seen` immediately (Organize with no dry-run — this replaces the
+plain detail view's "opening never marks read" default for mail too;
+explicit `m` still exists for the dry-run-then-confirm flow elsewhere).
+`j`/`k`/arrows move between messages. `r` (reply), `R` (reply-all,
+excluding your own address once a sent item has synced into the thread)
+and `f` (forward, starting with an empty `To` and listing the original's
+attachments informationally — re-attaching them is not implemented yet)
+all open the same full editor: editable `To`/`Cc`/`Subject` fields (`Tab`/
+`Shift+Tab` cycle focus) plus the reply body, prefilled with a quoted
+original. `Ctrl+S` requests a dry-run preview; `Enter` there sends for
+real (no double send, no auto-retry), and `Esc` at any stage returns to
+editing/the thread without ever sending. `Esc` from the thread view
+returns to the inbox.
 
 ## `bunker list [flags]`
 
@@ -468,6 +576,38 @@ Unread item counts per channel and account.
 {"counts": {"mail": {"cl": 3}, "whatsapp": {"personal": 5}, "matrix": {"work": 2}}}
 ```
 
+## `bunker health [--json]`
+
+Reports every adapter's current connection health, as the daemon's
+adapter supervisor tracks it (R1's restart-with-backoff policy):
+
+- `channel`, `account` — which adapter.
+- `state` — one of `connecting`, `connected`, `backoff` or `stopped`.
+  `connecting` covers both the very first `Run` attempt and every
+  restart's initial window; the supervisor promotes it to `connected`
+  once `Run` has kept going for a couple of seconds without returning (no
+  adapter-specific "I'm authenticated" signal is required). `backoff`
+  means `Run` returned and the supervisor is waiting before retrying.
+  `stopped` means the daemon itself is shutting down.
+- `since` — RFC3339 timestamp of when the adapter entered `state`.
+- `lastError` — the error that caused the most recent `backoff`
+  transition, if any (cleared once the adapter reconnects).
+- `restarts` — how many times this adapter's `Run` has been restarted.
+
+```json
+{"adapters": [
+  {"channel":"mail","account":"cl","state":"connected","since":"2026-01-02T03:04:05Z","restarts":0},
+  {"channel":"whatsapp","account":"personal","state":"backoff","since":"2026-01-02T03:05:00Z","lastError":"dial refused","restarts":3}
+]}
+```
+
+Non-JSON output, one line per adapter:
+
+```
+mail/cl: connected (restarts=0)
+whatsapp/personal: backoff (restarts=3) last_error="dial refused"
+```
+
 ## `bunker download <id> [-n index] -o path [--force] [--json]`
 
 Saves one attachment of a stored item to disk, so Alice (and Claude Code)
@@ -496,9 +636,15 @@ the download descriptor (`DirectPath`/`MediaKey`/`FileSHA256`/
 `FileEncSHA256`) it privately persisted when the message first arrived
 and calls whatsmeow's `Download`; an item stored before this feature
 existed has no descriptor and fails with a clear error ("no media key
-stored; re-download from the phone") instead of a panic. Matrix has no
-`AttachmentDownloader` yet (its adapter does not record attachments
-today) and returns an unsupported-capability error.
+stored; re-download from the phone") instead of a panic. Matrix looks up
+the mxc:// URL (plain rooms) or the `attachment.EncryptedFile` key/iv/hash
+(E2EE rooms, from the event's `file`) it privately persisted when the
+`m.image`/`m.video`/`m.audio`/`m.file` event first arrived, downloads the
+bytes from the homeserver's media repo and, for an encrypted room,
+decrypts them in place — a hash mismatch (tampered or corrupted ciphertext)
+is rejected rather than returned; an item stored before this feature
+existed, or whose room key never arrived, has no descriptor and fails
+with a clear error instead of a panic.
 
 ```json
 {"result": {"Path": "/home/alice/manual.pdf", "Bytes": 483921, "Name": "manual.pdf", "MIME": "application/pdf"}}
@@ -559,6 +705,184 @@ not an error.
 
 Non-JSON output is just the path on its own line.
 
+## `bunker thread <channel> <account> <thread> [--before RFC3339] [--limit N] [--json]`
+
+Prints one conversation's items, oldest→newest — the query the TUI's chat
+and mail thread views open a conversation with.
+
+- `<channel>`/`<account>`/`<thread>` identify the conversation, exactly
+  like `avatar`'s positionals.
+- `--before RFC3339` pages backward (scroll-up pagination): returns at
+  most `--limit` items strictly before that timestamp. Omitted (or the
+  zero time) means "the newest window".
+- `--limit N` caps how many items come back; omitted or `<= 0` uses the
+  daemon's own default (currently 50).
+
+Backed by `core.Filter.Thread` and a store index on `(channel, account,
+thread, timestamp)`, so this stays fast regardless of how large the store
+grows.
+
+```json
+{"items": [{"ID": "whatsapp:personal:3EB0...", "Channel": "whatsapp", "Account": "personal", "Thread": "5511999999999@s.whatsapp.net", "From": {"ID": "5511999999999@s.whatsapp.net", "Name": "Alice"}, "Body": "hola", "FromMe": false, "Unread": false, "Timestamp": "2026-09-01T12:00:00Z", "Meta": {}}]}
+```
+
+Non-JSON output is one line per item: `<id>\t<RFC3339 timestamp>\t<body>`.
+
+## `bunker read-thread <channel> <account> <thread> [--no-receipt] [--json]`
+
+Marks every unread, non-`FromMe` item of one conversation read in a single
+call — fixing the read-on-open bug where opening a conversation marked
+only its *newest* item read (`Read`/`organize` acting on a single id),
+leaving older unread incoming messages stranded in the unread panel. The
+TUI's chat view (K5) and mail thread view (K6) now use this same RPC on
+open instead.
+
+- `<channel>`/`<account>`/`<thread>` identify the conversation, exactly
+  like `thread`'s positionals.
+- `--no-receipt` still clears the local unread state (fixing the actual
+  bug) but skips notifying the channel itself: no WhatsApp/Matrix read
+  receipts, no mail `\Seen`. Default: receipts/`\Seen` are sent.
+
+Backed by `core.Service.ReadThread(ctx, channel, account, thread string,
+receipt bool) (int, error)`: it loads the whole conversation (paging past
+`thread`'s own default window when needed), selects the unread,
+non-`FromMe` items, and unless `--no-receipt`:
+
+- WhatsApp: batches a single `MarkRead` call per (chat, sender) — grouping
+  is required for a group conversation, since whatsmeow scopes one
+  `MarkRead` call to one sender within a chat.
+- Matrix: sends one read/fully_read marker on the *newest* selected event
+  (an older marker is already covered by a newer one).
+- Mail: sets `\Seen` on each selected item (`Organize` with `Seen: true`).
+
+It then marks every selected item read in the store (`MarkThreadReadUpTo`,
+up to the newest one's timestamp) and returns how many it marked. It never
+touches a `FromMe` item or any other thread, and is idempotent: calling it
+again on an already-read conversation marks nothing and returns 0.
+
+```json
+{"count": 3}
+```
+
+Non-JSON output is a single line: `3 item(s) marked read`.
+
+## `bunker backfill mail <account> --since YYYY-MM-DD [--folder INBOX] [--dry-run] [--json]`
+
+Recovers mail history a bounded initial sync never reached: it runs `UID
+SEARCH SINCE <date>` on `--folder` (default `INBOX`), then batch-FETCHes
+headers/flags (the exact same item-building path `Run`'s own sync uses)
+for whatever UIDs the store doesn't already have, and upserts them. Only
+`mail` is a supported channel today (the first positional names it
+explicitly, so a future channel's own backfill support slots in the same
+way later).
+
+- `<account>` is the configured mail account name.
+- `--since YYYY-MM-DD` (required) is the earliest date to search from.
+- `--folder` defaults to `INBOX`.
+- `--dry-run` reports the count and id range without upserting anything.
+- It never marks anything `\Seen` (BODY.PEEK, like `read`/`download`) and
+  never moves the account's regular sync cursor — a later `daemon` run
+  resumes exactly where it left off, regardless of how far back a
+  backfill reached.
+- Idempotent: an id the store already has is never re-fetched or
+  overwritten, so running the same `--since` twice adds nothing new the
+  second time.
+
+```json
+{"dryRun": false, "result": {"Count": 2, "FirstID": "mail:cl:1700000000.13262", "LastID": "mail:cl:1700000000.13333"}}
+```
+
+Non-JSON output: `added 2 item(s), range mail:cl:...13262..mail:cl:...13333`
+(`would add` instead of `added` on `--dry-run`), or `added 0 item(s);
+nothing found since <date>` when the search matched nothing.
+
+## `bunker search mail <account> [--from x] [--subject y] [--since D] [--before D] [--folder INBOX] [--limit 50] [--json]`
+
+Runs an IMAP `UID SEARCH` for the given criteria and upserts every match
+into the store (headers only, read-only — it never marks anything read),
+printing them exactly like `list` does (same line format, same
+`{"items": [...]}` JSON shape) — this is the escape hatch for not
+knowing an item's id at all, only roughly what it should contain. Only
+`mail` is a supported channel today, same as `backfill`.
+
+- `<account>` is the configured mail account name.
+- `--from` matches the `From` header; `--subject` matches `Subject`.
+- `--since`/`--before` are `YYYY-MM-DD` dates, both optional.
+- `--folder` defaults to `INBOX`; `--limit` defaults to 50.
+
+```json
+{"items": [{"ID": "mail:cl:1700000000.13300", "Channel": "mail", "Account": "cl", "Subject": "hi", "Unread": true, "Meta": {}}]}
+```
+
+Non-JSON output is one line per match: `<mark> <id>\t<subject>` (`*` for
+unread), same as `list`.
+
+## Presence, typing and the availability lease (K3)
+
+No CLI subcommand exposes these — they exist for the interactive TUI's
+chat view (a later task) — but they are part of the daemon's RPC
+contract, over `rpc.Client`:
+
+- `Presence(ctx, channel, account, thread string) (core.Presence, error)`
+  — `core.Presence{State string; LastSeen time.Time; Typers []string}`.
+  `State` is `"online"`, `"offline"`, `"typing"`, `"recording"`, or
+  `"unknown"`. A channel with no live presence (mail) always answers
+  `State: "unknown"`, never an error.
+- `PresenceKeepalive(ctx, channel, account, thread string, focused bool)
+  error` — the availability lease. **The daemon stays unavailable by
+  default.** WhatsApp only delivers a contact's presence/typing while
+  the user's own account is itself "available" (which also shows the user
+  online to contacts), so a chat view must call this every ≤20s while it is
+  open: `focused=true` grants (or renews) availability and subscribes to
+  `thread`; `focused=false` — or 60s without a renewing call, or the
+  daemon shutting down — revokes it. A channel without this gate
+  (Matrix, mail) treats every call as a no-op success.
+- `Typing(ctx, channel, account, thread string, composing bool) error` —
+  a thin, validated forward to the channel's typing indicator. `thread`
+  is required; a channel without typing (mail) returns an
+  unsupported-capability error. **The daemon never throttles the send
+  rate itself** — the caller must (at most every 5s while typing;
+  `composing=false` on idle, send, or leave).
+
+## Attachment download in the TUI's chat and mail thread views (`d` / `Ctrl+D`)
+
+Both K5's chat view (WhatsApp/Matrix) and K6's mail thread view let
+the user save an attachment straight from the conversation with `d`,
+without leaving to the CLI's `bunker download`. No CLI subcommand exposes
+this either — it is the interactive TUI's own `Client.Download`, the
+exact `rpc.Client.Download(ctx, id string, index int, destPath string,
+opts core.DownloadOptions) (core.DownloadResult, error)` signature above,
+reused as-is.
+
+- In the mail thread view, `d` acts on the currently selected stacked
+  message (the same one `r`/`R`/`f` act on): it downloads its one
+  attachment directly, or opens a small numbered picker for 2+.
+- In the chat view the composer always has focus, so every printable
+  key is draft text (a message may start with "d"). Download is on
+  `Ctrl+D` instead: it reaches for the newest loaded message that
+  carries an attachment (searching backward, so an attachment a few
+  messages back is still reachable even if the very last message has
+  none), whether or not a draft is in progress.
+- The destination defaults to `~/Descargas/<attachment name>` (falling
+  back to `~/Downloads` when `~/Descargas` does not exist), shown as an
+  editable text field before anything is downloaded. The attachment's
+  own name — content an attacker fully controls — is sanitized down to a
+  single safe filename first: no path separator, no `..`, no embedded
+  NUL survives into the suggested path, so a hostile attachment name can
+  never escape the destination directory on its own; the user can still
+  edit the field to any path they want, which is their own explicit
+  choice, same as `download -o`.
+- Confirming (`Enter`) a path that already exists on disk asks
+  "¿Sobrescribir?" first (`Enter`/`Esc`) and only an explicit `Enter`
+  there passes `Force: true` to `Download` — exactly `download`'s own
+  "refuses to clobber without `--force`" rule, just interactive.
+- The download itself never blocks the UI (it is a `tea.Cmd`, like every
+  other RPC call here): a "Descargando..." status shows while it is in
+  flight, then either "Guardado: `<path>` (`<bytes>` bytes)" or the
+  daemon's own error verbatim (the size cap, a missing WhatsApp media
+  key, mail's `BODY.PEEK` failure, Matrix's unsupported-capability
+  error) — `Esc` closes the result or backs out of an error to retry.
+
 ## `bunker render [--tmux] [--json]`
 
 Renders the tmux status segment: one glyph and unread count per channel,
@@ -573,7 +897,7 @@ in this fixed order:
 Plain output: `✉ 3  💬 5  ⌘ 2` (two spaces between segments).
 
 ```json
-{"segments": [{"channel":"mail","glyph":"✉","unread":3}, ...], "daemonUp": true}
+{"segments": [{"channel":"mail","glyph":"✉","unread":3}, ...], "daemonUp": true, "allConnected": true}
 ```
 
 `render` never blocks tmux: it gives itself a 200ms budget. It tries the
@@ -584,6 +908,16 @@ hanging:
 
 - plain: `bunker: dead`
 - json: `{"dead": true}`
+
+When the live daemon does answer within budget, `render` also asks it for
+`bunker health`'s snapshot (still inside the same 200ms budget): if any
+adapter is not `connected`, plain output appends a trailing `! ` marker
+(`✉ 3  💬 5  ⌘ 2 !`) and JSON's `allConnected` is `false`. This never adds
+extra latency risk beyond the render budget already enforced, and it
+never changes render's dead-daemon behavior: `daemonUp: false` (or the
+dead marker) means health was never even asked. If the health call itself
+doesn't answer in time, `allConnected` defaults to `true` (no marker)
+rather than guessing.
 
 Styles:
 
@@ -707,10 +1041,33 @@ command ran (missing argument, unknown flag, unknown command).
   "Attachments": [{"Name": "f.pdf", "MIME": "application/pdf", "Size": 10, "Ref": "ref1"}],
   "Labels": ["inbox", "vip"],
   "Unread": true,
+  "FromMe": false,
   "Timestamp": "2026-01-02T03:04:05Z",
-  "Meta": {"uid": "42"}
+  "Meta": {"uid": "42"},
+  "Edited": false,
+  "Deleted": false,
+  "Reactions": [{"Sender": "5511999999999@s.whatsapp.net", "Emoji": "👍"}]
 }
 ```
+
+`FromMe` is `true` when the account owner sent the message: WhatsApp's
+`IsFromMe`, a Matrix event whose sender is the account's own user, or a
+mail item whose `From` matches the account's own address (including one
+synced from the Sent folder — see `thread` above). It drives the chat
+view's right-aligned bubbles and is independent of `Unread` (mail's IMAP
+`\Seen` flag toggles on its own).
+
+`Edited`, `Deleted` and `Reactions` are S2's channel-agnostic WhatsApp
+edit/revoke/reaction model (Matrix can adopt the same shape later, not
+yet in scope). `Edited` is `true` once a channel-observed edit replaced
+`Body`. `Deleted` is `true` after a revoke; the row is kept (its place in
+`list`/`thread` pagination is preserved) but `Body` is cleared, and the
+TUI renders "mensaje eliminado" in its place. `Reactions` lists at most
+one entry per `Sender` — a newer reaction from the same sender replaces
+the previous one, and an empty `Emoji` removes it — rendered as a line of
+emoji under the message in the chat/thread view. Both fields are absent
+of any effect for a plain, never-edited/revoked/reacted-to item
+(`Edited`/`Deleted` `false`, `Reactions` empty).
 
 ## Adapter registration hook
 

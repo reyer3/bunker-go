@@ -2,6 +2,7 @@ package whatsapp
 
 import (
 	"context"
+	"strings"
 
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/types"
@@ -21,6 +22,13 @@ const defaultHistoryMessagesPerChat = 5
 // shows up in history sync like any other conversation but is never a
 // real thread bunker-go should surface.
 const statusBroadcastJID = "status@broadcast"
+
+// isFeedChat reports whether chat is a feed rather than a conversation:
+// contacts' statuses and WhatsApp channels (newsletters). Neither is
+// ever surfaced.
+func isFeedChat(chat string) bool {
+	return chat == statusBroadcastJID || strings.HasSuffix(chat, "@newsletter")
+}
 
 // handleHistorySync bounds a *events.HistorySync payload to what "unread
 // right now" actually needs: it records nothing for a conversation with
@@ -42,7 +50,7 @@ func (a *Adapter) handleHistorySync(ctx context.Context, sink core.Sink, data *w
 			continue
 		}
 		id := conv.GetID()
-		if id == statusBroadcastJID {
+		if isFeedChat(id) {
 			continue
 		}
 		unread := int(conv.GetUnreadCount())
@@ -78,7 +86,9 @@ func (a *Adapter) handleHistorySync(ctx context.Context, sink core.Sink, data *w
 
 			a.persistMediaDescriptor(ctx, sink, item, evt.Message)
 			a.cacheItem(item)
-			_ = sink.Upsert(ctx, item)
+			if err := sink.Upsert(ctx, item); err != nil {
+				core.LogSinkError(core.ChannelWhatsApp, a.account, "upsert", err)
+			}
 		}
 	}
 }

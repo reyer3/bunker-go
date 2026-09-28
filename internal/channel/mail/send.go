@@ -88,7 +88,7 @@ func (a *Adapter) Send(ctx context.Context, out core.Outgoing) (core.Receipt, er
 	isReply := out.ReplyTo != ""
 
 	if isReply {
-		account, uidValidity, uid, err := parseItemID(out.ReplyTo)
+		account, _, uidValidity, uid, err := parseItemID(out.ReplyTo)
 		if err != nil {
 			return core.Receipt{}, fmt.Errorf("mail: send: reply to %q: %w", out.ReplyTo, err)
 		}

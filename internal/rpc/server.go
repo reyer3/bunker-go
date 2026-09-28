@@ -200,6 +200,87 @@ func (s *Server) call(ctx context.Context, req Request) (any, error) {
 		}
 		return avatarResult{Result: res}, nil
 
+	case MethodThread:
+		var p threadParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		items, err := s.svc.Thread(ctx, string(p.Channel), p.Account, p.Thread, p.Before, p.Limit)
+		if err != nil {
+			return nil, err
+		}
+		return threadResult{Items: items}, nil
+
+	case MethodReadThread:
+		var p readThreadParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		count, err := s.svc.ReadThread(ctx, string(p.Channel), p.Account, p.Thread, p.Receipt)
+		if err != nil {
+			return nil, err
+		}
+		return readThreadResult{Count: count}, nil
+
+	case MethodPresence:
+		var p presenceParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		res, err := s.svc.Presence(ctx, string(p.Channel), p.Account, p.Thread)
+		if err != nil {
+			return nil, err
+		}
+		return presenceResult{Presence: res}, nil
+
+	case MethodPresenceKeepalive:
+		var p presenceKeepaliveParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		if err := s.svc.PresenceKeepalive(ctx, string(p.Channel), p.Account, p.Thread, p.Focused); err != nil {
+			return nil, err
+		}
+		return nil, nil
+
+	case MethodTyping:
+		var p typingParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		if err := s.svc.Typing(ctx, string(p.Channel), p.Account, p.Thread, p.Composing); err != nil {
+			return nil, err
+		}
+		return nil, nil
+
+	case MethodHealth:
+		adapters, err := s.svc.Health(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return healthResult{Adapters: adapters}, nil
+	case MethodBackfill:
+		var p backfillParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		result, err := s.svc.Backfill(ctx, p.Channel, p.Account, p.Folder, p.Since, p.DryRun)
+		if err != nil {
+			return nil, err
+		}
+		return backfillResult{Result: result}, nil
+
+	case MethodSearch:
+		var p searchParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		items, err := s.svc.Search(ctx, p.Channel, p.Account, p.Criteria)
+		if err != nil {
+			return nil, err
+		}
+		return listResult{Items: items}, nil
+
 	default:
 		return nil, fmt.Errorf("rpc: unknown method %q", req.Method)
 	}

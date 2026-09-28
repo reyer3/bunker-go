@@ -46,6 +46,28 @@ func TestAttachAddsValidatedPathAndShowsNameAndSize(t *testing.T) {
 	}
 }
 
+// TestAttachChipsRenderInlineOnOneLine pins the "attachments as chips"
+// decision (conversation-view.md): several attachments must render as
+// bracketed inline tags on one line, not one bulleted "- name (size)\n"
+// row per attachment as before K4.
+func TestAttachChipsRenderInlineOnOneLine(t *testing.T) {
+	pathA := writeTempFile(t, "a.txt", "abc")
+	pathB := writeTempFile(t, "b.txt", "wxyz")
+	client := &replyClient{}
+	model := readyModel(client, "mail:a:1")
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	model = attachPath(updated.(Model), pathA)
+	model = attachPath(model, pathB)
+
+	view := model.View()
+	if !strings.Contains(view, "[a.txt (3 bytes)] [b.txt (4 bytes)]") {
+		t.Fatalf("compose view = %q, want both attachments as one line of chips", view)
+	}
+	if strings.Contains(view, "- a.txt") || strings.Contains(view, "- b.txt") {
+		t.Fatalf("compose view = %q, still shows the old bulleted-list format", view)
+	}
+}
+
 func TestAttachRejectsMissingPathAndShowsVisibleError(t *testing.T) {
 	client := &replyClient{}
 	model := readyModel(client, "mail:a:1")
@@ -109,6 +131,9 @@ func TestAttachPathsFlowThroughPreviewAndSend(t *testing.T) {
 	last := client.calls[len(client.calls)-1]
 	if last.dryRun || len(last.attach) != 1 || last.attach[0] != path {
 		t.Fatalf("send call = %+v, want a real send carrying [%q]", last, path)
+	}
+	if len(model.attachments) != 0 {
+		t.Fatalf("attachments after a successful send = %+v, want none (cleared)", model.attachments)
 	}
 }
 
@@ -176,13 +201,21 @@ func TestAttachDoesNotCarryOverToNextDraft(t *testing.T) {
 	client := &replyClient{}
 	model := NewModel(client)
 	model.loaded = true
-	model.groups = []inboxGroup{{items: []core.Item{{ID: "first", Channel: core.ChannelMail}}}, {items: []core.Item{{ID: "second", Channel: core.ChannelMail}}}}
+	// Distinct senders (mail-sender-groups.md merges by From address), both
+	// pre-expanded, so each item still gets its own selectable thread row.
+	model.groups = []inboxGroup{
+		{items: []core.Item{{ID: "first", Channel: core.ChannelMail, From: core.Address{ID: "first@example.com"}}}},
+		{items: []core.Item{{ID: "second", Channel: core.ChannelMail, From: core.Address{ID: "second@example.com"}}}},
+	}
+	model = model.setSenderExpanded(senderKey(model.groups[0].items[0]), true)
+	model = model.setSenderExpanded(senderKey(model.groups[1].items[0]), true)
+	model.selected = 1 // rows: sender(first), thread(first), sender(second), thread(second)
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 	model = attachPath(updated.(Model), path)
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	model = updated.(Model)
-	model.selected = 1
+	model.selected = 3
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 	model = updated.(Model)
 	if len(model.attachments) != 0 {

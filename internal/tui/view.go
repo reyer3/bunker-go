@@ -24,9 +24,22 @@ func (m Model) View() string {
 		m.writeMark(&out)
 		return wrapView(out.String(), m.width)
 	}
-	if m.detail {
-		m.writeDetail(&out)
+	if m.mailComposing {
+		m.writeMailEditor(&out)
 		return wrapView(out.String(), m.width)
+	}
+	if m.downloadActive {
+		m.writeDownload(&out)
+		return wrapView(out.String(), m.width)
+	}
+	if m.detail && m.chatMode {
+		return wrapView(strings.Join(m.chatViewLines(), "\n"), m.width)
+	}
+	if m.detail && m.threadMode {
+		return wrapView(strings.Join(m.threadViewLines(), "\n"), m.width)
+	}
+	if m.detail {
+		return wrapView(strings.Join(m.detailViewLines(), "\n"), m.width)
 	}
 	return m.inboxView()
 }
@@ -57,52 +70,14 @@ func (m Model) helpView() string {
 	return strings.Join(lines, "\n")
 }
 
-func (m Model) writeDetail(out *strings.Builder) {
-	if m.reading {
-		out.WriteString("Loading item...\n")
-	} else if m.readErr != nil {
-		fmt.Fprintf(out, "Read error: %s\n", safeLine(m.readErr.Error()))
-	} else {
-		item := m.readItem
-		fmt.Fprintf(out, "Subject: %s\n", safeLine(item.Subject))
-		fmt.Fprintf(out, "From: %s\n", formatFromLine(item))
-		fmt.Fprintf(out, "Channel: %s/%s\n", safeLine(string(item.Channel)), safeLine(item.Account))
-		out.WriteString("\nBody:\n")
-		body := sanitizeTerminalText(item.Body)
-		if body == "" {
-			body = "(empty)"
-		} else {
-			// linkifyURLs only ever runs on text sanitizeTerminalText has
-			// already stripped: the escapes it adds are bunker's own,
-			// never anything message content could have injected.
-			body = linkifyURLs(body)
-		}
-		out.WriteString(body)
-		out.WriteString("\n\nAttachments:\n")
-		if len(item.Attachments) == 0 {
-			out.WriteString("(none)\n")
-		}
-		for _, attachment := range item.Attachments {
-			fmt.Fprintf(out, "- %s (%s, %d bytes)\n", safeLine(attachment.Name), safeLine(attachment.MIME), attachment.Size)
-		}
-	}
-	out.WriteString("\nEsc to inbox · q to quit\n")
-}
-
 func (m Model) writeCompose(out *strings.Builder) {
 	out.WriteString("Reply\n\n")
-	out.WriteString(m.draftBody)
-	out.WriteString("█\n")
+	out.WriteString(m.composer.View())
+	out.WriteString("\n")
 	if len(m.attachments) > 0 {
-		out.WriteString("\nAttachments:\n")
-		for _, path := range m.attachments {
-			name, size, err := statAttachment(path)
-			if err != nil {
-				fmt.Fprintf(out, "- %s (%s)\n", safeLine(path), safeLine(err.Error()))
-				continue
-			}
-			fmt.Fprintf(out, "- %s (%d bytes)\n", safeLine(name), size)
-		}
+		out.WriteString("\nAttachments: ")
+		out.WriteString(attachmentChips(m.attachments))
+		out.WriteString("\n")
 	}
 	if m.attaching {
 		fmt.Fprintf(out, "\nAttach path: %s█\n", safeLine(m.attachInput))
@@ -127,7 +102,7 @@ func (m Model) writePreview(out *strings.Builder) {
 		}
 	}
 	out.WriteString("\n")
-	out.WriteString(sanitizeTerminalText(m.draftBody))
+	out.WriteString(sanitizeTerminalText(m.composer.Value()))
 	out.WriteString("\n")
 	if m.sending {
 		out.WriteString("\nSending...\n")

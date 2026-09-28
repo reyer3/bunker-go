@@ -104,6 +104,23 @@ func TestInboxDegradesGracefullyForNoColorAndNarrowWidth(t *testing.T) {
 	}
 }
 
+// TestFooterKeepsQVisibleAtNarrowWidth pins bunker-tui.md's follow-up gap:
+// at a narrow width (40 columns), the inbox footer's plain ellipsis
+// truncation must never cut away the "q" quit hint the way it silently
+// did before ("q" was not even in the untruncated string).
+func TestFooterKeepsQVisibleAtNarrowWidth(t *testing.T) {
+	renderer := lipgloss.NewRenderer(io.Discard)
+	styles := newRowStyles(renderer)
+
+	got := stripANSI(footerLine(styles, 40))
+	if !strings.Contains(got, "q") {
+		t.Fatalf("footer at width 40 = %q, want it to keep \"q\" visible", got)
+	}
+	if w := runewidth.StringWidth(got); w > 40 {
+		t.Fatalf("footer at width 40 = %q, is %d cells wide, want <= 40", got, w)
+	}
+}
+
 // stripANSI removes SGR escape sequences so a colored render's plain
 // width can be measured with go-runewidth (which does not parse ANSI).
 // Only used by tests: buildRow itself must never truncate colored text.
@@ -122,4 +139,30 @@ func stripANSI(s string) string {
 		out = append(out, runes[i])
 	}
 	return string(out)
+}
+
+// TestLayoutSectionRowsRespectsShareWithMixedRowHeights covers a case
+// sender-groups.md introduces that never existed before it: a Mail
+// section can now mix 1-line (collapsed sender) and 2-line (an expanded
+// sender's thread row) units in the very same render, whereas every row
+// used to share one uniform height per render. layoutSectionRows must
+// still never render more physical lines than its share, even when the
+// units it is given are not all the same height.
+func TestLayoutSectionRowsRespectsShareWithMixedRowHeights(t *testing.T) {
+	styles := newRowStyles(lipgloss.NewRenderer(io.Discard))
+	units := []rowUnit{
+		{lines: []string{"sender0"}},                      // collapsed sender: 1 line
+		{lines: []string{"sender1"}},                      // collapsed sender: 1 line
+		{lines: []string{"thread line1", "thread line2"}}, // an expanded sender's thread: 2 lines
+		{lines: []string{"sender2"}},                      // collapsed sender: 1 line
+	}
+	const share = 4
+	shown := layoutSectionRows(units, share, 0, 1, styles, 40)
+	total := 0
+	for _, u := range shown {
+		total += len(u.lines)
+	}
+	if total > share {
+		t.Fatalf("layoutSectionRows rendered %d physical lines into a %d-line share with mixed row heights: %+v", total, share, shown)
+	}
 }

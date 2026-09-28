@@ -19,6 +19,169 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.blurred = false
 	case tea.BlurMsg:
 		m.blurred = true
+		if m.chatMode {
+			return m, leaveChatCmd(m.client, m.chatChannel, m.chatAccount, m.chatThread)
+		}
+	case chatThreadLoadedMsg:
+		if msg.token != m.chatToken || !m.chatMode {
+			return m, nil
+		}
+		m.chatLoading = false
+		m.chatLoadErr = msg.itemsErr
+		if msg.older {
+			if msg.itemsErr == nil {
+				m.chatItems = append(append([]core.Item(nil), msg.items...), m.chatItems...)
+			}
+			return m, nil
+		}
+		if msg.itemsErr == nil {
+			m.chatItems = msg.items
+		}
+		m.chatPresence = msg.presence
+		m.chatPresenceErr = msg.presenceErr
+		return m, tea.Batch(nextChatKeepalive(m.chatToken), nextChatTypingIdleTick(m.chatToken))
+	case chatKeepaliveTickMsg:
+		if msg.token != m.chatToken || !m.chatMode {
+			return m, nil
+		}
+		return m, tea.Batch(sendChatKeepalive(m.client, m.chatChannel, m.chatAccount, m.chatThread, !m.blurred), nextChatKeepalive(m.chatToken))
+	case chatTypingIdleTickMsg:
+		if msg.token != m.chatToken || !m.chatMode {
+			return m, nil
+		}
+		if m.chatTypingOn && m.clock().Sub(m.chatTypingAt) >= typingIdleTimeout {
+			m.chatTypingOn = false
+			return m, tea.Batch(sendChatTyping(m.client, m.chatChannel, m.chatAccount, m.chatThread, false), nextChatTypingIdleTick(m.chatToken))
+		}
+		return m, nextChatTypingIdleTick(m.chatToken)
+	case downloadResultMsg:
+		if msg.token != m.downloadToken || !m.downloadSending {
+			return m, nil
+		}
+		m.downloadSending = false
+		if msg.err != nil {
+			m.downloadErr = msg.err
+			return m, nil
+		}
+		m.downloadErr = nil
+		m.downloadResult = msg.result
+		return m, nil
+	case chatReplyPreviewMsg:
+		if msg.token != m.chatReplyToken || m.chatConfirm {
+			return m, nil
+		}
+		m.chatPreviewPending = false
+		if msg.err != nil {
+			m.chatSendErr = msg.err
+			return m, nil
+		}
+		m.chatConfirm = true
+		m.chatPlan = msg.plan
+		m.chatSendErr = nil
+		return m, nil
+	case threadLoadedMsg:
+		if msg.token != m.threadToken || !m.threadMode {
+			return m, nil
+		}
+		m.threadLoading = false
+		m.threadLoadErr = msg.itemsErr
+		m.threadSeenErr = msg.seenErr
+		if msg.itemsErr == nil {
+			m.threadItems = msg.items
+			m.threadSelected = max(0, len(m.threadItems)-1)
+			m.threadExpanded = map[int]bool{m.threadSelected: true}
+			m = m.resetThreadScrollToSelected()
+			if len(m.threadItems) > 0 {
+				return m.fetchThreadBodyIfNeeded(m.threadItems[m.threadSelected].ID)
+			}
+		}
+		return m, nil
+	case threadBodyLoadedMsg:
+		if msg.token != m.threadToken || !m.threadMode {
+			return m, nil
+		}
+		if m.threadBodyLoading != nil {
+			delete(m.threadBodyLoading, msg.id)
+		}
+		if msg.err != nil {
+			m.threadBodyErr = msg.err
+			return m, nil
+		}
+		if m.threadBodies == nil {
+			m.threadBodies = map[string]string{}
+		}
+		m.threadBodies[msg.id] = msg.body
+		m.threadBodyErr = nil
+		return m, nil
+	case mailPreviewMsg:
+		if msg.token != m.mailToken || !m.mailComposing || m.mailPreviewing {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.mailSendErr = msg.err
+			return m, nil
+		}
+		m.mailPreviewing = true
+		m.mailPlan = msg.plan
+		m.mailSendErr = nil
+		return m, nil
+	case mailSentMsg:
+		if msg.token != m.mailToken || !m.mailSending {
+			return m, nil
+		}
+		m.mailSending = false
+		if msg.err != nil {
+			m.mailSendErr = msg.err
+			m.mailPreviewing = false
+			return m, nil
+		}
+		m.mailComposing = false
+		m.mailPreviewing = false
+		m.mailPlan = core.Plan{}
+		m.mailSendErr = nil
+		return m, nil
+	case chatReplySentMsg:
+		if msg.token != m.chatReplyToken || !m.chatSending {
+			return m, nil
+		}
+		m.chatSending = false
+		if msg.err != nil {
+			m.chatSendErr = msg.err
+			m.chatConfirm = false
+			if m.chatOptimistic != nil {
+				// K10: keep the bubble visible, marked "no enviado", and
+				// restore the draft the optimistic send already cleared
+				// from the composer — never auto-retry.
+				m.chatOptimistic.failed = true
+				m.composer.SetValue(m.chatOptimistic.body)
+				m = m.resizeChatComposer()
+			}
+			return m, nil
+		}
+		m.chatConfirm = false
+		m.chatPlan = core.Plan{}
+		m.chatSendErr = nil
+		if m.chatOptimistic != nil {
+			m.chatOptimistic.id = msg.receipt.ID
+		}
+		return m, reloadChatAfterSend(m.client, m.chatChannel, m.chatAccount, m.chatThread, msg.receipt.ID, m.chatReplyToken)
+	case chatSendReloadMsg:
+		if msg.token != m.chatReplyToken {
+			return m, nil
+		}
+		if msg.err == nil {
+			m.chatItems = msg.items
+			m.chatScroll = 0
+		}
+		// K10 dedupe: the optimistic bubble is dropped only once the
+		// reloaded thread actually contains the stored FromMe item
+		// (matched by the send's own receipt ID) — never on the mere
+		// arrival of the reload, so a stale/short reload never hides the
+		// only visible copy of the message just sent.
+		if m.chatOptimistic != nil && chatItemsContainID(m.chatItems, m.chatOptimistic.id) {
+			m.chatOptimistic = nil
+		}
+		return m, nil
 	case replyPreviewMsg:
 		if msg.token != m.replyToken || !m.composing {
 			return m, nil
@@ -46,7 +209,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.composing = false
 		m.previewing = false
 		m.draftID = ""
-		m.draftBody = ""
+		m.composer.Reset()
 		m.attachments = nil
 		m.previewPlan = core.Plan{}
 		m.replyErr = nil
@@ -111,7 +274,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		oldGroups := m.groups
 		m.groups = groupUnread(msg.items)
 		m.counts = msg.counts
-		if visible := len(m.visibleGroups()); m.selected >= visible {
+		if visible := len(m.visibleRows()); m.selected >= visible {
 			m.selected = max(0, visible-1)
 		}
 		var notifyCmd tea.Cmd
@@ -142,6 +305,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.marking {
 			return m.updateMark(msg)
 		}
+		if m.downloadActive {
+			return m.updateDownload(msg)
+		}
+		if m.chatMode {
+			return m.updateChat(msg)
+		}
+		if m.mailComposing {
+			return m.updateMailEditor(msg)
+		}
+		if m.threadMode {
+			return m.updateThread(msg)
+		}
 		switch msg.String() {
 		case "q":
 			return m, tea.Quit
@@ -154,6 +329,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.readErr = nil
 				m.readItem = core.Item{}
 				m.readToken++
+				m.detailScroll = 0
 			}
 		case "g":
 			if m.client == nil {
@@ -193,18 +369,55 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.openItem(m.selected)
 			}
 		case "j", "down":
-			if !m.detail && m.selected < len(m.visibleGroups())-1 {
-				m.selected++
+			if !m.detail {
+				if m.selected < len(m.visibleRows())-1 {
+					m.selected++
+				}
+				break
 			}
+			m.detailScroll = clampScroll(m.detailScroll+1, len(m.detailBodyLines(m.readItem)), m.detailScrollBudget())
 		case "k", "up":
-			if !m.detail && m.selected > 0 {
-				m.selected--
+			if !m.detail {
+				if m.selected > 0 {
+					m.selected--
+				}
+				break
+			}
+			m.detailScroll = clampScroll(m.detailScroll-1, len(m.detailBodyLines(m.readItem)), m.detailScrollBudget())
+		case "pgdown":
+			if m.detail {
+				budget := m.detailScrollBudget()
+				m.detailScroll = clampScroll(m.detailScroll+budget, len(m.detailBodyLines(m.readItem)), budget)
+			}
+		case "pgup":
+			if m.detail {
+				budget := m.detailScrollBudget()
+				m.detailScroll = clampScroll(m.detailScroll-budget, len(m.detailBodyLines(m.readItem)), budget)
+			}
+		case "G":
+			// Lowercase "g" already means "refresh the inbox" everywhere,
+			// including while a detail view is open (the case above), so it
+			// keeps that meaning here instead of being repurposed as
+			// "scroll to top" — only the otherwise-unbound "G" scrolls to
+			// the bottom, vim-style.
+			if m.detail {
+				budget := m.detailScrollBudget()
+				total := len(m.detailBodyLines(m.readItem))
+				m.detailScroll = clampScroll(total, total, budget)
+			}
+		case "right":
+			if !m.detail {
+				m = m.expandRight()
+			}
+		case "left":
+			if !m.detail {
+				m = m.collapseLeft()
 			}
 		case "r":
 			if id, ok := m.selectedItemID(); ok && m.client != nil {
 				m.composing = true
 				m.draftID = id
-				m.draftBody = ""
+				m.composer = newComposer(m.width, m.renderer())
 				m.attachments = nil
 				m.attaching = false
 				m.attachInput = ""
@@ -230,8 +443,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // selectedItemID returns the item id "r" (reply) and "m" (mark read) act
 // on: the item open in detail view, or the newest item of the selected
-// inbox group. It never returns an id while a read is still loading or
-// failed, matching the same item Enter/Esc show.
+// thread row. It never returns an id while a read is still loading or
+// failed, matching the same item Enter/Esc show, and never resolves one
+// from a Mail sender header row — only an actual thread carries an item
+// to reply to or mark read.
 func (m Model) selectedItemID() (string, bool) {
 	if m.detail {
 		if m.reading || m.readErr != nil || m.readItem.ID == "" {
@@ -239,11 +454,15 @@ func (m Model) selectedItemID() (string, bool) {
 		}
 		return m.readItem.ID, true
 	}
-	visible := m.visibleGroups()
-	if m.selected >= 0 && m.selected < len(visible) && len(visible[m.selected].items) > 0 {
-		return visible[m.selected].items[0].ID, true
+	visible := m.visibleRows()
+	if m.selected < 0 || m.selected >= len(visible) {
+		return "", false
 	}
-	return "", false
+	row := visible[m.selected]
+	if row.kind != navThread || len(row.thread.items) == 0 {
+		return "", false
+	}
+	return row.thread.items[0].ID, true
 }
 
 // updateCompose handles keys while drafting a reply. Every key is literal
@@ -254,7 +473,7 @@ func (m Model) updateCompose(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.composing = false
 		m.draftID = ""
-		m.draftBody = ""
+		m.composer.Reset()
 		m.attachments = nil
 		m.attaching = false
 		m.attachInput = ""
@@ -278,22 +497,33 @@ func (m Model) updateCompose(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.replyErr = nil
 		m.replyToken++
 		attachments := append([]string(nil), m.attachments...)
-		return m, previewReply(m.client, m.draftID, m.draftBody, attachments, m.replyToken)
-	case "enter":
-		m.draftBody += "\n"
-	case "backspace":
-		if m.draftBody != "" {
-			_, size := utf8.DecodeLastRuneInString(m.draftBody)
-			m.draftBody = m.draftBody[:len(m.draftBody)-size]
+		return m, previewReply(m.client, m.draftID, m.composer.Value(), attachments, m.replyToken)
+	case "pgdown", "pgup":
+		// Text-input keys win in compose (j/k and the plain arrows already
+		// reach the composer below as cursor movement, which auto-scrolls
+		// it): PgUp/PgDown are the only scroll keys that need explicit
+		// handling here, since bubbles/textarea binds neither by default.
+		// There is no public API to move its internal viewport without
+		// moving the cursor, so a "page" is composerHeight CursorUp/
+		// CursorDown steps — the same movement the up/down arrows already
+		// do, just composerHeight of them at once.
+		for i := 0; i < composerHeight; i++ {
+			if msg.String() == "pgdown" {
+				m.composer.CursorDown()
+			} else {
+				m.composer.CursorUp()
+			}
 		}
-	default:
-		if msg.Type == tea.KeyRunes {
-			m.draftBody += string(msg.Runes)
-		} else if msg.Type == tea.KeySpace {
-			m.draftBody += " "
-		}
+		return m, nil
 	}
-	return m, nil
+	// Every other key (including "enter" for a newline, arrows/Home/End
+	// for cursor movement, backspace/delete, and paste) is handled by the
+	// shared bubbles/textarea composer itself (see composer.go), which is
+	// what lets "q"/"r" stay literal draft text while still supporting
+	// real cursor positioning instead of only ever appending at the end.
+	var cmd tea.Cmd
+	m.composer, cmd = m.composer.Update(msg)
+	return m, cmd
 }
 
 // updateAttach handles keys while typing a local attachment path. Every key
@@ -362,7 +592,7 @@ func (m Model) updatePreview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.quitConfirm = false
 		m.sending = true
 		attachments := append([]string(nil), m.attachments...)
-		return m, sendReply(m.client, m.draftID, m.draftBody, attachments, m.replyToken)
+		return m, sendReply(m.client, m.draftID, m.composer.Value(), attachments, m.replyToken)
 	default:
 		m.quitConfirm = false
 	}
@@ -392,6 +622,365 @@ func (m Model) updateMark(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.markConfirm = false
 		m.markSending = true
 		return m, sendMarkRead(m.client, m.markID, m.markToken)
+	}
+	return m, nil
+}
+
+// updateChat handles keys while the K5 chat view is open. The composer is
+// always active there (there is no separate "not composing" sub-state
+// like the mail flow's "r" key): every key is literal draft text except
+// Esc (leave), plain Enter (preview→inline confirm, never a newline —
+// unlike the mail composer), Alt+Enter (insert a newline instead), and Up
+// at the top of the draft (scroll-up pagination, K5's "Scrolling up
+// paginates through thread(before=oldest)").
+func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.chatSending || m.chatPreviewPending {
+		return m, nil
+	}
+	if m.chatConfirm {
+		switch msg.String() {
+		case "esc":
+			m.chatConfirm = false
+			return m, nil
+		case "enter":
+			draft := m.composer.Value()
+			// K10: clear the confirm state as the send starts (it was
+			// previously left true for the whole in-flight send, which
+			// left chatTailLines' "Enviando..." case dead code, since its
+			// switch checks chatConfirm first) so the tail line actually
+			// shows the send-in-progress state.
+			m.chatConfirm = false
+			m.chatSending = true
+			m.chatReplyToken++
+			// Show the optimistic own bubble and clear the composer right
+			// away, before the real send even returns — the draft is
+			// restored only if chatReplySentMsg comes back with an error
+			// (see its handler above).
+			m.chatOptimistic = &chatOptimisticMsg{body: draft, at: m.clock()}
+			m.composer.Reset()
+			m = m.resizeChatComposer()
+			return m, sendChatReply(m.client, m.chatDraftID, draft, m.chatReplyToken)
+		}
+		return m, nil
+	}
+	switch msg.String() {
+	case "esc":
+		return m.leaveChat()
+	case "alt+enter":
+		m.composer.InsertRune('\n')
+		return m.resizeChatComposer(), nil
+	case "enter":
+		body := strings.TrimSpace(m.composer.Value())
+		if body == "" {
+			return m, nil
+		}
+		m.chatSendErr = nil
+		m.chatReplyToken++
+		m.chatPreviewPending = true
+		return m, previewChatReply(m.client, m.chatDraftID, m.composer.Value(), m.chatReplyToken)
+	case "up":
+		if m.composer.Line() == 0 && !m.chatLoading && len(m.chatItems) > 0 {
+			return m.loadOlderChat()
+		}
+	case "pgup":
+		return m.scrollChatUp(m.chatScrollBudget())
+	case "pgdown":
+		m.chatScroll = clampScroll(m.chatScroll-m.chatScrollBudget(), len(m.chatBodyLines()), m.chatScrollBudget())
+		return m, nil
+	case "ctrl+d":
+		// The composer always has focus in the chat view, so a plain "d"
+		// is text ("de acuerdo"); download the newest attachment on
+		// Ctrl+D instead.
+		if item, ok := m.chatDownloadCandidate(); ok {
+			return m.openDownload(item.ID, item.Attachments)
+		}
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.composer, cmd = m.composer.Update(msg)
+	m = m.resizeChatComposer()
+	// The typing notification takes priority over any (rare, currently
+	// always nil in this static-cursor configuration) command the
+	// textarea itself returns: see typeRunes's doc comment for why only
+	// one command per keystroke is forwarded in tests.
+	m, typingCmd := m.noteChatTyping()
+	if typingCmd != nil {
+		return m, typingCmd
+	}
+	return m, cmd
+}
+
+// resizeChatComposer grows the K7 docked composer up to
+// chatComposerMaxHeight lines as the draft gains lines, and shrinks it
+// back down (e.g. after Reset() clears a sent draft) — never below 1.
+// bubbles/textarea does not do this on its own: Height is a fixed
+// viewport that only ever scrolls internally past it (see
+// newChatComposer's doc comment).
+func (m Model) resizeChatComposer() Model {
+	n := m.composer.LineCount()
+	if n < 1 {
+		n = 1
+	}
+	if n > chatComposerMaxHeight {
+		n = chatComposerMaxHeight
+	}
+	m.composer.SetHeight(n)
+	return m
+}
+
+// noteChatTyping applies the ≤once-per-5s typing throttle: it only
+// returns a non-nil command (and only then updates chatTypingAt) when
+// enough time passed since the last composing=true it sent.
+func (m Model) noteChatTyping() (Model, tea.Cmd) {
+	now := m.clock()
+	if m.chatTypingOn && now.Sub(m.chatTypingAt) < typingThrottle {
+		return m, nil
+	}
+	m.chatTypingOn = true
+	m.chatTypingAt = now
+	return m, sendChatTyping(m.client, m.chatChannel, m.chatAccount, m.chatThread, true)
+}
+
+// loadOlderChat requests one older page, keyed off the oldest currently
+// loaded item's timestamp.
+func (m Model) loadOlderChat() (tea.Model, tea.Cmd) {
+	if len(m.chatItems) == 0 {
+		return m, nil
+	}
+	m.chatLoading = true
+	before := m.chatItems[0].Timestamp
+	return m, loadOlderChatThread(m.client, m.chatChannel, m.chatAccount, m.chatThread, before, m.chatToken)
+}
+
+// chatWheelScroll is how many lines a single mouse wheel tick scrolls the
+// chat body (PgUp/PgDown instead scroll by a full viewport page — see
+// scrollChatUp/chatScrollBudget). The mail thread and plain detail views
+// reuse it too (mouse.go): all three windows share the same line-index
+// clampScroll contract, so one shared "how many lines per tick" constant
+// keeps their feel consistent.
+const chatWheelScroll = 3
+
+// composeWheelScroll is how many bubbles/textarea CursorUp/CursorDown
+// steps a single mouse wheel tick moves in the K4 reply composer — the
+// same unit PgUp/PgDown use there (composerHeight steps instead of 3),
+// since the composer has no line-index scroll offset of its own to share
+// chatWheelScroll's contract with (see updateCompose/updateComposeMouse).
+const composeWheelScroll = 3
+
+// scrollChatUp scrolls the chat body up by amount lines (clamped to the
+// oldest currently loaded line). If it is already scrolled as far up as
+// the loaded content allows, it requests an older page instead — the
+// same "reaching the top loads more" contract the plain "Up" key already
+// had, now shared with PgUp and the mouse wheel.
+func (m Model) scrollChatUp(amount int) (tea.Model, tea.Cmd) {
+	budget := m.chatScrollBudget()
+	total := len(m.chatBodyLines())
+	maxScroll := total - budget
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if m.chatScroll >= maxScroll && !m.chatLoading && len(m.chatItems) > 0 {
+		return m.loadOlderChat()
+	}
+	m.chatScroll = clampScroll(m.chatScroll+amount, total, budget)
+	return m, nil
+}
+
+// updateThread handles keys in the K6 mail thread view: j/k/up/down move
+// the selection, Enter toggles the selected message's collapsed/expanded
+// state, r/R/f open the full editor on the selected message, and Esc
+// leaves the thread view.
+func (m Model) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.detail = false
+		m.threadMode = false
+		return m, nil
+	case "enter":
+		if len(m.threadItems) == 0 {
+			return m, nil
+		}
+		if m.threadExpanded == nil {
+			m.threadExpanded = map[int]bool{}
+		}
+		nowExpanded := !m.threadExpanded[m.threadSelected]
+		m.threadExpanded[m.threadSelected] = nowExpanded
+		m = m.resetThreadScrollToSelected()
+		if nowExpanded {
+			return m.fetchThreadBodyIfNeeded(m.threadItems[m.threadSelected].ID)
+		}
+		return m, nil
+	case "j", "down":
+		if m.threadSelected < len(m.threadItems)-1 {
+			m.threadSelected++
+			m = m.resetThreadScrollToSelected()
+		}
+	case "k", "up":
+		if m.threadSelected > 0 {
+			m.threadSelected--
+			m = m.resetThreadScrollToSelected()
+		}
+	case "pgup":
+		budget := m.threadScrollBudget()
+		m.threadScroll = clampScroll(m.threadScroll-budget, m.threadBodyLen(), budget)
+	case "pgdown":
+		budget := m.threadScrollBudget()
+		m.threadScroll = clampScroll(m.threadScroll+budget, m.threadBodyLen(), budget)
+	case "r":
+		return m.openMailEditor("reply")
+	case "R":
+		return m.openMailEditor("replyAll")
+	case "f":
+		return m.openMailEditor("forward")
+	case "d":
+		if m.threadSelected >= 0 && m.threadSelected < len(m.threadItems) {
+			item := m.threadItems[m.threadSelected]
+			if len(item.Attachments) > 0 {
+				return m.openDownload(item.ID, item.Attachments)
+			}
+		}
+	}
+	return m, nil
+}
+
+// openMailEditor opens K6's full To/Cc/Subject editor on the currently
+// selected thread message, prefilled per action: "reply" (the sender),
+// "replyAll" (every participant excluding our own address, see
+// mailSelfAddress) or "forward" (empty To, the original's attachments
+// listed informationally — re-attaching them needs a download first,
+// which is not implemented here; see the K6 commit's disclosure).
+func (m Model) openMailEditor(action string) (tea.Model, tea.Cmd) {
+	if m.threadSelected < 0 || m.threadSelected >= len(m.threadItems) {
+		return m, nil
+	}
+	item := m.threadItems[m.threadSelected]
+	m.mailComposing = true
+	m.mailAction = action
+	m.mailTargetID = item.ID
+	m.mailChannel = item.Channel
+	m.mailAccount = item.Account
+	m.mailThread = item.Thread
+	m.mailTo = newLineEditor()
+	m.mailCc = newLineEditor()
+	m.mailSubject = newLineEditor()
+	m.mailAttachInfo = nil
+	m.mailPreviewing = false
+	m.mailSending = false
+	m.mailSendErr = nil
+	m.mailPlan = core.Plan{}
+	m.composer = newComposer(m.width, m.renderer())
+	m.mailFocus = 3
+
+	switch action {
+	case "reply":
+		m.mailTo.SetValue(item.From.ID)
+		m.mailSubject.SetValue(subjectWithPrefix(item.Subject, "Re: "))
+	case "replyAll":
+		self := mailSelfAddress(m.threadItems)
+		m.mailTo.SetValue(strings.Join(replyAllRecipients(item, self), ", "))
+		m.mailSubject.SetValue(subjectWithPrefix(item.Subject, "Re: "))
+	case "forward":
+		m.mailSubject.SetValue(subjectWithPrefix(item.Subject, "Fwd: "))
+		m.mailAttachInfo = item.Attachments
+		m.mailFocus = 0
+	}
+	m.composer.SetValue("\n\n" + quoteOriginal(item))
+	m.composer.CursorStart()
+	m = m.withMailFocusApplied()
+	return m, nil
+}
+
+// withMailFocusApplied blurs every editor field and focuses only the one
+// mailFocus names (0=To, 1=Cc, 2=Subject, else the composer/body).
+func (m Model) withMailFocusApplied() Model {
+	m.mailTo.Blur()
+	m.mailCc.Blur()
+	m.mailSubject.Blur()
+	m.composer.Blur()
+	switch m.mailFocus {
+	case 0:
+		m.mailTo.Focus()
+	case 1:
+		m.mailCc.Focus()
+	case 2:
+		m.mailSubject.Focus()
+	default:
+		m.composer.Focus()
+	}
+	return m
+}
+
+// buildMailOutgoing assembles the editor's fields into the core.Outgoing
+// Send needs.
+func (m Model) buildMailOutgoing() core.Outgoing {
+	return core.Outgoing{
+		Channel: m.mailChannel,
+		Account: m.mailAccount,
+		To:      splitRecipients(m.mailTo.Value()),
+		Cc:      splitRecipients(m.mailCc.Value()),
+		Thread:  m.mailThread,
+		ReplyTo: m.mailTargetID,
+		Subject: m.mailSubject.Value(),
+		Body:    m.composer.Value(),
+	}
+}
+
+// updateMailEditor handles keys in K6's full editor: Tab/Shift+Tab cycle
+// To/Cc/Subject/body focus, Ctrl+S requests a dry-run preview, Esc
+// discards the draft and closes the editor, and every other key goes to
+// whichever field is focused.
+func (m Model) updateMailEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.mailPreviewing {
+		return m.updateMailPreview(msg)
+	}
+	switch msg.String() {
+	case "esc":
+		m.mailComposing = false
+		return m, nil
+	case "tab":
+		m.mailFocus = (m.mailFocus + 1) % 4
+		m = m.withMailFocusApplied()
+		return m, nil
+	case "shift+tab":
+		m.mailFocus = (m.mailFocus - 1 + 4) % 4
+		m = m.withMailFocusApplied()
+		return m, nil
+	case "ctrl+s":
+		out := m.buildMailOutgoing()
+		m.mailSendErr = nil
+		m.mailToken++
+		return m, previewMailSend(m.client, out, m.mailToken)
+	}
+	var cmd tea.Cmd
+	switch m.mailFocus {
+	case 0:
+		m.mailTo, cmd = m.mailTo.Update(msg)
+	case 1:
+		m.mailCc, cmd = m.mailCc.Update(msg)
+	case 2:
+		m.mailSubject, cmd = m.mailSubject.Update(msg)
+	default:
+		m.composer, cmd = m.composer.Update(msg)
+	}
+	return m, cmd
+}
+
+// updateMailPreview handles keys once the editor's dry-run preview is
+// showing: Enter is the only way to send for real, guarded against a
+// second send while one is in flight; Esc returns to editing without
+// ever sending.
+func (m Model) updateMailPreview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.mailSending {
+		return m, nil
+	}
+	switch msg.String() {
+	case "esc":
+		m.mailPreviewing = false
+		return m, nil
+	case "enter":
+		m.mailSending = true
+		out := m.buildMailOutgoing()
+		return m, sendMailSend(m.client, out, m.mailToken)
 	}
 	return m, nil
 }

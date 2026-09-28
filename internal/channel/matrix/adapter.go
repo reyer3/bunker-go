@@ -41,6 +41,11 @@ type Adapter struct {
 	heroes         map[id.RoomID][]id.UserID          // DM heroes, from sync summary
 	memberNames    map[id.RoomID]map[id.UserID]string // m.room.member displayname, per room
 	unread         map[id.RoomID]int
+	// typers is the current m.typing user_ids list per room (K3),
+	// excluding this account's own user id. m.typing always carries the
+	// full current set, never an add/remove delta, so each event simply
+	// replaces the room's entry.
+	typers map[id.RoomID][]string
 
 	// sleep drives the typing-notification wait Send performs before
 	// delivering (T13d). It defaults to the real time.Sleep; tests
@@ -54,16 +59,26 @@ type Adapter struct {
 	// fails, defaultMaxUploadBytes.
 	mediaConfigOnce     sync.Once
 	mediaMaxUploadBytes int64
+
+	// sink is set once, at the top of Run, so DownloadAttachment (called
+	// independently, e.g. over RPC while Run is still active in the
+	// daemon) can read the same core.Sink messageHandler/encryptedHandler
+	// already persist media descriptors through (M1). It is nil until Run
+	// has been called at least once.
+	sink core.Sink
 }
 
 var (
-	_ core.Adapter     = (*Adapter)(nil)
-	_ core.Fetcher     = (*Adapter)(nil)
-	_ core.Sender      = (*Adapter)(nil)
-	_ core.MediaSender = (*Adapter)(nil)
-	_ core.Organizer   = (*Adapter)(nil)
-	_ core.Retrier     = (*Adapter)(nil)
-	_ core.ReadMarker  = (*Adapter)(nil)
+	_ core.Adapter              = (*Adapter)(nil)
+	_ core.Fetcher              = (*Adapter)(nil)
+	_ core.Sender               = (*Adapter)(nil)
+	_ core.MediaSender          = (*Adapter)(nil)
+	_ core.AttachmentDownloader = (*Adapter)(nil)
+	_ core.Organizer            = (*Adapter)(nil)
+	_ core.Retrier              = (*Adapter)(nil)
+	_ core.ReadMarker           = (*Adapter)(nil)
+	_ core.PresenceProvider     = (*Adapter)(nil)
+	_ core.TypingSender         = (*Adapter)(nil)
 )
 
 // SetSleeper overrides how Send waits during its typing-notification
@@ -105,6 +120,7 @@ func newAdapter(account string, client *mautrix.Client, cryptoHelper mautrix.Cry
 		heroes:         make(map[id.RoomID][]id.UserID),
 		memberNames:    make(map[id.RoomID]map[id.UserID]string),
 		unread:         make(map[id.RoomID]int),
+		typers:         make(map[id.RoomID][]string),
 		sleep:          time.Sleep,
 	}
 }
@@ -221,6 +237,10 @@ func (a *Adapter) Account() string { return a.account }
 // scratch, maps m.room.message and (decrypted or undecryptable)
 // m.room.encrypted events into Items, and upserts them through sink.
 func (a *Adapter) Run(ctx context.Context, sink core.Sink) error {
+	a.mu.Lock()
+	a.sink = sink
+	a.mu.Unlock()
+
 	if err := a.initCrypto(ctx); err != nil {
 		return err
 	}
@@ -239,6 +259,9 @@ func (a *Adapter) Run(ctx context.Context, sink core.Sink) error {
 	syncer.OnEventType(event.StateEncryption, a.handleEncryptionState)
 	syncer.OnEventType(event.EventMessage, a.messageHandler(sink))
 	syncer.OnEventType(event.EventEncrypted, a.encryptedHandler(sink))
+	syncer.OnEventType(event.EphemeralEventTyping, a.handleTyping)
+	syncer.OnEventType(event.EphemeralEventReceipt, a.receiptHandler(sink))
+	syncer.OnEventType(event.AccountDataFullyRead, a.fullyReadHandler(sink))
 
 	if err := a.client.SyncWithContext(ctx); err != nil {
 		if ctx.Err() != nil {
@@ -342,6 +365,7 @@ func (a *Adapter) messageHandler(sink core.Sink) mautrix.EventHandler {
 	return func(ctx context.Context, evt *event.Event) {
 		item := a.toItem(evt)
 		a.remember(item)
+		a.persistMediaDescriptor(ctx, sink, item, evt.Content.AsMessage())
 		if err := sink.Upsert(ctx, item); err != nil {
 			log.Printf("matrix: upsert %s: %v", item.ID, err)
 		}
@@ -355,12 +379,15 @@ func (a *Adapter) messageHandler(sink core.Sink) mautrix.EventHandler {
 func (a *Adapter) encryptedHandler(sink core.Sink) mautrix.EventHandler {
 	return func(ctx context.Context, evt *event.Event) {
 		item := a.toItem(evt)
+		var decryptedContent *event.MessageEventContent
 		if a.crypto != nil {
 			if decrypted, err := a.crypto.Decrypt(ctx, evt); err == nil {
 				item = a.toItem(decrypted)
+				decryptedContent = decrypted.Content.AsMessage()
 			}
 		}
 		a.remember(item)
+		a.persistMediaDescriptor(ctx, sink, item, decryptedContent)
 		if err := sink.Upsert(ctx, item); err != nil {
 			log.Printf("matrix: upsert %s: %v", item.ID, err)
 		}
@@ -383,6 +410,7 @@ func (a *Adapter) toItem(evt *event.Event) core.Item {
 		From:       core.Address{ID: evt.Sender.String(), Name: fromName},
 		Timestamp:  time.UnixMilli(evt.Timestamp),
 		Unread:     unreadCount > 0 && evt.Sender != a.client.UserID,
+		FromMe:     evt.Sender == a.client.UserID,
 		Meta:       map[string]string{},
 	}
 
@@ -390,7 +418,11 @@ func (a *Adapter) toItem(evt *event.Event) core.Item {
 	case event.EventEncrypted:
 		item.Meta["undecryptable"] = "true"
 	default:
-		item.Body = evt.Content.AsMessage().Body
+		content := evt.Content.AsMessage()
+		item.Body = content.Body
+		if att, ok := attachmentFromContent(content); ok {
+			item.Attachments = append(item.Attachments, att)
+		}
 	}
 	return item
 }
@@ -430,6 +462,72 @@ func (a *Adapter) remember(item core.Item) {
 	a.mu.Lock()
 	a.items[item.ID] = item
 	a.mu.Unlock()
+}
+
+// cachedItem returns the item last observed for itemIDStr, without the
+// core.ErrNotFound wrapping Fetch applies (callers here treat "unknown"
+// as just another reason to fall back, not an error to report).
+func (a *Adapter) cachedItem(itemIDStr string) (core.Item, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	item, ok := a.items[itemIDStr]
+	return item, ok
+}
+
+// referencedEventTimestamp resolves the timestamp to mark a thread read
+// up to for whichever event a receipt or m.fully_read points to: the
+// referenced event's own Timestamp when this adapter has seen it (the
+// precise "read up to this specific message" instant), else fallback —
+// the receipt's own ts for m.receipt, or "now" for m.fully_read, which
+// carries no timestamp of its own at all.
+func (a *Adapter) referencedEventTimestamp(roomID id.RoomID, eventID id.EventID, fallback time.Time) time.Time {
+	if cached, ok := a.cachedItem(itemID(a.account, roomID, eventID)); ok && !cached.Timestamp.IsZero() {
+		return cached.Timestamp
+	}
+	return fallback
+}
+
+// receiptHandler processes m.receipt ephemeral events (own m.read/
+// m.read.private receipts from other devices/clients, e.g. Element):
+// only entries for THIS account's own user id ever affect our unread
+// state ("own user only" — another participant's receipt into the same
+// room says nothing about what the user has read) and mark their room's
+// thread read up to the referenced event's timestamp.
+func (a *Adapter) receiptHandler(sink core.Sink) mautrix.EventHandler {
+	return func(ctx context.Context, evt *event.Event) {
+		ownUser := a.client.UserID
+		for eventID, receipts := range *evt.Content.AsReceipt() {
+			for _, receiptType := range []event.ReceiptType{event.ReceiptTypeRead, event.ReceiptTypeReadPrivate} {
+				receipt, ok := receipts[receiptType][ownUser]
+				if !ok {
+					continue
+				}
+				upTo := a.referencedEventTimestamp(evt.RoomID, eventID, receipt.Timestamp)
+				if err := sink.MarkThreadReadUpTo(ctx, core.ChannelMatrix, a.account, evt.RoomID.String(), upTo); err != nil {
+					log.Printf("matrix: mark thread %s read up to %v: %v", evt.RoomID, upTo, err)
+				}
+			}
+		}
+	}
+}
+
+// fullyReadHandler processes the m.fully_read room account data event
+// (the "read marker" other clients, e.g. Element, advance): it marks the
+// room's thread read up to the referenced event's timestamp, the same
+// way receiptHandler does. m.fully_read is inherently per-account (it is
+// account data, never shared with other room members), so there is no
+// "own user only" check to apply here.
+func (a *Adapter) fullyReadHandler(sink core.Sink) mautrix.EventHandler {
+	return func(ctx context.Context, evt *event.Event) {
+		eventID := evt.Content.AsFullyRead().EventID
+		if eventID == "" {
+			return
+		}
+		upTo := a.referencedEventTimestamp(evt.RoomID, eventID, time.Now())
+		if err := sink.MarkThreadReadUpTo(ctx, core.ChannelMatrix, a.account, evt.RoomID.String(), upTo); err != nil {
+			log.Printf("matrix: mark thread %s read up to %v (fully_read): %v", evt.RoomID, upTo, err)
+		}
+	}
 }
 
 // Fetch returns the item as last observed by Run; the Matrix adapter

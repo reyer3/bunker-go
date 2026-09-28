@@ -45,3 +45,14 @@ func (a *Adapter) MarkRead(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+// MarkThreadRead implements core.ThreadReader (conversation-view.md's
+// read-thread fix, K9): a Matrix read/fully_read marker already covers
+// every earlier event in the room, so only ids' newest (last) entry needs
+// a receipt — unlike WhatsApp, there is nothing to batch or group here.
+func (a *Adapter) MarkThreadRead(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return a.MarkRead(ctx, ids[len(ids)-1])
+}

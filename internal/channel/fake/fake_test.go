@@ -30,12 +30,20 @@ func (s *recordingSink) Upsert(ctx context.Context, item core.Item) error {
 	return nil
 }
 func (s *recordingSink) MarkRead(ctx context.Context, id string, read bool) error { return nil }
+func (s *recordingSink) MarkThreadReadUpTo(ctx context.Context, channel core.Channel, account, thread string, upTo time.Time) error {
+	return nil
+}
 func (s *recordingSink) Delete(ctx context.Context, id string) error {
 	delete(s.items, id)
 	return nil
 }
 func (s *recordingSink) Cursor(ctx context.Context, key string) (string, error) { return "", nil }
 func (s *recordingSink) SetCursor(ctx context.Context, key, val string) error   { return nil }
+func (s *recordingSink) EditItem(ctx context.Context, id, body string) error    { return nil }
+func (s *recordingSink) RevokeItem(ctx context.Context, id string) error        { return nil }
+func (s *recordingSink) SetReaction(ctx context.Context, id string, reaction core.Reaction) error {
+	return nil
+}
 
 func TestRunStreamsSeedItemsThenBlocksUntilCanceled(t *testing.T) {
 	seed := core.Item{ID: "mail:demo:1", Channel: core.ChannelMail, Account: "demo", Subject: "hi"}

@@ -105,18 +105,28 @@ func TestWrapViewSkipsEscapeSequencesWithoutCountingWidth(t *testing.T) {
 // Model.View() gets bunker's own OSC 8 links, while any escape sequence
 // the message content itself tried to inject is still stripped by
 // sanitizeTerminalText — only bunker's own OSC 8 ever reaches the view.
+// TestDetailViewLinkifiesURLAndSenderButStripsInjectedEscapes exercises
+// the K6 mail thread view's newest-expanded rendering (mail's Enter no
+// longer opens the old plain single-item detail — see
+// conversation-view.md's Decisions).
 func TestDetailViewLinkifiesURLAndSenderButStripsInjectedEscapes(t *testing.T) {
-	client := &inboxClient{readResult: core.Item{
+	client := &inboxClient{threadItems: []core.Item{{
 		ID: "mail:a:1", Channel: core.ChannelMail, Account: "a",
 		From: core.Address{Name: "Alice\x1b[31m", ID: "alice@example.com"},
 		Body: "see \x1b[31mhttps://example.org/report\x1b[0m\x1b]2;evil\x07 for details",
-	}}
+	}}}
 	model := NewModel(client)
 	model.loaded = true
-	model.groups = []inboxGroup{{items: []core.Item{{ID: "mail:a:1", Channel: core.ChannelMail}}}}
+	item := core.Item{ID: "mail:a:1", Channel: core.ChannelMail, From: core.Address{ID: "alice@example.com"}}
+	model.groups = []inboxGroup{{items: []core.Item{item}}}
+	// Mail wraps this conversation under a collapsible sender row
+	// (mail-sender-groups.md); expand it and select the nested thread row
+	// so Enter opens the thread view instead of toggling the sender.
+	model = model.setSenderExpanded(senderKey(item), true)
+	model.selected = 1
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
-		t.Fatal("Enter did not request the selected item")
+		t.Fatal("Enter did not request the thread")
 	}
 	updated, _ = updated.(Model).Update(cmd())
 	view := updated.(Model).View()

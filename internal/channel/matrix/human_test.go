@@ -109,3 +109,57 @@ func TestAdapterIsReadMarkerCapability(t *testing.T) {
 	var a Adapter
 	var _ core.ReadMarker = &a
 }
+
+// TestAdapterMarkThreadReadSendsOneReceiptOnTheNewestEvent covers K9
+// (conversation-view.md's read-thread fix): Matrix's read/fully_read
+// markers already cover every earlier event in the room, so
+// MarkThreadRead needs only one receipt, on ids' newest (last) entry.
+func TestAdapterMarkThreadReadSendsOneReceiptOnTheNewestEvent(t *testing.T) {
+	srv, state := newFakeHomeserver(t, nil)
+	adapter := newTestAdapter(t, srv, nil)
+
+	ids := []string{
+		itemID("work", "!room:matrix.example.org", "$event1"),
+		itemID("work", "!room:matrix.example.org", "$event2"),
+		itemID("work", "!room:matrix.example.org", "$event3"),
+	}
+	if err := adapter.MarkThreadRead(context.Background(), ids); err != nil {
+		t.Fatalf("MarkThreadRead: %v", err)
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if len(state.readMarkers) != 1 {
+		t.Fatalf("readMarkers = %d, want 1 (a single receipt on the newest event)", len(state.readMarkers))
+	}
+	var marker mautrix.ReqSetReadMarkers
+	if err := json.Unmarshal(state.readMarkers[0], &marker); err != nil {
+		t.Fatalf("decode read marker: %v", err)
+	}
+	if marker.Read != "$event3" || marker.FullyRead != "$event3" {
+		t.Errorf("marker = %+v, want Read=FullyRead=$event3 (the newest id)", marker)
+	}
+}
+
+// TestAdapterMarkThreadReadEmptyIsNoOp covers the idempotent-with-
+// nothing-unread case: no ids means no receipt at all.
+func TestAdapterMarkThreadReadEmptyIsNoOp(t *testing.T) {
+	srv, state := newFakeHomeserver(t, nil)
+	adapter := newTestAdapter(t, srv, nil)
+
+	if err := adapter.MarkThreadRead(context.Background(), nil); err != nil {
+		t.Fatalf("MarkThreadRead: %v, want nil for an empty batch", err)
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if len(state.readMarkers) != 0 {
+		t.Fatalf("readMarkers = %d, want 0 for an empty batch", len(state.readMarkers))
+	}
+}
+
+// TestAdapterIsThreadReaderCapability is a static assertion that Adapter
+// satisfies core.ThreadReader.
+func TestAdapterIsThreadReaderCapability(t *testing.T) {
+	var a Adapter
+	var _ core.ThreadReader = &a
+}

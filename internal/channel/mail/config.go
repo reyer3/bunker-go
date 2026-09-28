@@ -3,9 +3,16 @@ package mail
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/reyer3/bunker-go/internal/config"
 )
+
+// defaultSeenReconcileInterval is how often Run's periodic \Seen
+// safety-net reconcile (R4) re-checks stored-unread messages against
+// the server's live flags when an account's config sets no explicit
+// seen_reconcile option.
+const defaultSeenReconcileInterval = 3 * time.Minute
 
 // ErrInvalidConfig is returned when an account's config.toml options are
 // missing a required field or use an unrecognized value.
@@ -54,6 +61,24 @@ type AccountConfig struct {
 	// EnvPasswordPath is the fallback password file for AuthLogin
 	// accounts (see EnvFilePasswordSource).
 	EnvPasswordPath string
+
+	// SeenReconcileInterval is how often Run's periodic \Seen safety-net
+	// reconcile (R4) UID FETCH FLAGS the newest stored-unread messages
+	// and applies any \Seen change made elsewhere that the live IDLE
+	// unsolicited-FETCH path (T9b) might have missed. Configured as
+	// seen_reconcile, a duration string (e.g. "3m"); defaults to
+	// defaultSeenReconcileInterval when the option is absent. Zero
+	// (explicitly configured as "0") disables the reconcile entirely.
+	SeenReconcileInterval time.Duration
+
+	// InitialSyncLimit bounds how many of the most recent INBOX messages
+	// Run backfills on a fresh (never-synced) store, configured as
+	// initial_sync_limit. It has no effect once a sync cursor exists:
+	// raising it after the first sync only widens a future initial sync
+	// of an account newly added afterward. Defaults to
+	// defaultInitialSyncLimit (200) when the option is absent; must be
+	// > 0 when set.
+	InitialSyncLimit int
 }
 
 // ParseAccountConfig decodes acc.Options into an AccountConfig, applying
@@ -110,6 +135,23 @@ func ParseAccountConfig(acc config.Account) (AccountConfig, error) {
 		return AccountConfig{}, fmt.Errorf("mail: account %q: goa_identity is required for xoauth2: %w", acc.Name, ErrInvalidConfig)
 	}
 	cfg.EnvPasswordPath, _ = acc.Options["password_env"].(string)
+
+	cfg.SeenReconcileInterval = defaultSeenReconcileInterval
+	if raw, ok := acc.Options["seen_reconcile"].(string); ok {
+		d, err := time.ParseDuration(raw)
+		if err != nil {
+			return AccountConfig{}, fmt.Errorf("mail: account %q: seen_reconcile %q: %w", acc.Name, raw, ErrInvalidConfig)
+		}
+		cfg.SeenReconcileInterval = d
+	}
+
+	cfg.InitialSyncLimit = defaultInitialSyncLimit
+	if limit, ok := intOption(acc.Options, "initial_sync_limit"); ok {
+		if limit <= 0 {
+			return AccountConfig{}, fmt.Errorf("mail: account %q: initial_sync_limit must be > 0: %w", acc.Name, ErrInvalidConfig)
+		}
+		cfg.InitialSyncLimit = limit
+	}
 
 	return cfg, nil
 }

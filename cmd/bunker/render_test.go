@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -133,5 +134,111 @@ func TestRenderUsesLiveDaemonWhenReachable(t *testing.T) {
 	}
 	if !got.DaemonUp {
 		t.Fatal("expected daemonUp = true when the daemon answers")
+	}
+}
+
+// startRenderTestDaemon opens a store seeded with item, wires a Service
+// with health (if non-nil) as its HealthTracker, serves it over a fresh
+// unix socket, points BUNKER_SOCKET at it, and returns the store path's
+// directory for cleanup coordination. Modeled on
+// TestRenderUsesLiveDaemonWhenReachable.
+func startRenderTestDaemon(t *testing.T, item core.Item, health *core.HealthTracker) {
+	t.Helper()
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "bunker.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+	if err := st.Upsert(context.Background(), item); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	svc := core.NewService(st, core.NewRegistry())
+	if health != nil {
+		svc.SetHealthTracker(health)
+	}
+	srv := rpc.NewServer(svc)
+	socket := filepath.Join(dir, "bunker.sock")
+	ctx, cancel := context.WithCancel(context.Background())
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.Serve(ctx, socket) }()
+	t.Cleanup(func() { cancel(); <-serveErr })
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if c, err := rpc.Dial(socket); err == nil {
+			c.Close()
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Setenv("BUNKER_SOCKET", socket)
+}
+
+// TestRenderAppendsWarningMarkerWhenAnAdapterIsNotConnected proves R4:
+// render's plain output appends "!" when the live daemon reports any
+// adapter not in the connected state, and the JSON form's allConnected
+// field is false.
+func TestRenderAppendsWarningMarkerWhenAnAdapterIsNotConnected(t *testing.T) {
+	health := core.NewHealthTracker()
+	health.SetBackoff(core.ChannelMail, "cl", time.Now(), nil)
+	item := core.Item{ID: "mail:cl:1", Channel: core.ChannelMail, Account: "cl", Unread: true}
+	startRenderTestDaemon(t, item, health)
+
+	var stdout, stderr bytes.Buffer
+	if code := cmdRender(context.Background(), nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, stderr=%s", code, stderr.String())
+	}
+	if !strings.HasSuffix(strings.TrimRight(stdout.String(), "\n"), "!") {
+		t.Fatalf("stdout = %q, want it to end with the ! marker", stdout.String())
+	}
+
+	stdout.Reset()
+	if code := cmdRender(context.Background(), []string{"--json"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, stderr=%s", code, stderr.String())
+	}
+	var got struct {
+		AllConnected bool `json:"allConnected"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.AllConnected {
+		t.Fatal("expected allConnected = false when an adapter is in backoff")
+	}
+}
+
+// TestRenderNoMarkerWhenAllAdaptersConnected proves the non-alerting
+// side: no "!" and allConnected=true when every tracked adapter is
+// connected.
+func TestRenderNoMarkerWhenAllAdaptersConnected(t *testing.T) {
+	health := core.NewHealthTracker()
+	health.SetConnected(core.ChannelMail, "cl", time.Now())
+	item := core.Item{ID: "mail:cl:1", Channel: core.ChannelMail, Account: "cl", Unread: true}
+	startRenderTestDaemon(t, item, health)
+
+	var stdout, stderr bytes.Buffer
+	if code := cmdRender(context.Background(), nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, stderr=%s", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "!") {
+		t.Fatalf("stdout = %q, want no ! marker when every adapter is connected", stdout.String())
+	}
+}
+
+// TestRenderNoMarkerWhenNoHealthTrackerWired proves an untracked Service
+// (health tracker never wired, e.g. an older daemon build) shows no
+// marker rather than always warning.
+func TestRenderNoMarkerWhenNoHealthTrackerWired(t *testing.T) {
+	item := core.Item{ID: "mail:cl:1", Channel: core.ChannelMail, Account: "cl", Unread: true}
+	startRenderTestDaemon(t, item, nil)
+
+	var stdout, stderr bytes.Buffer
+	if code := cmdRender(context.Background(), nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, stderr=%s", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "!") {
+		t.Fatalf("stdout = %q, want no ! marker without a wired health tracker", stdout.String())
 	}
 }

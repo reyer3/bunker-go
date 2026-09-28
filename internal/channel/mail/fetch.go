@@ -20,7 +20,7 @@ import (
 // initial sync/IDLE upserts don't populate. It always uses BODY.PEEK, so
 // it never marks a message \Seen.
 func (a *Adapter) Fetch(ctx context.Context, id string) (core.Item, error) {
-	account, uidValidity, uid, err := parseItemID(id)
+	account, folder, uidValidity, uid, err := parseItemID(id)
 	if err != nil {
 		return core.Item{}, err
 	}
@@ -38,10 +38,11 @@ func (a *Adapter) Fetch(ctx context.Context, id string) (core.Item, error) {
 	if err != nil {
 		return core.Item{}, fmt.Errorf("mail: fetch %s: %w", id, err)
 	}
+	mailbox := folders.Resolve(folder)
 
-	mbox, err := client.Select("INBOX", &imap.SelectOptions{ReadOnly: true}).Wait()
+	mbox, err := client.Select(mailbox, &imap.SelectOptions{ReadOnly: true}).Wait()
 	if err != nil {
-		return core.Item{}, fmt.Errorf("mail: fetch %s: select INBOX: %w", id, err)
+		return core.Item{}, fmt.Errorf("mail: fetch %s: select %s: %w", id, mailbox, err)
 	}
 	if mbox.UIDValidity != uidValidity {
 		return core.Item{}, fmt.Errorf("mail: fetch %s: mailbox UIDVALIDITY changed (%d != %d): %w", id, mbox.UIDValidity, uidValidity, core.ErrNotFound)
@@ -65,7 +66,7 @@ func (a *Adapter) Fetch(ctx context.Context, id string) (core.Item, error) {
 	}
 	msg := messages[0]
 
-	item := a.buildItem(msg, folders, uidValidity)
+	item := a.buildItem(msg, folders, uidValidity, folder)
 	if a.cfg.Gmail {
 		// T14(a): see fetchAndUpsert's identical comment — X-GM-LABELS
 		// needs the raw connection, and a failure here must never fail

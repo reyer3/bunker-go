@@ -76,11 +76,35 @@ Commands:
   status post <channel> <account> <text>
        [--media path] [--dry-run] [--json]                 publish a status
   counts [--json]                                          unread counts
+  health [--json]                                          per-adapter connection
+                                                             state, since when,
+                                                             last error, restarts
   download <id> [-n index] -o path [--force] [--json]      save an attachment
                                                              to disk (index
                                                              defaults to 0)
   avatar <channel> <account> <thread> [--json]              conversation avatar
                                                              PNG path (debug)
+  thread <channel> <account> <thread>
+       [--before RFC3339] [--limit N] [--json]              one conversation's
+                                                             items, oldest→newest
+  read-thread <channel> <account> <thread>
+       [--no-receipt] [--json]                              mark every unread
+                                                             item of one
+                                                             conversation read
+                                                             (not just the
+                                                             newest); prints
+                                                             how many it marked
+  backfill mail <account> --since YYYY-MM-DD
+       [--folder INBOX] [--dry-run] [--json]                 add mail the store
+                                                             is missing since a
+                                                             date, without
+                                                             moving the sync
+                                                             cursor
+  search mail <account> [--from x] [--subject y]
+       [--since D] [--before D] [--folder INBOX]
+       [--limit 50] [--json]                                 server-side IMAP
+                                                             search, upserting
+                                                             hits (read-only)
   render [--tmux] [--json]                                 tmux status segment
   link whatsapp <account>                                  QR-pair WhatsApp
   link matrix <account> [--recovery-key|--recovery-key-stdin]
@@ -119,6 +143,16 @@ func runWithBackend(ctx context.Context, backend Backend, args []string, stdin i
 		return cmdDownload(ctx, backend, args[1:], stdout, stderr)
 	case "avatar":
 		return cmdAvatar(ctx, backend, args[1:], stdout, stderr)
+	case "thread":
+		return cmdThread(ctx, backend, args[1:], stdout, stderr)
+	case "read-thread":
+		return cmdReadThread(ctx, backend, args[1:], stdout, stderr)
+	case "health":
+		return cmdHealth(ctx, backend, args[1:], stdout, stderr)
+	case "backfill":
+		return cmdBackfill(ctx, backend, args[1:], stdout, stderr)
+	case "search":
+		return cmdSearch(ctx, backend, args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n%s", args[0], topLevelUsage)
 		return 2
@@ -539,6 +573,82 @@ func cmdAvatar(ctx context.Context, backend Backend, args []string, stdout, stde
 		return 0
 	}
 	fmt.Fprintln(stdout, res.Path)
+	return 0
+}
+
+// cmdThread prints one conversation's items, oldest→newest: the same
+// (channel, account, thread) triple avatar uses, plus a --before RFC3339
+// cursor for scrolling up (older messages) and --limit (the daemon
+// applies its own default when omitted/zero, so this never sends a
+// synthetic default of its own).
+func cmdThread(ctx context.Context, backend Backend, args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("thread", stderr)
+	before := fs.String("before", "", "RFC3339 timestamp cursor: return items strictly before it (default: newest)")
+	limit := fs.Int("limit", 0, "max items to return (default: the daemon's own default, currently 50)")
+	jsonOut := fs.Bool("json", false, "emit JSON")
+	positionals, err := parseInterspersed(fs, args)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if len(positionals) < 3 {
+		fmt.Fprintln(stderr, "usage: bunker thread <channel> <account> <thread> [--before RFC3339] [--limit N] [--json]")
+		return 2
+	}
+
+	var beforeTime time.Time
+	if *before != "" {
+		beforeTime, err = time.Parse(time.RFC3339, *before)
+		if err != nil {
+			fmt.Fprintf(stderr, "invalid --before %q: %v\n", *before, err)
+			return 2
+		}
+	}
+
+	items, err := backend.Thread(ctx, positionals[0], positionals[1], positionals[2], beforeTime, *limit)
+	if err != nil {
+		return fail(*jsonOut, stdout, stderr, err)
+	}
+	if *jsonOut {
+		writeJSON(stdout, map[string]any{"items": items})
+		return 0
+	}
+	for _, it := range items {
+		fmt.Fprintf(stdout, "%s\t%s\t%s\n", it.ID, it.Timestamp.Format(time.RFC3339), it.Body)
+	}
+	return 0
+}
+
+// cmdReadThread marks every unread, non-FromMe item of one conversation
+// read (see core.Service.ReadThread) — the fix for the live bug where
+// opening a conversation in the TUI marked only its newest item read,
+// leaving older unread items stranded in the unread panel
+// (conversation-view.md, K9). --no-receipt still clears the local unread
+// state but skips notifying the channel itself (no WhatsApp/Matrix
+// receipts, no mail \Seen).
+func cmdReadThread(ctx context.Context, backend Backend, args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("read-thread", stderr)
+	noReceipt := fs.Bool("no-receipt", false, "mark read locally without notifying the channel (no receipts/\\Seen)")
+	jsonOut := fs.Bool("json", false, "emit JSON")
+	positionals, err := parseInterspersed(fs, args)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if len(positionals) < 3 {
+		fmt.Fprintln(stderr, "usage: bunker read-thread <channel> <account> <thread> [--no-receipt] [--json]")
+		return 2
+	}
+
+	count, err := backend.ReadThread(ctx, positionals[0], positionals[1], positionals[2], !*noReceipt)
+	if err != nil {
+		return fail(*jsonOut, stdout, stderr, err)
+	}
+	if *jsonOut {
+		writeJSON(stdout, map[string]any{"count": count})
+		return 0
+	}
+	fmt.Fprintf(stdout, "%d item(s) marked read\n", count)
 	return 0
 }
 

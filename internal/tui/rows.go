@@ -190,15 +190,50 @@ func buildRow(group inboxGroup, selected bool, width int, glyphs map[core.Channe
 	return line1, line2
 }
 
-// buildRowUnits renders every group in groups to its 1-or-2-line row
-// unit, marking the group at localSelected (if any, and if in range) as
-// selected. Each unit's hit target is hitRow at its index in groups — the
-// same index space m.visibleGroups() uses, so a click resolves directly
-// to a selectable/openable row with no separate coordinate math.
-func buildRowUnits(groups []inboxGroup, localSelected, width int, glyphs map[core.Channel]string, counts map[core.Channel]map[string]int, styles rowStyles, now time.Time) []rowUnit {
-	rowUnits := make([]rowUnit, len(groups))
-	for i, g := range groups {
-		line1, line2 := buildRow(g, i == localSelected, width, glyphs, counts, styles, now)
+// indentWidth is how many cells an expanded Mail sender's thread rows
+// shift right, per mail-sender-groups.md ("indented by 2 cells").
+const indentWidth = 2
+
+// indentLine prefixes line with indentWidth plain spaces; called before
+// any lipgloss style wraps the rest, so the indent itself is never
+// colored (matching the rest of this file's "truncate/pad first, style
+// last" discipline).
+func indentLine(line string) string {
+	return strings.Repeat(" ", indentWidth) + line
+}
+
+// buildRowUnits renders every row in rows to its 1-or-2-line row unit,
+// marking the row at localSelected (if any, and if in range) as selected.
+// Each unit's hit target is hitRow at its index in rows — the same index
+// space m.visibleRows() uses, so a click resolves directly to a
+// selectable/openable/toggleable row with no separate coordinate math. A
+// Mail sender row (navSender) renders as its own single-line chevron
+// header; an expanded sender's threads (navThread with indent set)
+// render with the existing two-line row design, shifted right by
+// indentWidth cells.
+func buildRowUnits(rows []navRow, localSelected, width int, glyphs map[core.Channel]string, counts map[core.Channel]map[string]int, styles rowStyles, now time.Time) []rowUnit {
+	rowUnits := make([]rowUnit, len(rows))
+	for i, row := range rows {
+		selected := i == localSelected
+		if row.kind == navSender {
+			line := buildSenderRow(row.sender, row.expanded, selected, width, counts, styles, now)
+			rowUnits[i] = rowUnit{lines: []string{line}, hit: inboxHit{kind: hitRow, row: i}}
+			continue
+		}
+		rowWidth := width
+		if row.indent && width > 0 {
+			rowWidth = width - indentWidth
+			if rowWidth < 1 {
+				rowWidth = 1
+			}
+		}
+		line1, line2 := buildRow(row.thread, selected, rowWidth, glyphs, counts, styles, now)
+		if row.indent {
+			line1 = indentLine(line1)
+			if line2 != "" {
+				line2 = indentLine(line2)
+			}
+		}
 		lines := []string{line1}
 		if line2 != "" {
 			lines = append(lines, line2)
@@ -206,6 +241,65 @@ func buildRowUnits(groups []inboxGroup, localSelected, width int, glyphs map[cor
 		rowUnits[i] = rowUnit{lines: lines, hit: inboxHit{kind: hitRow, row: i}}
 	}
 	return rowUnits
+}
+
+// buildSenderRow renders one Mail sender's collapsible header line: a
+// chevron (▸ collapsed, ▾ expanded), the sender's display name (see
+// senderDisplayName — the newest thread's newest non-empty From.Name,
+// else the address itself), a dim account tag when Mail has more than
+// one account, the sender's newest time, and an unread badge summing
+// every thread's loaded unread count. It mirrors buildRow's column math
+// (right-aligned account/time/badge) but is always a single line: a
+// sender row never shows a body preview.
+func buildSenderRow(s senderGroup, expanded, selected bool, width int, counts map[core.Channel]map[string]int, styles rowStyles, now time.Time) string {
+	chevron := "▸"
+	if expanded {
+		chevron = "▾"
+	}
+	newest := s.threads[0].newest()
+	accountTag := ""
+	if channelHasMultipleAccounts(counts, core.ChannelMail) {
+		accountTag = "  " + newest.Account
+	}
+	timeStr := relativeTime(newest.Timestamp, now)
+	badgeText := fmt.Sprintf("⬤%d", s.unreadCount())
+
+	marker := " "
+	if selected {
+		marker = "▌"
+	}
+
+	rightPlain := accountTag + "  " + timeStr + "  " + badgeText
+	leftFixed := runewidth.StringWidth(marker) + 1 + runewidth.StringWidth(chevron) + 1
+	rightWidth := runewidth.StringWidth(rightPlain)
+
+	var namePadded string
+	if width > 0 {
+		budget := width - leftFixed - rightWidth
+		if budget < 1 {
+			budget = 1
+		}
+		nameTrunc := runewidth.Truncate(s.name, budget, "…")
+		pad := budget - runewidth.StringWidth(nameTrunc)
+		if pad < 0 {
+			pad = 0
+		}
+		namePadded = nameTrunc + strings.Repeat(" ", pad)
+	} else {
+		namePadded = s.name
+	}
+
+	linePlain := marker + " " + chevron + " " + namePadded + rightPlain
+	if selected {
+		rest := strings.TrimPrefix(linePlain, marker)
+		restWidth := 0
+		if width > 0 {
+			restWidth = width - runewidth.StringWidth(marker)
+		}
+		return styles.selectedBar.Render(marker) + styles.selectedRow.Render(padTo(rest, restWidth))
+	}
+	return marker + " " + styles.title.Render(chevron) + " " + styles.title.Render(namePadded) +
+		styles.dim.Render(accountTag+"  "+timeStr) + "  " + styles.badge[core.ChannelMail].Render(badgeText)
 }
 
 // sectionHeaderLine renders one channel section's header: its brand-color
@@ -231,9 +325,13 @@ func separatorLine(styles rowStyles, width int) string {
 	return styles.dim.Render(strings.Repeat("─", widthOrDefault(width)))
 }
 
-// footerLine renders the short dim keymap hint row.
+// footerLine renders the short dim keymap hint row. "q salir" comes first
+// so a narrow width's ellipsis truncation (truncatePlain) always cuts
+// from the tail end, never hiding "q" — the follow-up gap bunker-tui.md
+// recorded (a 40-column terminal used to lose "q to quit" entirely, since
+// this line never even mentioned it).
 func footerLine(styles rowStyles, width int) string {
-	return styles.dim.Render(truncatePlain("↵ leer  r responder  m leído  ? ayuda", width))
+	return styles.dim.Render(truncatePlain("q salir  ↵ leer  r responder  m leído  ? ayuda", width))
 }
 
 // emptySectionLine renders a section's single dim placeholder line when
@@ -293,59 +391,81 @@ func fairShares(totalBudget, n int) []int {
 	return shares
 }
 
-// layoutSectionRows fits rowUnits (each 1 or 2 physical lines, uniform
-// within one render) into share physical lines. When they all fit, every
-// unit is returned as-is. Otherwise it scrolls to keep localSelected
-// visible (localSelected < 0 means no selection in this section) and
-// ends with a dim "+N más" notice for the rows that did not fit — a
-// synthetic unit whose hit focuses focusTab (this section), matching G2's
-// "a click on '+N más' also focuses that section".
+// unitLines returns u's physical line count (at least 1, defensively: a
+// unit with no lines still occupies a row).
+func unitLines(u rowUnit) int {
+	if n := len(u.lines); n > 0 {
+		return n
+	}
+	return 1
+}
+
+// layoutSectionRows fits rowUnits into share physical lines by their
+// actual, possibly mixed, per-unit heights: a Mail section can combine
+// 1-line collapsed sender rows with 2-line thread rows (an expanded
+// sender's own threads) in the very same render — unlike before
+// mail-sender-groups.md, when every row in one render shared one uniform
+// height. When they all fit, every unit is returned as-is. Otherwise it
+// builds a contiguous window around localSelected (localSelected < 0
+// means no selection in this section), growing forward then backward
+// while it still fits share (minus 1 reserved line for the "+N más"
+// notice — except the selected unit itself is never dropped even if its
+// own height alone exceeds that reduced budget: keeping the selection
+// visible outranks always having room to spare for the notice in an
+// extremely short pane). The notice is a synthetic unit whose hit
+// focuses focusTab (this section), matching G2's "a click on '+N más'
+// also focuses that section".
 func layoutSectionRows(rowUnits []rowUnit, share, localSelected, focusTab int, styles rowStyles, width int) []rowUnit {
 	if len(rowUnits) == 0 || share <= 0 {
 		return nil
 	}
-	perRow := len(rowUnits[0].lines)
-	if perRow < 1 {
-		perRow = 1
+	total := 0
+	for _, u := range rowUnits {
+		total += unitLines(u)
 	}
-	maxUnits := share / perRow
-	if maxUnits < 1 {
-		maxUnits = 1
-	}
-	if len(rowUnits) <= maxUnits {
+	if total <= share {
 		return rowUnits
 	}
 
-	// Reserve 1 line for the "+N más" notice by showing one fewer row
-	// unit, but never drop below 1 visible row: keeping the selection
-	// (and at least one conversation) visible outranks always having
-	// room to spare for the notice in an extremely short pane.
-	unitsShown := maxUnits
-	noticeBudget := share - unitsShown*perRow
-	if noticeBudget < 1 && unitsShown > 1 {
-		unitsShown--
-		noticeBudget = share - unitsShown*perRow
+	sel := localSelected
+	if sel < 0 {
+		sel = 0
+	}
+	if sel >= len(rowUnits) {
+		sel = len(rowUnits) - 1
 	}
 
-	start := 0
-	if localSelected >= 0 {
-		if localSelected >= start+unitsShown {
-			start = localSelected - unitsShown + 1
-		}
-		if localSelected < start {
-			start = localSelected
-		}
-	}
-	if start+unitsShown > len(rowUnits) {
-		start = len(rowUnits) - unitsShown
-	}
-	if start < 0 {
-		start = 0
+	budget := share - 1
+	selLines := unitLines(rowUnits[sel])
+	if budget < selLines {
+		budget = selLines
 	}
 
-	out := append([]rowUnit{}, rowUnits[start:start+unitsShown]...)
-	more := len(rowUnits) - unitsShown
-	if noticeBudget > 0 {
+	// Grow a window starting at the selection, forward first (so what
+	// follows it is preferred when there is a tie), then backward with
+	// any budget left over.
+	start, end := sel, sel+1
+	used := selLines
+	for end < len(rowUnits) {
+		need := unitLines(rowUnits[end])
+		if used+need > budget {
+			break
+		}
+		used += need
+		end++
+	}
+	for start > 0 {
+		need := unitLines(rowUnits[start-1])
+		if used+need > budget {
+			break
+		}
+		used += need
+		start--
+	}
+
+	out := append([]rowUnit{}, rowUnits[start:end]...)
+	more := len(rowUnits) - (end - start)
+	if more > 0 && used < share {
 		out = append(out, rowUnit{
 			lines: []string{moreLine(more, styles, width)},
 			hit:   inboxHit{kind: hitFocus, tab: focusTab},

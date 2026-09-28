@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -367,5 +368,285 @@ func TestClientAvatarWritesGeneratedFallbackViaDaemon(t *testing.T) {
 	}
 	if _, err := os.Stat(res.Path); err != nil {
 		t.Errorf("avatar file %s does not exist: %v", res.Path, err)
+	}
+}
+
+// TestClientThreadReturnsOldestFirstOverSocket proves the thread RPC
+// method reaches core.Service.Thread/store.Store.Thread and comes back
+// oldest→newest, scoped to one conversation, over the real socket
+// protocol (not just the in-process fakes rpc_test's other cases use for
+// List/Get).
+func TestClientThreadReturnsOldestFirstOverSocket(t *testing.T) {
+	client, _, socket := startTestServer(t)
+	ctx := context.Background()
+
+	// startTestServer already seeded "mail:cl:1" with no Thread; add a
+	// real conversation directly on the same on-disk store so the
+	// running daemon (already serving that store) sees these rows too.
+	st, err := store.Open(filepath.Join(filepath.Dir(socket), "bunker.db"))
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	defer st.Close()
+
+	base := time.Date(2026, 9, 1, 9, 0, 0, 0, time.UTC)
+	thread := "5511999999999@s.whatsapp.net"
+	for i, id := range []string{"whatsapp:personal:1", "whatsapp:personal:2", "whatsapp:personal:3"} {
+		item := core.Item{
+			ID: id, Channel: core.ChannelWhatsApp, Account: "personal", Thread: thread,
+			Body: id, Timestamp: base.Add(time.Duration(i) * time.Minute),
+		}
+		if err := st.Upsert(ctx, item); err != nil {
+			t.Fatalf("seed thread item %s: %v", id, err)
+		}
+	}
+
+	items, err := client.Thread(ctx, "whatsapp", "personal", thread, time.Time{}, 10)
+	if err != nil {
+		t.Fatalf("Thread: %v", err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("Thread() len = %d, want 3", len(items))
+	}
+	wantOrder := []string{"whatsapp:personal:1", "whatsapp:personal:2", "whatsapp:personal:3"}
+	for i, want := range wantOrder {
+		if items[i].ID != want {
+			t.Fatalf("Thread()[%d].ID = %q, want %q (oldest→newest)", i, items[i].ID, want)
+		}
+	}
+}
+
+// TestClientReadThreadMarksUnreadItemsAndSetsSeenOverSocket proves the
+// read_thread RPC method reaches core.Service.ReadThread over the real
+// socket protocol, and that mail's Organizer fallback (fake.Adapter
+// implements only core.Organizer, like the real mail adapter) sets \Seen
+// on each unread item — the K9 read-on-open fix (conversation-view.md).
+func TestClientReadThreadMarksUnreadItemsAndSetsSeenOverSocket(t *testing.T) {
+	client, adapter, socket := startTestServer(t)
+	ctx := context.Background()
+
+	st, err := store.Open(filepath.Join(filepath.Dir(socket), "bunker.db"))
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	defer st.Close()
+
+	base := time.Date(2026, 9, 27, 9, 0, 0, 0, time.UTC)
+	thread := "them@x.cl"
+	unreadIDs := []string{"mail:cl:th1", "mail:cl:th2"}
+	for i, id := range unreadIDs {
+		item := core.Item{
+			ID: id, Channel: core.ChannelMail, Account: "cl", Thread: thread,
+			Unread: true, Timestamp: base.Add(time.Duration(i) * time.Minute),
+		}
+		if err := st.Upsert(ctx, item); err != nil {
+			t.Fatalf("seed thread item %s: %v", id, err)
+		}
+	}
+	fromMe := core.Item{
+		ID: "mail:cl:th3", Channel: core.ChannelMail, Account: "cl", Thread: thread,
+		Unread: true, FromMe: true, Timestamp: base.Add(2 * time.Minute),
+	}
+	if err := st.Upsert(ctx, fromMe); err != nil {
+		t.Fatalf("seed FromMe item: %v", err)
+	}
+
+	count, err := client.ReadThread(ctx, "mail", "cl", thread, true)
+	if err != nil {
+		t.Fatalf("ReadThread: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("ReadThread() count = %d, want 2", count)
+	}
+
+	calls := adapter.OrganizeCalls()
+	if len(calls) != 2 {
+		t.Fatalf("OrganizeCalls = %+v, want 2", calls)
+	}
+	for i, want := range unreadIDs {
+		if calls[i].ID != want {
+			t.Errorf("OrganizeCalls[%d].ID = %q, want %q", i, calls[i].ID, want)
+		}
+		if calls[i].Op.Seen == nil || !*calls[i].Op.Seen {
+			t.Errorf("OrganizeCalls[%d].Op.Seen = %v, want true", i, calls[i].Op.Seen)
+		}
+	}
+
+	for _, id := range unreadIDs {
+		item, err := client.Get(ctx, id)
+		if err != nil {
+			t.Fatalf("Get(%s): %v", id, err)
+		}
+		if item.Unread {
+			t.Errorf("Get(%s).Unread = true, want false", id)
+		}
+	}
+	if item, err := client.Get(ctx, fromMe.ID); err != nil || !item.Unread {
+		t.Errorf("Get(FromMe item) = (%+v, %v), want Unread=true untouched", item, err)
+	}
+}
+
+// presenceCapableAdapter is a minimal core.Adapter implementing
+// PresenceProvider, PresenceAvailabilityController and TypingSender, so
+// rpc_test.go can prove the presence/presence_keepalive/typing RPC
+// methods actually reach core.Service over the real socket protocol,
+// not just the in-process fakes rpc_test's other cases use.
+type presenceCapableAdapter struct {
+	channel core.Channel
+	account string
+
+	mu            sync.Mutex
+	presenceCalls []struct {
+		available bool
+		thread    string
+	}
+	typingCalls []struct {
+		thread    string
+		composing bool
+	}
+	presenceResult core.Presence
+}
+
+func (p *presenceCapableAdapter) Channel() core.Channel                { return p.channel }
+func (p *presenceCapableAdapter) Account() string                      { return p.account }
+func (p *presenceCapableAdapter) Run(context.Context, core.Sink) error { return nil }
+
+func (p *presenceCapableAdapter) SetPresenceAvailable(_ context.Context, available bool, thread string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.presenceCalls = append(p.presenceCalls, struct {
+		available bool
+		thread    string
+	}{available, thread})
+	return nil
+}
+
+func (p *presenceCapableAdapter) Presence(context.Context, string) (core.Presence, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.presenceResult, nil
+}
+
+func (p *presenceCapableAdapter) SendTyping(_ context.Context, thread string, composing bool) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.typingCalls = append(p.typingCalls, struct {
+		thread    string
+		composing bool
+	}{thread, composing})
+	return nil
+}
+
+// TestClientPresenceTypingAndKeepaliveOverSocket proves the presence,
+// presence_keepalive and typing RPC methods reach core.Service (and, for
+// presence_keepalive, the availability lease in internal/core/presence.go)
+// over the real socket protocol.
+func TestClientPresenceTypingAndKeepaliveOverSocket(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "bunker.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer st.Close()
+
+	reg := core.NewRegistry()
+	adapter := &presenceCapableAdapter{
+		channel: core.ChannelWhatsApp, account: "personal",
+		presenceResult: core.Presence{State: "typing", Typers: []string{"5511999999999@s.whatsapp.net"}},
+	}
+	reg.Register(adapter)
+	svc := core.NewService(st, reg)
+
+	socket := filepath.Join(dir, "bunker.sock")
+	srv := rpc.NewServer(svc)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go srv.Serve(ctx, socket)
+
+	var client *rpc.Client
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if c, err := rpc.Dial(socket); err == nil {
+			client = c
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if client == nil {
+		t.Fatal("server never became reachable")
+	}
+	defer client.Close()
+
+	thread := "5511999999999@s.whatsapp.net"
+
+	if err := client.PresenceKeepalive(context.Background(), "whatsapp", "personal", thread, true); err != nil {
+		t.Fatalf("PresenceKeepalive(focused=true): %v", err)
+	}
+	if err := client.Typing(context.Background(), "whatsapp", "personal", thread, true); err != nil {
+		t.Fatalf("Typing: %v", err)
+	}
+	presence, err := client.Presence(context.Background(), "whatsapp", "personal", thread)
+	if err != nil {
+		t.Fatalf("Presence: %v", err)
+	}
+	if presence.State != "typing" || len(presence.Typers) != 1 {
+		t.Fatalf("Presence = %+v, want State=typing with one typer", presence)
+	}
+	if err := client.PresenceKeepalive(context.Background(), "whatsapp", "personal", thread, false); err != nil {
+		t.Fatalf("PresenceKeepalive(focused=false): %v", err)
+	}
+
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if len(adapter.presenceCalls) != 2 || !adapter.presenceCalls[0].available || adapter.presenceCalls[1].available {
+		t.Fatalf("presenceCalls = %+v, want [available=true, available=false]", adapter.presenceCalls)
+	}
+	if len(adapter.typingCalls) != 1 || !adapter.typingCalls[0].composing || adapter.typingCalls[0].thread != thread {
+		t.Fatalf("typingCalls = %+v, want one composing=true call for %q", adapter.typingCalls, thread)
+	}
+}
+
+// TestClientHealthReturnsTrackerSnapshotOverSocket proves R4's health RPC
+// method: Client.Health round-trips through the real socket protocol to
+// whatever core.Service.Health (backed by a wired HealthTracker) reports.
+func TestClientHealthReturnsTrackerSnapshotOverSocket(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "bunker.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer st.Close()
+
+	svc := core.NewService(st, core.NewRegistry())
+	tracker := core.NewHealthTracker()
+	tracker.SetConnected(core.ChannelMail, "cl", time.Unix(1, 0))
+	svc.SetHealthTracker(tracker)
+
+	socket := filepath.Join(dir, "bunker.sock")
+	srv := rpc.NewServer(svc)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go srv.Serve(ctx, socket)
+
+	var client *rpc.Client
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if c, err := rpc.Dial(socket); err == nil {
+			client = c
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if client == nil {
+		t.Fatal("server never became reachable")
+	}
+	defer client.Close()
+
+	adapters, err := client.Health(context.Background())
+	if err != nil {
+		t.Fatalf("Health: %v", err)
+	}
+	if len(adapters) != 1 || adapters[0].Channel != core.ChannelMail || adapters[0].Account != "cl" || adapters[0].State != core.AdapterConnected {
+		t.Fatalf("Health() = %+v, want one connected mail/cl entry", adapters)
 	}
 }

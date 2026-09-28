@@ -58,7 +58,10 @@ func TestEndToEndCLIAgainstFakeDaemon(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	daemonDone := make(chan error, 1)
 	daemonOut := &bytes.Buffer{}
-	go func() { daemonDone <- runDaemon(ctx, dir, filepath.Join(dir, "avatars"), socket, true, daemonOut) }()
+	daemonErr := &bytes.Buffer{}
+	go func() {
+		daemonDone <- runDaemon(ctx, dir, filepath.Join(dir, "avatars"), socket, true, daemonOut, daemonErr)
+	}()
 	t.Cleanup(func() {
 		cancel()
 		if err := <-daemonDone; err != nil {

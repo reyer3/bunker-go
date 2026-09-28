@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/reyer3/bunker-go/internal/core"
 )
@@ -172,6 +173,80 @@ func (c *queryClient) Organize(ctx context.Context, id string, op core.OrganizeO
 		return core.Plan{}, err
 	}
 	return client.Organize(ctx, id, op, dryRun)
+}
+
+// Thread and Presence are read-only, so they retry-after-redial like List
+// and Counts. PresenceKeepalive and Typing report a still-current fact
+// ("still focused"/"still composing") rather than performing a one-shot
+// action, so resending after a transport failure is harmless the same
+// way; they are not forwarded-once-only like Reply/Organize.
+func (c *queryClient) Thread(ctx context.Context, channel string, account, thread string, before time.Time, limit int) ([]core.Item, error) {
+	return query(c, ctx, func(client Client) ([]core.Item, error) {
+		return client.Thread(ctx, channel, account, thread, before, limit)
+	})
+}
+
+// ReadThread is forwarded at most once, like Reply/Organize/Send: it
+// sends read receipts/\Seen and mutates store state as a side effect, so
+// silently retrying it after a lost response could double-send receipts.
+func (c *queryClient) ReadThread(ctx context.Context, channel string, account, thread string, receipt bool) (int, error) {
+	if err := c.acquire(ctx); err != nil {
+		return 0, err
+	}
+	defer c.release()
+	client, err := c.activeClient()
+	if err != nil {
+		return 0, err
+	}
+	return client.ReadThread(ctx, channel, account, thread, receipt)
+}
+
+func (c *queryClient) Presence(ctx context.Context, channel string, account, thread string) (core.Presence, error) {
+	return query(c, ctx, func(client Client) (core.Presence, error) { return client.Presence(ctx, channel, account, thread) })
+}
+
+func (c *queryClient) PresenceKeepalive(ctx context.Context, channel string, account, thread string, focused bool) error {
+	_, err := query(c, ctx, func(client Client) (struct{}, error) {
+		return struct{}{}, client.PresenceKeepalive(ctx, channel, account, thread, focused)
+	})
+	return err
+}
+
+func (c *queryClient) Typing(ctx context.Context, channel string, account, thread string, composing bool) error {
+	_, err := query(c, ctx, func(client Client) (struct{}, error) {
+		return struct{}{}, client.Typing(ctx, channel, account, thread, composing)
+	})
+	return err
+}
+
+// Send is forwarded at most once, like Reply/Organize: it is a one-shot
+// action, not an idempotent query.
+func (c *queryClient) Send(ctx context.Context, out core.Outgoing, dryRun bool) (core.Plan, core.Receipt, error) {
+	if err := c.acquire(ctx); err != nil {
+		return core.Plan{}, core.Receipt{}, err
+	}
+	defer c.release()
+	client, err := c.activeClient()
+	if err != nil {
+		return core.Plan{}, core.Receipt{}, err
+	}
+	return client.Send(ctx, out, dryRun)
+}
+
+// Download is forwarded at most once, like Send/Reply/Organize: it writes
+// a file as a side effect, so silently retrying it after a lost response
+// could either double the work or (without Force) fail on the file the
+// first attempt already wrote — the caller sees the error and decides.
+func (c *queryClient) Download(ctx context.Context, id string, index int, destPath string, opts core.DownloadOptions) (core.DownloadResult, error) {
+	if err := c.acquire(ctx); err != nil {
+		return core.DownloadResult{}, err
+	}
+	defer c.release()
+	client, err := c.activeClient()
+	if err != nil {
+		return core.DownloadResult{}, err
+	}
+	return client.Download(ctx, id, index, destPath, opts)
 }
 
 func (c *queryClient) Close() error {

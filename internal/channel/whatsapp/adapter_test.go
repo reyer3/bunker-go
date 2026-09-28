@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waSyncAction"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 
@@ -79,7 +80,11 @@ func TestRunConnectsUpsertsMessagesAndStopsOnContextCancel(t *testing.T) {
 	}
 }
 
-func TestRunMarksReadOnReadReceipt(t *testing.T) {
+// TestReceiptTypeReadDoesNotMarkOurItemsRead proves the decision that
+// types.ReceiptTypeRead means OTHERS read OUR messages (delivery/blue
+// ticks on something we sent) and must never affect our own unread
+// state: it must not call sink.MarkRead nor sink.MarkThreadReadUpTo.
+func TestReceiptTypeReadDoesNotMarkOurItemsRead(t *testing.T) {
 	cli := newFakeWAClient()
 	cli.linked = true
 	sink := newSpySink()
@@ -97,10 +102,177 @@ func TestRunMarksReadOnReadReceipt(t *testing.T) {
 		Type:          types.ReceiptTypeRead,
 	})
 
+	// There is no positive event to wait for, so give handleEvent a
+	// generous window to (wrongly) act before asserting it did not.
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if len(sink.markedRead) != 0 || len(sink.threadReadUpToCalls()) != 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if len(sink.markedRead) != 0 {
+		t.Errorf("MarkRead calls = %+v, want none for ReceiptTypeRead", sink.markedRead)
+	}
+	if calls := sink.threadReadUpToCalls(); len(calls) != 0 {
+		t.Errorf("MarkThreadReadUpTo calls = %+v, want none for ReceiptTypeRead", calls)
+	}
+}
+
+// TestReceiptTypeReadSelfMarksIndividualIDsAndThread proves ReadSelf (we
+// read a chat from a different device) still marks each listed message
+// id read (existing per-ID behavior, T9-era) and additionally marks the
+// whole thread read up to the receipt's timestamp, so a ReadSelf that
+// does not list every unread message of the chat (Evidence gap (a))
+// still clears the rest.
+func TestReceiptTypeReadSelfMarksIndividualIDsAndThread(t *testing.T) {
+	cli := newFakeWAClient()
+	cli.linked = true
+	sink := newSpySink()
+	a := newTestAdapter("personal", cli)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go a.Run(ctx, sink)
+	waitFor(t, func() bool { return cli.IsConnected() })
+
+	chat := mustJID(t, "1234@s.whatsapp.net")
+	ts := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	cli.emit(&events.Receipt{
+		MessageSource: types.MessageSource{Chat: chat, Sender: chat},
+		MessageIDs:    []types.MessageID{"M1"},
+		Timestamp:     ts,
+		Type:          types.ReceiptTypeReadSelf,
+	})
+
 	waitFor(t, func() bool { return len(sink.markedRead) == 1 })
 	want := itemID("personal", "1234@s.whatsapp.net", "M1")
 	if sink.markedRead[0].id != want || !sink.markedRead[0].read {
 		t.Errorf("MarkRead call = %+v, want id=%q read=true", sink.markedRead[0], want)
+	}
+
+	waitFor(t, func() bool { return len(sink.threadReadUpToCalls()) >= 1 })
+	calls := sink.threadReadUpToCalls()
+	found := false
+	for _, c := range calls {
+		if c.channel == core.ChannelWhatsApp && c.account == "personal" && c.thread == "1234@s.whatsapp.net" && c.upTo.Equal(ts) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("MarkThreadReadUpTo calls = %+v, want one for thread 1234@s.whatsapp.net up to %v", calls, ts)
+	}
+}
+
+// TestReceiptTypeReadSelfResolvesLIDPNThreadKey proves the LID/PN
+// resolution decision: when the receipt's chat arrives in one address
+// form, MarkThreadReadUpTo is also tried against its stored LID/PN
+// counterpart, since the conversation's items may have been persisted
+// under whichever form the first message used (Evidence gap (b)).
+func TestReceiptTypeReadSelfResolvesLIDPNThreadKey(t *testing.T) {
+	cli := newFakeWAClient()
+	cli.linked = true
+	lidChat := mustJID(t, "555000111@lid")
+	pnChat := mustJID(t, "555000222@s.whatsapp.net")
+	cli.altJIDs = map[string]types.JID{lidChat.String(): pnChat}
+	sink := newSpySink()
+	a := newTestAdapter("personal", cli)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go a.Run(ctx, sink)
+	waitFor(t, func() bool { return cli.IsConnected() })
+
+	ts := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	cli.emit(&events.Receipt{
+		MessageSource: types.MessageSource{Chat: lidChat, Sender: lidChat},
+		MessageIDs:    []types.MessageID{"M1"},
+		Timestamp:     ts,
+		Type:          types.ReceiptTypeReadSelf,
+	})
+
+	waitFor(t, func() bool { return len(sink.threadReadUpToCalls()) >= 2 })
+	calls := sink.threadReadUpToCalls()
+	var sawLID, sawPN bool
+	for _, c := range calls {
+		if c.thread == lidChat.String() {
+			sawLID = true
+		}
+		if c.thread == pnChat.String() {
+			sawPN = true
+		}
+	}
+	if !sawLID || !sawPN {
+		t.Errorf("MarkThreadReadUpTo calls = %+v, want both %q and %q", calls, lidChat.String(), pnChat.String())
+	}
+}
+
+// TestMarkChatAsReadActionReadTrueMarksThread proves the decision for
+// events.MarkChatAsRead (the phone's own "mark as read" app-state
+// mutation, Evidence gap (c)): Action.Read == true marks the chat's
+// thread read up to the action's message-range cutoff.
+func TestMarkChatAsReadActionReadTrueMarksThread(t *testing.T) {
+	cli := newFakeWAClient()
+	cli.linked = true
+	sink := newSpySink()
+	a := newTestAdapter("personal", cli)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go a.Run(ctx, sink)
+	waitFor(t, func() bool { return cli.IsConnected() })
+
+	chat := mustJID(t, "1234@s.whatsapp.net")
+	lastMsgTS := int64(1767322800) // fictional fixed instant
+	read := true
+	cli.emit(&events.MarkChatAsRead{
+		JID:       chat,
+		Timestamp: time.Date(2026, 1, 2, 4, 0, 0, 0, time.UTC),
+		Action: &waSyncAction.MarkChatAsReadAction{
+			Read:         &read,
+			MessageRange: &waSyncAction.SyncActionMessageRange{LastMessageTimestamp: &lastMsgTS},
+		},
+	})
+
+	waitFor(t, func() bool { return len(sink.threadReadUpToCalls()) >= 1 })
+	calls := sink.threadReadUpToCalls()
+	want := time.Unix(lastMsgTS, 0)
+	if calls[0].channel != core.ChannelWhatsApp || calls[0].account != "personal" || calls[0].thread != "1234@s.whatsapp.net" || !calls[0].upTo.Equal(want) {
+		t.Errorf("MarkThreadReadUpTo call = %+v, want channel=whatsapp account=personal thread=1234@s.whatsapp.net upTo=%v", calls[0], want)
+	}
+}
+
+// TestMarkChatAsReadActionReadFalseIsNoOp proves the decision that
+// unmarking a chat as read (Action.Read == false) never re-marks
+// anything unread: bunker's Sink has no "mark unread" op for this path.
+func TestMarkChatAsReadActionReadFalseIsNoOp(t *testing.T) {
+	cli := newFakeWAClient()
+	cli.linked = true
+	sink := newSpySink()
+	a := newTestAdapter("personal", cli)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go a.Run(ctx, sink)
+	waitFor(t, func() bool { return cli.IsConnected() })
+
+	chat := mustJID(t, "1234@s.whatsapp.net")
+	read := false
+	cli.emit(&events.MarkChatAsRead{
+		JID:       chat,
+		Timestamp: time.Now(),
+		Action:    &waSyncAction.MarkChatAsReadAction{Read: &read},
+	})
+
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if len(sink.threadReadUpToCalls()) != 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if calls := sink.threadReadUpToCalls(); len(calls) != 0 {
+		t.Errorf("MarkThreadReadUpTo calls = %+v, want none for Action.Read == false", calls)
 	}
 }
 
@@ -296,5 +468,38 @@ func TestRunDropsStatusBroadcastMessages(t *testing.T) {
 	}
 	if got := len(sink.items()); got != 0 {
 		t.Fatalf("sink items = %d, want 0 (status@broadcast must be dropped)", got)
+	}
+}
+
+// TestRunDropsNewsletterMessages: posts from WhatsApp channels
+// (newsletters) are feed noise like statuses, so they never reach the
+// WhatsApp list.
+func TestRunDropsNewsletterMessages(t *testing.T) {
+	cli := newFakeWAClient()
+	cli.linked = true
+	sink := newSpySink()
+	a := newTestAdapter("personal", cli)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go a.Run(ctx, sink)
+	waitFor(t, func() bool { return cli.IsConnected() })
+
+	channel := mustJID(t, "120363000000000001@newsletter")
+	cli.emit(&events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: channel, Sender: channel},
+			ID:            types.MessageID("NEWS-1"),
+			Timestamp:     time.Now(),
+		},
+		Message: &waE2E.Message{Conversation: strPtr("novedades de la semana")},
+	})
+
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := len(sink.items()); got != 0 {
+		t.Fatalf("sink items = %d, want 0 (newsletter posts must be dropped)", got)
 	}
 }

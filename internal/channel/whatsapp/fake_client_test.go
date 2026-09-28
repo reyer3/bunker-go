@@ -41,11 +41,19 @@ type fakeWAClient struct {
 	profilePicCalls   []types.JID
 	profilePicPreview []bool
 
+	// altJIDs maps a JID string to its configured LID/PN counterpart, for
+	// tests exercising read-receipt thread resolution (R2). A JID absent
+	// from the map resolves to types.EmptyJID, nil (no known counterpart).
+	altJIDs   map[string]types.JID
+	altJIDErr error
+
 	handlers   map[uint32]whatsmeow.EventHandler
 	nextHandle uint32
 
 	sent       []sentMessage
 	markedRead []markReadCall
+
+	subscribePresenceErr error
 
 	// calls records every waClient method this fake observed, in order,
 	// as a short tag (e.g. "presence:available", "chatpresence:composing",
@@ -192,6 +200,28 @@ func (f *fakeWAClient) SendChatPresence(_ context.Context, _ types.JID, state ty
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "chatpresence:"+string(state))
 	return nil
+}
+
+func (f *fakeWAClient) SubscribePresence(_ context.Context, jid types.JID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "subscribe:"+jid.String())
+	if f.subscribePresenceErr != nil {
+		return f.subscribePresenceErr
+	}
+	return nil
+}
+
+func (f *fakeWAClient) GetAltJID(_ context.Context, jid types.JID) (types.JID, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.altJIDErr != nil {
+		return types.EmptyJID, f.altJIDErr
+	}
+	if alt, ok := f.altJIDs[jid.String()]; ok {
+		return alt, nil
+	}
+	return types.EmptyJID, nil
 }
 
 // callLog returns every recorded call, in order, safe for concurrent use.

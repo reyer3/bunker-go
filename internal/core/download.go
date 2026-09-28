@@ -46,6 +46,11 @@ type DownloadResult struct {
 // exactly one place instead of twice.
 func (s *Service) Download(ctx context.Context, id string, index int, destPath string, opts DownloadOptions) (DownloadResult, error) {
 	item, err := s.store.Get(ctx, id)
+	if errors.Is(err, ErrNotFound) {
+		// Older than the store's history: Fetch's server fallback gets
+		// the full item (attachments included) and upserts it.
+		item, err = s.Fetch(ctx, id)
+	}
 	if err != nil {
 		return DownloadResult{}, err
 	}

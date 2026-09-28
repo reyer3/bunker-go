@@ -879,6 +879,214 @@ func TestCmdAvatarErrorProducesJSONError(t *testing.T) {
 	}
 }
 
+func TestCmdThreadBuildsCallAndPrintsItems(t *testing.T) {
+	backend := newFakeBackend()
+	backend.threadItems = []core.Item{
+		{ID: "whatsapp:personal:1", Channel: core.ChannelWhatsApp, Account: "personal", Body: "hola"},
+		{ID: "whatsapp:personal:2", Channel: core.ChannelWhatsApp, Account: "personal", Body: "buenas"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runWithBackend(context.Background(), backend, []string{"thread", "whatsapp", "personal", "5511999999999@s.whatsapp.net"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr=%s", code, stderr.String())
+	}
+	if len(backend.threadCalls) != 1 {
+		t.Fatalf("threadCalls = %+v, want 1 call", backend.threadCalls)
+	}
+	call := backend.threadCalls[0]
+	if call.Channel != "whatsapp" || call.Account != "personal" || call.Thread != "5511999999999@s.whatsapp.net" {
+		t.Fatalf("call = %+v, unexpected", call)
+	}
+	if !call.Before.IsZero() {
+		t.Fatalf("Before = %v, want zero (no --before given)", call.Before)
+	}
+	if call.Limit != 0 {
+		t.Fatalf("Limit = %d, want 0 (no --limit given; the daemon applies the default)", call.Limit)
+	}
+	if !strings.Contains(stdout.String(), "hola") || !strings.Contains(stdout.String(), "buenas") {
+		t.Fatalf("stdout = %q, want it to mention both items' bodies", stdout.String())
+	}
+}
+
+func TestCmdThreadParsesBeforeAndLimit(t *testing.T) {
+	backend := newFakeBackend()
+
+	var stdout, stderr bytes.Buffer
+	code := runWithBackend(context.Background(), backend, []string{
+		"thread", "whatsapp", "personal", "5511999999999@s.whatsapp.net",
+		"--before", "2026-09-01T12:00:00Z", "--limit", "10",
+	}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr=%s", code, stderr.String())
+	}
+	if len(backend.threadCalls) != 1 {
+		t.Fatalf("threadCalls = %+v, want 1 call", backend.threadCalls)
+	}
+	call := backend.threadCalls[0]
+	wantBefore := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	if !call.Before.Equal(wantBefore) {
+		t.Fatalf("Before = %v, want %v", call.Before, wantBefore)
+	}
+	if call.Limit != 10 {
+		t.Fatalf("Limit = %d, want 10", call.Limit)
+	}
+}
+
+func TestCmdThreadRequiresThreePositionals(t *testing.T) {
+	backend := newFakeBackend()
+	var stdout, stderr bytes.Buffer
+	code := runWithBackend(context.Background(), backend, []string{"thread", "whatsapp", "personal"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2", code)
+	}
+	if len(backend.threadCalls) != 0 {
+		t.Fatalf("threadCalls = %+v, want 0", backend.threadCalls)
+	}
+}
+
+func TestCmdThreadRejectsMalformedBefore(t *testing.T) {
+	backend := newFakeBackend()
+	var stdout, stderr bytes.Buffer
+	code := runWithBackend(context.Background(), backend, []string{"thread", "whatsapp", "personal", "t1", "--before", "not-a-time"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2 for a malformed --before", code)
+	}
+	if len(backend.threadCalls) != 0 {
+		t.Fatalf("threadCalls = %+v, want 0", backend.threadCalls)
+	}
+}
+
+func TestCmdThreadJSON(t *testing.T) {
+	backend := newFakeBackend()
+	backend.threadItems = []core.Item{{ID: "whatsapp:personal:1", Channel: core.ChannelWhatsApp}}
+
+	var stdout, stderr bytes.Buffer
+	code := runWithBackend(context.Background(), backend, []string{"thread", "whatsapp", "personal", "t1", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr=%s", code, stderr.String())
+	}
+	var got struct {
+		Items []core.Item `json:"items"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal stdout %q: %v", stdout.String(), err)
+	}
+	if len(got.Items) != 1 || got.Items[0].ID != "whatsapp:personal:1" {
+		t.Fatalf("Items = %+v", got.Items)
+	}
+}
+
+func TestCmdThreadErrorProducesJSONError(t *testing.T) {
+	backend := newFakeBackend()
+	backend.threadErr = errTest
+
+	var stdout, stderr bytes.Buffer
+	code := runWithBackend(context.Background(), backend, []string{"thread", "whatsapp", "personal", "t1", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("expected non-zero exit code on backend error")
+	}
+	var got struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal stdout %q: %v", stdout.String(), err)
+	}
+	if got.Error == "" {
+		t.Fatal("expected a non-empty error field")
+	}
+}
+
+// TestCmdReadThreadBuildsCallAndPrintsCount covers K9's CLI
+// (conversation-view.md's read-thread fix): default receipt=true, and the
+// count the daemon returns is printed.
+func TestCmdReadThreadBuildsCallAndPrintsCount(t *testing.T) {
+	backend := newFakeBackend()
+	backend.readThreadCount = 3
+
+	var stdout, stderr bytes.Buffer
+	code := runWithBackend(context.Background(), backend, []string{"read-thread", "whatsapp", "personal", "5511999999999@s.whatsapp.net"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr=%s", code, stderr.String())
+	}
+	if len(backend.readThreadCalls) != 1 {
+		t.Fatalf("readThreadCalls = %+v, want 1 call", backend.readThreadCalls)
+	}
+	call := backend.readThreadCalls[0]
+	if call.Channel != "whatsapp" || call.Account != "personal" || call.Thread != "5511999999999@s.whatsapp.net" || !call.Receipt {
+		t.Fatalf("call = %+v, unexpected", call)
+	}
+	if !strings.Contains(stdout.String(), "3") {
+		t.Fatalf("stdout = %q, want it to mention the count 3", stdout.String())
+	}
+}
+
+// TestCmdReadThreadNoReceiptSetsReceiptFalse covers --no-receipt.
+func TestCmdReadThreadNoReceiptSetsReceiptFalse(t *testing.T) {
+	backend := newFakeBackend()
+
+	var stdout, stderr bytes.Buffer
+	code := runWithBackend(context.Background(), backend, []string{"read-thread", "whatsapp", "personal", "t1", "--no-receipt"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr=%s", code, stderr.String())
+	}
+	if len(backend.readThreadCalls) != 1 || backend.readThreadCalls[0].Receipt {
+		t.Fatalf("readThreadCalls = %+v, want one call with Receipt=false", backend.readThreadCalls)
+	}
+}
+
+func TestCmdReadThreadRequiresThreePositionals(t *testing.T) {
+	backend := newFakeBackend()
+	var stdout, stderr bytes.Buffer
+	code := runWithBackend(context.Background(), backend, []string{"read-thread", "whatsapp", "personal"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2", code)
+	}
+	if len(backend.readThreadCalls) != 0 {
+		t.Fatalf("readThreadCalls = %+v, want 0", backend.readThreadCalls)
+	}
+}
+
+func TestCmdReadThreadJSON(t *testing.T) {
+	backend := newFakeBackend()
+	backend.readThreadCount = 2
+
+	var stdout, stderr bytes.Buffer
+	code := runWithBackend(context.Background(), backend, []string{"read-thread", "whatsapp", "personal", "t1", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr=%s", code, stderr.String())
+	}
+	var got struct {
+		Count int `json:"count"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal stdout %q: %v", stdout.String(), err)
+	}
+	if got.Count != 2 {
+		t.Fatalf("Count = %d, want 2", got.Count)
+	}
+}
+
+func TestCmdReadThreadErrorProducesJSONError(t *testing.T) {
+	backend := newFakeBackend()
+	backend.readThreadErr = errTest
+
+	var stdout, stderr bytes.Buffer
+	code := runWithBackend(context.Background(), backend, []string{"read-thread", "whatsapp", "personal", "t1", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("expected non-zero exit code on backend error")
+	}
+	var got struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal stdout %q: %v", stdout.String(), err)
+	}
+	if got.Error == "" {
+		t.Fatal("expected a non-empty error field")
+	}
+}
+
 func TestUnknownCommandReturnsUsageExitCode(t *testing.T) {
 	backend := newFakeBackend()
 	var stdout, stderr bytes.Buffer

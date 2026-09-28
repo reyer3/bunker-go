@@ -16,7 +16,6 @@ type mediaMeta struct {
 	ref     string // DirectPath, or the URL when DirectPath is unset.
 	name    string
 	caption string
-	quoted  *waE2E.ContextInfo
 }
 
 // bodyAndMedia extracts the text body and, when present, one media
@@ -81,6 +80,7 @@ func toItem(account string, evt *events.Message) core.Item {
 		From:       core.Address{ID: evt.Info.Sender.String(), Name: evt.Info.PushName},
 		Body:       body,
 		Unread:     !evt.Info.IsFromMe,
+		FromMe:     evt.Info.IsFromMe,
 		Timestamp:  evt.Info.Timestamp,
 		Meta:       map[string]string{},
 	}
@@ -112,11 +112,11 @@ func toItem(account string, evt *events.Message) core.Item {
 // and bodyAndMedia extracts neither text nor media from any of those, so
 // they fall out here without special-casing each protobuf kind.
 //
-// TODO(reactions/edits/revokes): WhatsApp reactions, message edits and
-// revokes arrive as *events.Message too and also produce no body/media
-// through toItem today, so they are dropped the same way. They are not
-// yet surfaced as Items; modeling them (e.g. as operations on an existing
-// Item) is deferred until the store supports it.
+// WhatsApp reactions, message edits and revokes also arrive as
+// *events.Message and produce no body/media through toItem, but
+// Adapter.handleEvent intercepts them before toItem/isSurfaceable ever
+// run (see handleEditOrRevoke/handleReaction, S2): they are applied as
+// operations on the existing target Item instead of being dropped here.
 func isSurfaceable(item core.Item) bool {
 	return item.Body != "" || len(item.Attachments) > 0
 }

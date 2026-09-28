@@ -3,6 +3,7 @@ package whatsapp
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/reyer3/bunker-go/internal/core"
 )
@@ -18,8 +19,15 @@ type spySink struct {
 		id   string
 		read bool
 	}
-	markReadErr error
-	cursors     map[string]string
+	markReadErr          error
+	cursors              map[string]string
+	markedThreadReadUpTo []struct {
+		channel core.Channel
+		account string
+		thread  string
+		upTo    time.Time
+	}
+	markThreadReadUpToErr error
 }
 
 func newSpySink() *spySink {
@@ -33,6 +41,34 @@ func (s *spySink) Upsert(_ context.Context, item core.Item) error {
 		return s.upsertErr
 	}
 	s.upserted = append(s.upserted, item)
+	return nil
+}
+
+// MarkThreadReadUpTo records the call and, to keep items() a faithful
+// mirror of what a real store would show, flips Unread=false on every
+// matching upserted item (same channel/account/thread, not FromMe,
+// Timestamp <= upTo).
+func (s *spySink) MarkThreadReadUpTo(_ context.Context, channel core.Channel, account, thread string, upTo time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.markThreadReadUpToErr != nil {
+		return s.markThreadReadUpToErr
+	}
+	s.markedThreadReadUpTo = append(s.markedThreadReadUpTo, struct {
+		channel core.Channel
+		account string
+		thread  string
+		upTo    time.Time
+	}{channel, account, thread, upTo})
+	for i, item := range s.upserted {
+		if item.Channel != channel || item.Account != account || item.Thread != thread {
+			continue
+		}
+		if item.FromMe || !item.Unread || item.Timestamp.After(upTo) {
+			continue
+		}
+		s.upserted[i].Unread = false
+	}
 	return nil
 }
 
@@ -62,6 +98,53 @@ func (s *spySink) SetCursor(_ context.Context, key, val string) error {
 	return nil
 }
 
+func (s *spySink) EditItem(_ context.Context, id, body string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, item := range s.upserted {
+		if item.ID == id {
+			s.upserted[i].Body = body
+			s.upserted[i].Edited = true
+			return nil
+		}
+	}
+	return core.ErrNotFound
+}
+
+func (s *spySink) RevokeItem(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, item := range s.upserted {
+		if item.ID == id {
+			s.upserted[i].Body = ""
+			s.upserted[i].Deleted = true
+			return nil
+		}
+	}
+	return core.ErrNotFound
+}
+
+func (s *spySink) SetReaction(_ context.Context, id string, reaction core.Reaction) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, item := range s.upserted {
+		if item.ID == id {
+			var kept []core.Reaction
+			for _, r := range item.Reactions {
+				if r.Sender != reaction.Sender {
+					kept = append(kept, r)
+				}
+			}
+			if reaction.Emoji != "" {
+				kept = append(kept, reaction)
+			}
+			s.upserted[i].Reactions = kept
+			return nil
+		}
+	}
+	return core.ErrNotFound
+}
+
 func (s *spySink) Delete(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -72,6 +155,25 @@ func (s *spySink) Delete(_ context.Context, id string) error {
 		}
 	}
 	return core.ErrNotFound
+}
+
+// threadReadUpToCalls returns every recorded MarkThreadReadUpTo call.
+func (s *spySink) threadReadUpToCalls() []struct {
+	channel core.Channel
+	account string
+	thread  string
+	upTo    time.Time
+} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]struct {
+		channel core.Channel
+		account string
+		thread  string
+		upTo    time.Time
+	}, len(s.markedThreadReadUpTo))
+	copy(out, s.markedThreadReadUpTo)
+	return out
 }
 
 func (s *spySink) items() []core.Item {

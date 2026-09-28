@@ -16,7 +16,7 @@ func TestSyncFilterExactJSON(t *testing.T) {
 		t.Fatalf("marshal filter: %v", err)
 	}
 
-	const want = `{"presence":{},"room":{"state":{"lazy_load_members":true},"timeline":{"limit":50}}}`
+	const want = `{"presence":{},"room":{"account_data":{},"ephemeral":{},"state":{"lazy_load_members":true},"timeline":{"limit":50}}}`
 	if string(got) != want {
 		t.Fatalf("filter JSON mismatch:\n got:  %s\n want: %s", got, want)
 	}

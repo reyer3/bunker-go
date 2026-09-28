@@ -24,7 +24,7 @@ func (a *Adapter) DownloadAttachment(ctx context.Context, item core.Item, index 
 		return nil, fmt.Errorf("mail: download %s: attachment index %d out of range: %w", item.ID, index, core.ErrNotFound)
 	}
 
-	account, uidValidity, uid, err := parseItemID(item.ID)
+	account, folder, uidValidity, uid, err := parseItemID(item.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -38,9 +38,15 @@ func (a *Adapter) DownloadAttachment(ctx context.Context, item core.Item, index 
 	}
 	defer client.Close()
 
-	mbox, err := client.Select("INBOX", &imap.SelectOptions{ReadOnly: true}).Wait()
+	folders, err := discoverFolders(ctx, client, a.cfg)
 	if err != nil {
-		return nil, fmt.Errorf("mail: download %s: select INBOX: %w", item.ID, err)
+		return nil, fmt.Errorf("mail: download %s: %w", item.ID, err)
+	}
+	mailbox := folders.Resolve(folder)
+
+	mbox, err := client.Select(mailbox, &imap.SelectOptions{ReadOnly: true}).Wait()
+	if err != nil {
+		return nil, fmt.Errorf("mail: download %s: select %s: %w", item.ID, mailbox, err)
 	}
 	if mbox.UIDValidity != uidValidity {
 		return nil, fmt.Errorf("mail: download %s: mailbox UIDVALIDITY changed (%d != %d): %w", item.ID, mbox.UIDValidity, uidValidity, core.ErrNotFound)

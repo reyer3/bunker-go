@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"time"
 
 	"github.com/reyer3/bunker-go/internal/core"
 	"github.com/reyer3/bunker-go/internal/rpc"
@@ -24,6 +25,22 @@ type Backend interface {
 	PostStatus(ctx context.Context, channel core.Channel, account string, status core.Status, dryRun bool) (core.Plan, core.Receipt, error)
 	Download(ctx context.Context, id string, index int, destPath string, opts core.DownloadOptions) (core.DownloadResult, error)
 	Avatar(ctx context.Context, channel core.Channel, account, thread string) (core.AvatarResult, error)
+	Thread(ctx context.Context, channel, account, thread string, before time.Time, limit int) ([]core.Item, error)
+	// ReadThread marks every unread, non-FromMe item of one conversation
+	// read, backing the K5/K6 read-on-open fix and `bunker read-thread`
+	// (conversation-view.md's read-thread fix, K9).
+	ReadThread(ctx context.Context, channel, account, thread string, receipt bool) (int, error)
+	// Health returns every adapter's current health snapshot (R4):
+	// channel, account, connection state, since when, its last error (if
+	// any) and how many times it has been restarted.
+	Health(ctx context.Context) ([]core.AdapterHealth, error)
+	// Backfill runs a server-side history search since a point in time,
+	// upserting whatever the store is missing (H2: mail-history,
+	// `bunker backfill mail <account> --since ...`).
+	Backfill(ctx context.Context, channel core.Channel, account, folder string, since time.Time, dryRun bool) (core.BackfillResult, error)
+	// Search runs a server-side search and upserts every match (H3:
+	// mail-history, `bunker search mail <account> ...`).
+	Search(ctx context.Context, channel core.Channel, account string, criteria core.SearchCriteria) ([]core.Item, error)
 }
 
 var (

@@ -43,6 +43,13 @@ func (r *realClient) MarkRead(ctx context.Context, ids []types.MessageID, timest
 	return r.Client.MarkRead(ctx, ids, timestamp, chat, sender)
 }
 
+func (r *realClient) GetAltJID(ctx context.Context, jid types.JID) (types.JID, error) {
+	if r.Client.Store == nil {
+		return types.EmptyJID, nil
+	}
+	return r.Client.Store.GetAltJID(ctx, jid)
+}
+
 var _ waClient = (*realClient)(nil)
 
 // buildRealClient opens acc's device store (pure-Go modernc.org/sqlite,

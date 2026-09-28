@@ -51,6 +51,25 @@ func (s *memSink) Upsert(_ context.Context, item core.Item) error {
 
 func (s *memSink) MarkRead(context.Context, string, bool) error { return nil }
 
+// MarkThreadReadUpTo flips Unread=false on every matching item (same
+// channel/account/thread, not FromMe, Timestamp <= upTo), mirroring the
+// real store's filter.
+func (s *memSink) MarkThreadReadUpTo(_ context.Context, channel core.Channel, account, thread string, upTo time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, item := range s.items {
+		if item.Channel != channel || item.Account != account || item.Thread != thread {
+			continue
+		}
+		if item.FromMe || !item.Unread || item.Timestamp.After(upTo) {
+			continue
+		}
+		item.Unread = false
+		s.items[id] = item
+	}
+	return nil
+}
+
 func (s *memSink) Delete(_ context.Context, id string) error {
 	s.mu.Lock()
 	delete(s.items, id)
@@ -68,6 +87,53 @@ func (s *memSink) SetCursor(_ context.Context, key, val string) error {
 	s.mu.Lock()
 	s.cursors[key] = val
 	s.mu.Unlock()
+	return nil
+}
+
+func (s *memSink) EditItem(_ context.Context, id, body string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, ok := s.items[id]
+	if !ok {
+		return core.ErrNotFound
+	}
+	item.Body = body
+	item.Edited = true
+	s.items[id] = item
+	return nil
+}
+
+func (s *memSink) RevokeItem(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, ok := s.items[id]
+	if !ok {
+		return core.ErrNotFound
+	}
+	item.Body = ""
+	item.Deleted = true
+	s.items[id] = item
+	return nil
+}
+
+func (s *memSink) SetReaction(_ context.Context, id string, reaction core.Reaction) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, ok := s.items[id]
+	if !ok {
+		return core.ErrNotFound
+	}
+	var kept []core.Reaction
+	for _, r := range item.Reactions {
+		if r.Sender != reaction.Sender {
+			kept = append(kept, r)
+		}
+	}
+	if reaction.Emoji != "" {
+		kept = append(kept, reaction)
+	}
+	item.Reactions = kept
+	s.items[id] = item
 	return nil
 }
 
@@ -105,6 +171,23 @@ func (s *memSink) Counts(context.Context) (map[core.Channel]map[string]int, erro
 	return nil, nil
 }
 
+// Thread is a minimal in-memory stand-in, sufficient for the matrix
+// package's own tests (none of which exercise pagination directly —
+// that is covered by internal/store and internal/core): it filters by
+// Channel/Account/Thread and ignores before/limit.
+func (s *memSink) Thread(_ context.Context, filter core.Filter, _ time.Time, _ int) ([]core.Item, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []core.Item
+	for _, item := range s.items {
+		if item.Channel != filter.Channel || item.Account != filter.Account || item.Thread != filter.Thread {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
 var _ core.Store = (*memSink)(nil)
 
 // fakeState records what a fakeHomeserver observed.
@@ -119,6 +202,22 @@ type fakeState struct {
 	// (client.GetEvent), keyed by the raw eventID string, for
 	// RetryUndecryptable's tests.
 	getEventResponses map[string]json.RawMessage
+
+	// mediaFiles serves GET /_matrix/client/v1/media/download/<homeserver>/
+	// <fileID> (client.Download/DownloadBytes), keyed by "<homeserver>/
+	// <fileID>", for attachment download tests (M1).
+	mediaFiles map[string][]byte
+}
+
+// setMediaFile registers uri's bytes for a later client.DownloadBytes call
+// to serve, mirroring an object the media repo already stored.
+func (s *fakeState) setMediaFile(uri id.ContentURI, data []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.mediaFiles == nil {
+		s.mediaFiles = make(map[string][]byte)
+	}
+	s.mediaFiles[uri.Homeserver+"/"+uri.FileID] = data
 }
 
 type sentEvent struct {
@@ -209,6 +308,18 @@ func newFakeHomeserver(t *testing.T, syncSeq []*mautrix.RespSync) (*httptest.Ser
 			w.WriteHeader(http.StatusNotFound)
 		}
 	})
+	mux.HandleFunc("/_matrix/client/v1/media/download/", func(w http.ResponseWriter, r *http.Request) {
+		key := strings.TrimPrefix(r.URL.Path, "/_matrix/client/v1/media/download/")
+		state.mu.Lock()
+		data, ok := state.mediaFiles[key]
+		state.mu.Unlock()
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Write(data)
+	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv, state
@@ -290,7 +401,7 @@ func TestAdapterRunUploadsCriticalFilterSyncsMessagesAndTracksUnread(t *testing.
 	state.mu.Lock()
 	filterBody := string(state.filterBody)
 	state.mu.Unlock()
-	const wantFilter = `{"presence":{},"room":{"state":{"lazy_load_members":true},"timeline":{"limit":50}}}`
+	const wantFilter = `{"presence":{},"room":{"account_data":{},"ephemeral":{},"state":{"lazy_load_members":true},"timeline":{"limit":50}}}`
 	if filterBody != wantFilter {
 		t.Errorf("uploaded filter = %s, want %s", filterBody, wantFilter)
 	}
@@ -321,6 +432,53 @@ func TestAdapterRunUploadsCriticalFilterSyncsMessagesAndTracksUnread(t *testing.
 	}
 	if fetched.ID != wantID {
 		t.Errorf("Fetch id = %q, want %q", fetched.ID, wantID)
+	}
+}
+
+// TestAdapterRunMarksOwnMessageFromMe proves toItem sets FromMe when the
+// event's sender is the adapter's own client.UserID (newTestAdapter logs
+// in as "@alice:example.com") — never derived from Unread, which a
+// self-sent message would also report false for a different reason
+// (unreadCount==0, not sender identity).
+func TestAdapterRunMarksOwnMessageFromMe(t *testing.T) {
+	const room = id.RoomID("!abc:matrix.example.org")
+	const self = id.UserID("@alice:example.com")
+
+	msgEvt := &event.Event{
+		ID:        "$own1",
+		Sender:    self,
+		Type:      event.EventMessage,
+		Timestamp: 1700000000000,
+		Content:   event.Content{Parsed: &event.MessageEventContent{MsgType: event.MsgText, Body: "sent from bunker-go"}},
+	}
+	firstSync := &mautrix.RespSync{
+		NextBatch: "s1",
+		Rooms: mautrix.RespSyncRooms{
+			Join: map[id.RoomID]*mautrix.SyncJoinedRoom{
+				room: {Timeline: mautrix.SyncTimeline{SyncEventsList: mautrix.SyncEventsList{Events: []*event.Event{msgEvt}}}},
+			},
+		},
+	}
+
+	srv, _ := newFakeHomeserver(t, []*mautrix.RespSync{firstSync})
+	adapter := newTestAdapter(t, srv, nil)
+	sink := newMemSink()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- adapter.Run(ctx, sink) }()
+
+	var item core.Item
+	select {
+	case item = <-sink.upserts:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the adapter to upsert the synced message")
+	}
+	cancel()
+	<-done
+
+	if !item.FromMe {
+		t.Errorf("FromMe = false for a message sent by the adapter's own user (%s), want true", self)
 	}
 }
 
@@ -509,4 +667,257 @@ func TestAdapterOrganizeRejectsLabels(t *testing.T) {
 	if !errors.Is(err, core.ErrUnsupported) {
 		t.Fatalf("Organize with labels: err = %v, want core.ErrUnsupported", err)
 	}
+}
+
+// waitForItemUnread polls sink for id's Unread flag to equal want. An
+// ephemeral (m.receipt) or account-data (m.fully_read) handler, unlike a
+// timeline Upsert, has no channel to synchronize a test on, since it
+// never calls Upsert itself.
+func waitForItemUnread(t *testing.T, sink *memSink, id string, want bool) core.Item {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		item, err := sink.Get(context.Background(), id)
+		if err == nil && item.Unread == want {
+			return item
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for item %s Unread=%v (last err=%v, item=%+v)", id, want, err, item)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// runWithSeedAndEphemeral starts adapter.Run against a single sync
+// response carrying one timeline message (so the store has something to
+// mark read) plus whatever ephemeral/account-data events the test wants
+// to exercise, and returns once the timeline message has been upserted
+// (guaranteeing the ephemeral/account-data events from the very same
+// /sync response have already been processed too, since DefaultSyncer
+// processes timeline, then ephemeral, then account data, synchronously,
+// for one response before ever issuing the next /sync request).
+func runWithSeedAndEphemeral(t *testing.T, room id.RoomID, msgEvt *event.Event, ephemeral, accountData []*event.Event) (*memSink, func()) {
+	t.Helper()
+	firstSync := &mautrix.RespSync{
+		NextBatch: "s1",
+		Rooms: mautrix.RespSyncRooms{
+			Join: map[id.RoomID]*mautrix.SyncJoinedRoom{
+				room: {
+					Timeline:            mautrix.SyncTimeline{SyncEventsList: mautrix.SyncEventsList{Events: []*event.Event{msgEvt}}},
+					Ephemeral:           mautrix.SyncEventsList{Events: ephemeral},
+					AccountData:         mautrix.SyncEventsList{Events: accountData},
+					UnreadNotifications: &mautrix.UnreadNotificationCounts{NotificationCount: 1},
+				},
+			},
+		},
+	}
+	srv, _ := newFakeHomeserver(t, []*mautrix.RespSync{firstSync})
+	adapter := newTestAdapter(t, srv, nil)
+	sink := newMemSink()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go adapter.Run(ctx, sink)
+
+	select {
+	case <-sink.upserts:
+	case <-time.After(5 * time.Second):
+		cancel()
+		t.Fatal("timed out waiting for the seed message to be upserted")
+	}
+	return sink, cancel
+}
+
+// ownUserID is the adapter's own user in every matrix package test:
+// newTestAdapter logs in as this user (see mautrix.NewClient there).
+const ownUserID = id.UserID("@alice:example.com")
+
+func TestReceiptHandlerMarksThreadReadForOwnReceipt(t *testing.T) {
+	tests := []struct {
+		name          string
+		receiptType   event.ReceiptType
+		receiptUserID id.UserID
+	}{
+		{"m.read", event.ReceiptTypeRead, ownUserID},
+		{"m.read.private", event.ReceiptTypeReadPrivate, ownUserID},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			const room = id.RoomID("!abc:matrix.example.org")
+			const sender = id.UserID("@bob:matrix.example.org")
+			msgEvt := &event.Event{
+				ID:        "$evt1",
+				Sender:    sender,
+				Type:      event.EventMessage,
+				Timestamp: 1700000000000,
+				Content:   event.Content{Parsed: &event.MessageEventContent{MsgType: event.MsgText, Body: "hi"}},
+			}
+			receiptEvt := &event.Event{
+				Type: event.EphemeralEventReceipt,
+				Content: event.Content{Parsed: &event.ReceiptEventContent{
+					"$evt1": event.Receipts{
+						tt.receiptType: event.UserReceipts{
+							tt.receiptUserID: event.ReadReceipt{Timestamp: time.UnixMilli(1700000000000)},
+						},
+					},
+				}},
+			}
+
+			sink, cancel := runWithSeedAndEphemeral(t, room, msgEvt, []*event.Event{receiptEvt}, nil)
+			defer cancel()
+
+			wantID := itemID("work", room, "$evt1")
+			waitForItemUnread(t, sink, wantID, false)
+		})
+	}
+}
+
+// TestReceiptHandlerIgnoresOtherUsersReceipts proves the "own user only"
+// filter: a receipt entry for a participant other than this account's
+// own user must never affect our unread state.
+func TestReceiptHandlerIgnoresOtherUsersReceipts(t *testing.T) {
+	const room = id.RoomID("!abc:matrix.example.org")
+	const sender = id.UserID("@bob:matrix.example.org")
+	msgEvt := &event.Event{
+		ID:        "$evt1",
+		Sender:    sender,
+		Type:      event.EventMessage,
+		Timestamp: 1700000000000,
+		Content:   event.Content{Parsed: &event.MessageEventContent{MsgType: event.MsgText, Body: "hi"}},
+	}
+	receiptEvt := &event.Event{
+		Type: event.EphemeralEventReceipt,
+		Content: event.Content{Parsed: &event.ReceiptEventContent{
+			"$evt1": event.Receipts{
+				event.ReceiptTypeRead: event.UserReceipts{
+					// A DIFFERENT room member's receipt, never our own.
+					id.UserID("@bob:matrix.example.org"): event.ReadReceipt{Timestamp: time.UnixMilli(1700000000000)},
+				},
+			},
+		}},
+	}
+
+	sink, cancel := runWithSeedAndEphemeral(t, room, msgEvt, []*event.Event{receiptEvt}, nil)
+	defer cancel()
+
+	wantID := itemID("work", room, "$evt1")
+	// There is no positive event to wait for, so give the (wrongly
+	// acting) handler a generous window before asserting it did not.
+	deadline := time.Now().Add(200 * time.Millisecond)
+	var item core.Item
+	for time.Now().Before(deadline) {
+		item, _ = sink.Get(context.Background(), wantID)
+		if !item.Unread {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !item.Unread {
+		t.Fatalf("item %s Unread = false, want still true: another user's receipt must not affect our unread state", wantID)
+	}
+}
+
+// TestReceiptHandlerPrefersReferencedEventTimestamp proves the decision
+// to mark a thread read "up to ts of the referenced event", not the
+// receipt's own (possibly much later) timestamp: a later message in the
+// same thread than the referenced event must stay unread even though its
+// timestamp is before the receipt's own ts.
+func TestReceiptHandlerPrefersReferencedEventTimestamp(t *testing.T) {
+	const room = id.RoomID("!abc:matrix.example.org")
+	const sender = id.UserID("@bob:matrix.example.org")
+	referencedEvt := &event.Event{
+		ID:        "$evtA",
+		Sender:    sender,
+		Type:      event.EventMessage,
+		Timestamp: 1000,
+		Content:   event.Content{Parsed: &event.MessageEventContent{MsgType: event.MsgText, Body: "first"}},
+	}
+	laterEvt := &event.Event{
+		ID:        "$evtB",
+		Sender:    sender,
+		Type:      event.EventMessage,
+		Timestamp: 2000,
+		Content:   event.Content{Parsed: &event.MessageEventContent{MsgType: event.MsgText, Body: "second"}},
+	}
+	receiptEvt := &event.Event{
+		Type: event.EphemeralEventReceipt,
+		Content: event.Content{Parsed: &event.ReceiptEventContent{
+			"$evtA": event.Receipts{
+				event.ReceiptTypeRead: event.UserReceipts{
+					// The receipt itself claims ts=5000ms, well after
+					// evtB's 2000ms — a naive "use the receipt's own ts"
+					// implementation would wrongly mark evtB read too.
+					ownUserID: event.ReadReceipt{Timestamp: time.UnixMilli(5000)},
+				},
+			},
+		}},
+	}
+
+	firstSync := &mautrix.RespSync{
+		NextBatch: "s1",
+		Rooms: mautrix.RespSyncRooms{
+			Join: map[id.RoomID]*mautrix.SyncJoinedRoom{
+				room: {
+					Timeline:            mautrix.SyncTimeline{SyncEventsList: mautrix.SyncEventsList{Events: []*event.Event{referencedEvt, laterEvt}}},
+					Ephemeral:           mautrix.SyncEventsList{Events: []*event.Event{receiptEvt}},
+					UnreadNotifications: &mautrix.UnreadNotificationCounts{NotificationCount: 2},
+				},
+			},
+		},
+	}
+	srv, _ := newFakeHomeserver(t, []*mautrix.RespSync{firstSync})
+	adapter := newTestAdapter(t, srv, nil)
+	sink := newMemSink()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go adapter.Run(ctx, sink)
+
+	// Wait for both timeline messages, in either order.
+	seen := map[string]bool{}
+	deadline := time.After(5 * time.Second)
+	for len(seen) < 2 {
+		select {
+		case item := <-sink.upserts:
+			seen[item.ID] = true
+		case <-deadline:
+			t.Fatal("timed out waiting for both seed messages to be upserted")
+		}
+	}
+
+	referencedID := itemID("work", room, "$evtA")
+	laterID := itemID("work", room, "$evtB")
+	waitForItemUnread(t, sink, referencedID, false)
+
+	// Give the (potentially wrong) handler a window to also mark evtB
+	// read before asserting it did not.
+	time.Sleep(150 * time.Millisecond)
+	item, err := sink.Get(context.Background(), laterID)
+	if err != nil {
+		t.Fatalf("Get %s: %v", laterID, err)
+	}
+	if !item.Unread {
+		t.Fatalf("item %s Unread = false, want still true: only the referenced event's own timestamp (1000ms) should bound the mark-read, not the receipt's own ts (5000ms)", laterID)
+	}
+}
+
+func TestFullyReadAccountDataMarksThreadReadUpToReferencedEvent(t *testing.T) {
+	const room = id.RoomID("!abc:matrix.example.org")
+	const sender = id.UserID("@bob:matrix.example.org")
+	msgEvt := &event.Event{
+		ID:        "$evt1",
+		Sender:    sender,
+		Type:      event.EventMessage,
+		Timestamp: 1700000000000,
+		Content:   event.Content{Parsed: &event.MessageEventContent{MsgType: event.MsgText, Body: "hi"}},
+	}
+	fullyReadEvt := &event.Event{
+		Type:    event.AccountDataFullyRead,
+		Content: event.Content{Parsed: &event.FullyReadEventContent{EventID: "$evt1"}},
+	}
+
+	sink, cancel := runWithSeedAndEphemeral(t, room, msgEvt, nil, []*event.Event{fullyReadEvt})
+	defer cancel()
+
+	wantID := itemID("work", room, "$evt1")
+	waitForItemUnread(t, sink, wantID, false)
 }

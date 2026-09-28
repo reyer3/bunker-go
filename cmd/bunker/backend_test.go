@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"time"
 
 	"github.com/reyer3/bunker-go/internal/core"
 )
@@ -25,11 +26,53 @@ type fakeBackend struct {
 	readCalls     []readCall
 	downloadCalls []downloadCall
 	avatarCalls   []avatarCall
+	threadCalls   []threadCall
 
 	receipt        core.Receipt
 	sendPlan       core.Plan // overrides Send's default Plan when Action != ""
 	downloadResult core.DownloadResult
 	avatarResult   core.AvatarResult
+	threadErr      error
+	threadItems    []core.Item
+
+	readThreadCalls []readThreadCall
+	readThreadCount int
+	readThreadErr   error
+
+	health         []core.AdapterHealth
+	healthErr      error
+	backfillCalls  []backfillCall
+	backfillResult core.BackfillResult
+	backfillErr    error
+
+	searchCalls []searchCall
+	searchItems []core.Item
+	searchErr   error
+}
+
+type backfillCall struct {
+	Channel core.Channel
+	Account string
+	Folder  string
+	Since   time.Time
+	DryRun  bool
+}
+
+type searchCall struct {
+	Channel  core.Channel
+	Account  string
+	Criteria core.SearchCriteria
+}
+
+type threadCall struct {
+	Channel, Account, Thread string
+	Before                   time.Time
+	Limit                    int
+}
+
+type readThreadCall struct {
+	Channel, Account, Thread string
+	Receipt                  bool
 }
 
 type downloadCall struct {
@@ -179,6 +222,45 @@ func (f *fakeBackend) Avatar(ctx context.Context, channel core.Channel, account,
 		return core.AvatarResult{}, f.avatarErr
 	}
 	return f.avatarResult, nil
+}
+
+func (f *fakeBackend) Thread(ctx context.Context, channel, account, thread string, before time.Time, limit int) ([]core.Item, error) {
+	f.threadCalls = append(f.threadCalls, threadCall{Channel: channel, Account: account, Thread: thread, Before: before, Limit: limit})
+	if f.threadErr != nil {
+		return nil, f.threadErr
+	}
+	return f.threadItems, nil
+}
+
+func (f *fakeBackend) ReadThread(ctx context.Context, channel, account, thread string, receipt bool) (int, error) {
+	f.readThreadCalls = append(f.readThreadCalls, readThreadCall{Channel: channel, Account: account, Thread: thread, Receipt: receipt})
+	if f.readThreadErr != nil {
+		return 0, f.readThreadErr
+	}
+	return f.readThreadCount, nil
+}
+
+func (f *fakeBackend) Health(ctx context.Context) ([]core.AdapterHealth, error) {
+	if f.healthErr != nil {
+		return nil, f.healthErr
+	}
+	return f.health, nil
+}
+
+func (f *fakeBackend) Backfill(ctx context.Context, channel core.Channel, account, folder string, since time.Time, dryRun bool) (core.BackfillResult, error) {
+	f.backfillCalls = append(f.backfillCalls, backfillCall{Channel: channel, Account: account, Folder: folder, Since: since, DryRun: dryRun})
+	if f.backfillErr != nil {
+		return core.BackfillResult{}, f.backfillErr
+	}
+	return f.backfillResult, nil
+}
+
+func (f *fakeBackend) Search(ctx context.Context, channel core.Channel, account string, criteria core.SearchCriteria) ([]core.Item, error) {
+	f.searchCalls = append(f.searchCalls, searchCall{Channel: channel, Account: account, Criteria: criteria})
+	if f.searchErr != nil {
+		return nil, f.searchErr
+	}
+	return f.searchItems, nil
 }
 
 var _ Backend = (*fakeBackend)(nil)

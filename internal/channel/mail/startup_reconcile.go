@@ -22,19 +22,21 @@ type storeLister interface {
 	List(ctx context.Context, filter core.Filter) ([]core.Item, error)
 }
 
-// reconcileStartup implements T9(c): it compares every stored INBOX item
-// for this account against the server, keyed by UIDVALIDITY. A stored
+// reconcileFolder implements T9(c) (and, for folder "Sent", K2's
+// "reconciliation parity"): it compares every stored item of this
+// account's folder against the server, keyed by UIDVALIDITY. A stored
 // item whose UID is no longer present is dropped (its message was moved
 // or deleted elsewhere while the daemon wasn't running — mirroring the
 // stale row kept live on 2026-09-25, mail:cl:1700000000.100); one
 // still present has its \Seen state refreshed via a FETCH bounded to
 // just the stored items, so a read done elsewhere before startup isn't
 // left stale. If UIDVALIDITY itself changed (the mailbox was
-// recreated), every stored INBOX item for this account is dropped
-// outright — a UID collision under a new UIDVALIDITY could name a
-// completely different message — and the normal initial sync that
-// follows repopulates INBOX from scratch.
-func (a *Adapter) reconcileStartup(ctx context.Context, client *imapclient.Client, sink core.Sink, uidValidity uint32) error {
+// recreated), every stored item of this folder for this account is
+// dropped outright — a UID collision under a new UIDVALIDITY could name
+// a completely different message — and the normal sync that follows
+// repopulates the folder from scratch. The caller must already have
+// folder's actual mailbox selected on client.
+func (a *Adapter) reconcileFolder(ctx context.Context, client *imapclient.Client, sink core.Sink, folder string, uidValidity uint32) error {
 	lister, ok := sink.(storeLister)
 	if !ok {
 		return nil
@@ -51,10 +53,10 @@ func (a *Adapter) reconcileStartup(ctx context.Context, client *imapclient.Clien
 	var refs []storedRef
 	storedByID := make(map[string]core.Item, len(stored))
 	for _, item := range stored {
-		if item.Meta["folder"] != "INBOX" {
-			continue // only INBOX is synced/reconciled today
+		if item.Meta["folder"] != folder {
+			continue // only this call's folder is being reconciled here
 		}
-		_, storedValidity, uid, err := parseItemID(item.ID)
+		_, _, storedValidity, uid, err := parseItemID(item.ID)
 		if err != nil {
 			continue // foreign/malformed id, not ours to reconcile
 		}

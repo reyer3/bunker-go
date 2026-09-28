@@ -19,6 +19,16 @@ type Adapter interface {
 type Sink interface {
 	Upsert(ctx context.Context, item Item) error
 	MarkRead(ctx context.Context, id string, read bool) error
+	// MarkThreadReadUpTo marks every unread item of the (channel, account,
+	// thread) conversation whose Timestamp is at or before upTo as read.
+	// It never touches an item whose FromMe is true (marking our own sent
+	// messages "read" makes no sense: only the other side's messages
+	// drive our unread state) and never touches any other thread. Used
+	// when a read event observed elsewhere (a WhatsApp ReadSelf/
+	// MarkChatAsRead, a Matrix m.receipt/m.fully_read, mail's \Seen
+	// reconciliation) reports "the conversation up to this point is
+	// read" rather than naming individual item ids.
+	MarkThreadReadUpTo(ctx context.Context, channel Channel, account, thread string, upTo time.Time) error
 	// Delete removes item id from the store, e.g. when an adapter
 	// observes it was expunged upstream or Service rekeyed it to a new
 	// address after a move. It is a no-op error (ErrNotFound) when id is
@@ -26,12 +36,74 @@ type Sink interface {
 	Delete(ctx context.Context, id string) error
 	Cursor(ctx context.Context, key string) (string, error)
 	SetCursor(ctx context.Context, key, val string) error
+	// EditItem replaces id's stored Body with the new body and sets its
+	// Edited flag (a WhatsApp/Matrix message edit). It is a no-op error
+	// (ErrNotFound) when id is unknown, mirroring MarkRead/Delete.
+	EditItem(ctx context.Context, id, body string) error
+	// RevokeItem clears id's stored Body and sets its Deleted flag,
+	// keeping the row (unlike Delete, which removes it) so the
+	// conversation's history and thread pagination are undisturbed. It
+	// is a no-op error (ErrNotFound) when id is unknown.
+	RevokeItem(ctx context.Context, id string) error
+	// SetReaction stores sender's reaction to item id: a newer reaction
+	// from the same sender replaces the previous one, and an empty
+	// Emoji removes it. Channel-agnostic (see core.Reaction).
+	SetReaction(ctx context.Context, id string, reaction Reaction) error
 }
 
 // Fetcher is an optional capability: adapters that only sync headers/
 // previews implement it to fetch a full body on demand.
 type Fetcher interface {
 	Fetch(ctx context.Context, id string) (Item, error)
+}
+
+// Backfiller is an optional adapter capability: it searches the channel's
+// own server-side history for items on or after since (in folder, a
+// channel-specific mailbox/room/whatever "INBOX" means for it) and
+// upserts via store whichever of them the store doesn't already have,
+// batching however its own protocol batches headers. It never marks
+// anything read and never moves the adapter's regular Run sync cursor,
+// so a later Run resumes exactly where it left off; dryRun reports what
+// would be added without upserting anything. It exists because a bounded
+// adapter (e.g. mail's initial_sync_limit) may never have synced
+// messages older than its window, and Service.Fetch's per-id server
+// fallback (see Service.Fetch) only recovers one id at a time.
+type Backfiller interface {
+	Backfill(ctx context.Context, store Store, folder string, since time.Time, dryRun bool) (BackfillResult, error)
+}
+
+// BackfillResult reports what a Backfiller.Backfill call added, or (on a
+// dry-run) would add.
+type BackfillResult struct {
+	// Count is how many items were (or, on dry-run, would be) upserted.
+	Count int
+	// FirstID and LastID are the lowest- and highest-native-id items
+	// Backfill found in [since, now) — including ones the store already
+	// had — so a dry-run can still report a range when Count is 0. Both
+	// are empty when nothing matched.
+	FirstID, LastID string
+}
+
+// Searcher is an optional adapter capability: it runs a server-side
+// search for criteria and upserts every match via store (headers only,
+// read-only — it must never mark anything read), returning them the way
+// Service.List does. It exists for the case Backfiller and Service.Fetch
+// don't cover: not knowing an item's id at all, only what it should
+// contain.
+type Searcher interface {
+	Search(ctx context.Context, store Store, criteria SearchCriteria) ([]Item, error)
+}
+
+// SearchCriteria narrows a Searcher.Search call. An adapter treats a zero
+// field as "don't filter on this"; Limit <= 0 uses the adapter's own
+// default.
+type SearchCriteria struct {
+	Folder  string
+	From    string
+	Subject string
+	Since   time.Time
+	Before  time.Time
+	Limit   int
 }
 
 // AttachmentDownloader is an optional capability: an adapter that can
@@ -161,6 +233,18 @@ type ReadMarker interface {
 	MarkRead(ctx context.Context, id string) error
 }
 
+// ThreadReader is an optional capability: an adapter that can mark
+// several items of one conversation read on the channel itself in as few
+// native calls as possible implements it — WhatsApp's MarkRead batched
+// per (chat, sender) as whatsmeow requires for a group, or a single
+// Matrix receipt on the newest event (a room's read/fully_read markers
+// already cover every older event). ids is oldest→newest.
+// Service.ReadThread prefers this over calling ReadMarker.MarkRead once
+// per item when the adapter implements it.
+type ThreadReader interface {
+	MarkThreadRead(ctx context.Context, ids []string) error
+}
+
 // AttachmentInfo is what Service computes once for each local file path in
 // Outgoing.Attachments before validating and sending it: its base name,
 // content-sniffed MIME type (falling back to the file extension when
@@ -241,6 +325,48 @@ type FolderMover interface {
 	OrganizeMove(ctx context.Context, id string, op OrganizeOp) (OrganizeMove, error)
 }
 
+// Presence is one conversation's live presence state: WhatsApp contact
+// online/offline plus typing/recording, or Matrix typing. State is one
+// of "online", "offline", "typing", "recording", or "unknown" for a
+// channel with no live presence (mail) or a thread never subscribed to.
+type Presence struct {
+	State    string
+	LastSeen time.Time
+	Typers   []string
+}
+
+// PresenceProvider is an optional capability: an adapter that can report
+// a conversation's live presence (WhatsApp contact presence/typing,
+// Matrix typing) implements it. A channel without it (mail) always
+// reports State "unknown" through Service.Presence, never an error.
+type PresenceProvider interface {
+	Presence(ctx context.Context, thread string) (Presence, error)
+}
+
+// PresenceAvailabilityController is an optional, WhatsApp-specific
+// capability: an adapter whose presence system requires the account to
+// broadcast its own global availability before it receives others'
+// presence/typing updates at all (WhatsApp only delivers a contact's
+// presence while WE are "available", which also shows the user online —
+// the privacy constraint odd/tasks/conversation-view.md's Decisions
+// records) implements it. SetPresenceAvailable(true, thread) broadcasts
+// available and subscribes to thread's presence; SetPresenceAvailable
+// (false, thread) unsubscribes and broadcasts unavailable. Matrix has no
+// such gate and does not implement this capability, so
+// Service.PresenceKeepalive is a no-op for it.
+type PresenceAvailabilityController interface {
+	SetPresenceAvailable(ctx context.Context, available bool, thread string) error
+}
+
+// TypingSender is an optional capability: an adapter that can send a
+// typing/composing notification for a thread implements it. Throttling
+// (at most every 5s while typing; composing=false on idle, send or
+// leave) is the TUI's own responsibility — Service.Typing is a thin,
+// validated forward.
+type TypingSender interface {
+	SendTyping(ctx context.Context, thread string, composing bool) error
+}
+
 // Status is a channel status/story post (e.g. WhatsApp status).
 type Status struct {
 	Text       string
@@ -263,10 +389,13 @@ type Retrier interface {
 	RetryUndecryptable(ctx context.Context, store Store) error
 }
 
-// Filter narrows a List query.
+// Filter narrows a List query. Thread additionally narrows a Thread query
+// (Channel+Account+Thread together identify one conversation); List never
+// reads it.
 type Filter struct {
 	Channel Channel
 	Account string
+	Thread  string
 	Unread  *bool
 	Label   string
 	Query   string
@@ -325,4 +454,10 @@ type Store interface {
 	Get(ctx context.Context, id string) (Item, error)
 	List(ctx context.Context, filter Filter) ([]Item, error)
 	Counts(ctx context.Context) (map[Channel]map[string]int, error)
+	// Thread returns filter.Channel/Account/Thread's items, oldest→newest,
+	// at most limit items strictly before the before cursor (zero means
+	// "the newest window"). Backed by the store's (channel, account,
+	// thread, timestamp) index, so opening a conversation stays fast
+	// regardless of how large the whole store grows.
+	Thread(ctx context.Context, filter Filter, before time.Time, limit int) ([]Item, error)
 }

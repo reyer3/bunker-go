@@ -231,7 +231,8 @@ func TestQueryClientDoesNotRetryMutationsOrBusinessErrors(t *testing.T) {
 	}
 	_, _, _ = client.Reply(context.Background(), "id", "body", nil, nil, false)
 	_, _ = client.Organize(context.Background(), "id", core.OrganizeOp{}, false)
-	if dials != 0 || first.otherCalls != 2 {
+	_, _ = client.Download(context.Background(), "id", 0, "/tmp/x", core.DownloadOptions{})
+	if dials != 0 || first.otherCalls != 3 {
 		t.Fatalf("mutations retried or rerouted: dials=%d calls=%d", dials, first.otherCalls)
 	}
 }

@@ -93,7 +93,7 @@ func TestAdapterOrganizeMoveReportsNewAddress(t *testing.T) {
 
 	// the new id must decode back to an account/uid pair a fresh sync of
 	// the destination mailbox would itself produce.
-	account, _, uid, err := parseItemID(move.ID)
+	account, _, _, uid, err := parseItemID(move.ID)
 	if err != nil {
 		t.Fatalf("parseItemID(%q): %v", move.ID, err)
 	}

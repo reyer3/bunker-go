@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -47,6 +49,35 @@ type Service struct {
 	avatarClock         func() time.Time
 	avatarLimiter       *avatarLimiter
 	avatarCacheCapBytes int64
+
+	// presenceMu/presenceLeases/presenceAfterFunc back the availability
+	// lease PresenceKeepalive implements (see presence.go). presenceAfterFunc
+	// mirrors time.AfterFunc's shape so tests can inject a fake timer and
+	// never wait a real PresenceLeaseTimeout.
+	presenceMu        sync.Mutex
+	presenceLeases    map[string]*presenceLease
+	presenceAfterFunc func(d time.Duration, f func()) (stop func() bool)
+
+	// health backs Service.Health (R4): nil until SetHealthTracker wires
+	// it (production wiring in cmd/bunker/daemon.go), so a Service built
+	// only for tests that never call it simply reports no adapters
+	// rather than erroring.
+	health *HealthTracker
+}
+
+// SetHealthTracker wires the daemon adapter supervisor's shared
+// HealthTracker (R4) into Service.Health.
+func (s *Service) SetHealthTracker(h *HealthTracker) { s.health = h }
+
+// Health returns every adapter's current health snapshot (R4): channel,
+// account, connection state, since when, its last error (if any) and how
+// many times it has been restarted. It never errors; an untracked
+// Service (health tracker not wired) simply returns no adapters.
+func (s *Service) Health(ctx context.Context) ([]AdapterHealth, error) {
+	if s.health == nil {
+		return nil, nil
+	}
+	return s.health.Snapshot(), nil
 }
 
 // NewService wires a Service to its Store and Registry.
@@ -59,6 +90,8 @@ func NewService(store Store, registry *Registry) *Service {
 		avatarClock:         time.Now,
 		avatarLimiter:       newAvatarLimiter(defaultAvatarFetchInterval),
 		avatarCacheCapBytes: avatarCacheCapBytes,
+		presenceLeases:      make(map[string]*presenceLease),
+		presenceAfterFunc:   defaultPresenceAfterFunc,
 	}
 }
 
@@ -95,11 +128,36 @@ func (s *Service) Counts(ctx context.Context) (map[Channel]map[string]int, error
 	return s.store.Counts(ctx)
 }
 
+// defaultThreadLimit is how many items Thread returns when limit is <= 0,
+// matching the RPC/CLI contract's documented default.
+const defaultThreadLimit = 50
+
+// Thread returns one conversation's items, oldest→newest, with at most
+// limit items strictly before the before cursor (zero = newest). limit
+// <= 0 uses defaultThreadLimit.
+func (s *Service) Thread(ctx context.Context, channel, account, thread string, before time.Time, limit int) ([]Item, error) {
+	if limit <= 0 {
+		limit = defaultThreadLimit
+	}
+	return s.store.Thread(ctx, Filter{Channel: Channel(channel), Account: account, Thread: thread}, before, limit)
+}
+
 // Fetch returns the full item body. It uses the registered adapter's
 // Fetcher capability when available, falling back to the stored copy.
+// When the store has no item for id at all (H1: mail-history, e.g. an
+// IMAP UID older than what the initial sync window ever covered), it
+// resolves the (channel, account) from id's own "<channel>:<account>:..."
+// prefix and, if that adapter implements Fetcher, fetches straight from
+// the server and upserts the result into the store — so a later
+// `bunker download` on the same id works exactly like it does for
+// anything sync already knew about. An unknown account, or a native id
+// the server itself doesn't have, both stay ErrNotFound.
 func (s *Service) Fetch(ctx context.Context, id string) (Item, error) {
 	item, err := s.store.Get(ctx, id)
 	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return s.fetchFromServer(ctx, id)
+		}
 		return Item{}, err
 	}
 	adapter, ok := s.registry.Get(item.Channel, item.Account)
@@ -117,6 +175,81 @@ func (s *Service) Fetch(ctx context.Context, id string) (Item, error) {
 		return item, nil
 	}
 	return fetched, err
+}
+
+// parseItemIDPrefix splits a core.Item.ID's leading "<channel>:<account>:"
+// prefix, the scheme every channel package's own itemID builds (see e.g.
+// internal/channel/mail/itemid.go). It never validates the rest of id:
+// that is each adapter's own Fetch to reject.
+func parseItemIDPrefix(id string) (channel Channel, account string, ok bool) {
+	parts := strings.SplitN(id, ":", 3)
+	if len(parts) < 3 || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return Channel(parts[0]), parts[1], true
+}
+
+// fetchFromServer implements Fetch's store-miss fallback (see Fetch's own
+// doc comment). It never marks anything read: it depends entirely on the
+// adapter's own Fetcher, and mail's (the only Fetcher implementation
+// today) always uses IMAP BODY.PEEK.
+func (s *Service) fetchFromServer(ctx context.Context, id string) (Item, error) {
+	channel, account, ok := parseItemIDPrefix(id)
+	if !ok {
+		return Item{}, fmt.Errorf("core: fetch %s: %w", id, ErrNotFound)
+	}
+	adapter, ok := s.registry.Get(channel, account)
+	if !ok {
+		return Item{}, fmt.Errorf("core: fetch %s: no adapter registered for %s/%s: %w", id, channel, account, ErrNotFound)
+	}
+	fetcher, ok := adapter.(Fetcher)
+	if !ok {
+		return Item{}, fmt.Errorf("core: fetch %s: %w", id, ErrNotFound)
+	}
+	fetched, err := fetcher.Fetch(ctx, id)
+	if err != nil {
+		return Item{}, err
+	}
+	if err := s.store.Upsert(ctx, fetched); err != nil {
+		return Item{}, fmt.Errorf("core: fetch %s: upsert: %w", id, err)
+	}
+	return fetched, nil
+}
+
+// Backfill runs a server-side history search on (channel, account)'s
+// Backfiller capability (H2: mail-history), giving it the Service's own
+// Store so it can check what's already there and upsert whatever it
+// finds missing. See Backfiller's doc comment for the exact contract
+// (never marks read, never moves the sync cursor, dryRun upserts
+// nothing). An adapter without Backfiller, or an unregistered account,
+// is ErrUnsupported.
+func (s *Service) Backfill(ctx context.Context, channel Channel, account, folder string, since time.Time, dryRun bool) (BackfillResult, error) {
+	adapter, err := s.adapterFor(channel, account)
+	if err != nil {
+		return BackfillResult{}, err
+	}
+	backfiller, ok := adapter.(Backfiller)
+	if !ok {
+		return BackfillResult{}, fmt.Errorf("core: adapter %s/%s cannot backfill: %w", channel, account, ErrUnsupported)
+	}
+	return backfiller.Backfill(ctx, s.store, folder, since, dryRun)
+}
+
+// Search runs a server-side search on (channel, account)'s Searcher
+// capability (H3: mail-history), giving it the Service's own Store so it
+// can upsert whatever it finds (read-only: it must never mark anything
+// read). An adapter without Searcher, or an unregistered account, is
+// ErrUnsupported.
+func (s *Service) Search(ctx context.Context, channel Channel, account string, criteria SearchCriteria) ([]Item, error) {
+	adapter, err := s.adapterFor(channel, account)
+	if err != nil {
+		return nil, err
+	}
+	searcher, ok := adapter.(Searcher)
+	if !ok {
+		return nil, fmt.Errorf("core: adapter %s/%s cannot search: %w", channel, account, ErrUnsupported)
+	}
+	return searcher.Search(ctx, s.store, criteria)
 }
 
 // Read fetches item id's full body (see Fetch) and, unless markReceipt is
@@ -149,6 +282,113 @@ func (s *Service) Read(ctx context.Context, id string, markReceipt bool) (Item, 
 	}
 	item.Unread = false
 	return item, nil
+}
+
+// readThreadPageSize bounds each Store.Thread page threadItemsAll walks
+// while collecting a whole conversation's history: large enough that a
+// realistic conversation resolves in one round trip, small enough to keep
+// each query cheap for the rare very large thread.
+const readThreadPageSize = 500
+
+// threadItemsAll returns every item of (channel, account, thread),
+// oldest→newest, paging Store.Thread all the way back instead of
+// stopping at its default/likely-truncating window.
+func (s *Service) threadItemsAll(ctx context.Context, channel Channel, account, thread string) ([]Item, error) {
+	filter := Filter{Channel: channel, Account: account, Thread: thread}
+	var (
+		all    []Item
+		before time.Time
+	)
+	for {
+		page, err := s.store.Thread(ctx, filter, before, readThreadPageSize)
+		if err != nil {
+			return nil, err
+		}
+		if len(page) == 0 {
+			break
+		}
+		all = append(page, all...) // page is strictly older than everything already collected
+		before = page[0].Timestamp
+		if len(page) < readThreadPageSize {
+			break
+		}
+	}
+	return all, nil
+}
+
+// markThreadItemsReadOnChannel notifies the channel itself that items were
+// read, preferring adapter's ThreadReader (one batched call) over calling
+// ReadMarker.MarkRead once per item, over calling Organizer.Organize with
+// Seen=true once per item (mail). It is a no-op when adapter implements
+// none of these.
+func markThreadItemsReadOnChannel(ctx context.Context, adapter Adapter, items []Item) error {
+	ids := make([]string, len(items))
+	for i, it := range items {
+		ids[i] = it.ID
+	}
+	if reader, ok := adapter.(ThreadReader); ok {
+		return reader.MarkThreadRead(ctx, ids)
+	}
+	if marker, ok := adapter.(ReadMarker); ok {
+		for _, id := range ids {
+			if err := marker.MarkRead(ctx, id); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if organizer, ok := adapter.(Organizer); ok {
+		seen := true
+		for _, id := range ids {
+			if err := organizer.Organize(ctx, id, OrganizeOp{Seen: &seen}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return nil
+}
+
+// ReadThread marks every unread, non-FromMe item of conversation
+// (channel, account, thread) read: unless receipt is false, it first
+// notifies the channel itself (see markThreadItemsReadOnChannel), then
+// marks them read in the store via MarkThreadReadUpTo (up to the newest
+// selected item's timestamp). It returns how many items it marked, and is
+// idempotent: a thread with nothing unread marks nothing and returns 0.
+//
+// This fixes the K5/K6 read-on-open bug (conversation-view.md,
+// 2026-09-27): opening a conversation used to mark only its newest item
+// read, leaving older unread items stranded in the unread panel.
+func (s *Service) ReadThread(ctx context.Context, channel, account, thread string, receipt bool) (int, error) {
+	ch := Channel(channel)
+	all, err := s.threadItemsAll(ctx, ch, account, thread)
+	if err != nil {
+		return 0, fmt.Errorf("core: read thread: %w", err)
+	}
+
+	var unread []Item
+	for _, it := range all {
+		if it.Unread && !it.FromMe {
+			unread = append(unread, it)
+		}
+	}
+	if len(unread) == 0 {
+		return 0, nil
+	}
+
+	if receipt {
+		if adapter, ok := s.registry.Get(ch, account); ok {
+			if err := markThreadItemsReadOnChannel(ctx, adapter, unread); err != nil {
+				return 0, fmt.Errorf("core: read thread: %w", err)
+			}
+		}
+	}
+
+	newest := unread[len(unread)-1].Timestamp
+	if err := s.store.MarkThreadReadUpTo(ctx, ch, account, thread, newest); err != nil {
+		return 0, fmt.Errorf("core: read thread: store mark read: %w", err)
+	}
+	return len(unread), nil
 }
 
 func (s *Service) adapterFor(channel Channel, account string) (Adapter, error) {
@@ -315,6 +555,7 @@ func (s *Service) Reply(ctx context.Context, id string, body string, cc []string
 		if err != nil {
 			return Plan{}, Receipt{}, fmt.Errorf("core: reply send failed: %w", err)
 		}
+		s.storeSentItem(ctx, item.Channel, item.Account, item.Thread, item.From.ID, plan.Subject, body, plan.Attachments, receipt)
 		return plan, receipt, nil
 	}
 
@@ -329,6 +570,7 @@ func (s *Service) Reply(ctx context.Context, id string, body string, cc []string
 	if err != nil {
 		return Plan{}, Receipt{}, fmt.Errorf("core: reply send failed: %w", err)
 	}
+	s.storeSentItem(ctx, item.Channel, item.Account, item.Thread, item.From.ID, plan.Subject, body, nil, receipt)
 	return plan, receipt, nil
 }
 
@@ -378,6 +620,9 @@ func (s *Service) Send(ctx context.Context, out Outgoing, dryRun bool) (Plan, Re
 		if err != nil {
 			return Plan{}, Receipt{}, fmt.Errorf("core: send media failed: %w", err)
 		}
+		if len(out.To) > 0 {
+			s.storeSentItem(ctx, out.Channel, out.Account, outgoingThread(out.Thread, out.To[0]), out.To[0], out.Subject, out.Body, plan.Attachments, receipt)
+		}
 		return plan, receipt, nil
 	}
 
@@ -392,6 +637,9 @@ func (s *Service) Send(ctx context.Context, out Outgoing, dryRun bool) (Plan, Re
 	receipt, err := sender.Send(ctx, out)
 	if err != nil {
 		return Plan{}, Receipt{}, fmt.Errorf("core: send failed: %w", err)
+	}
+	if len(out.To) > 0 {
+		s.storeSentItem(ctx, out.Channel, out.Account, outgoingThread(out.Thread, out.To[0]), out.To[0], out.Subject, out.Body, nil, receipt)
 	}
 	return plan, receipt, nil
 }
@@ -497,8 +745,11 @@ func (s *Service) sendFanout(ctx context.Context, adapter Adapter, plan Plan, ou
 		result := RecipientResult{To: to, Receipt: receipt}
 		if sendErr != nil {
 			result.Error = sendErr.Error()
-		} else if firstReceipt.ID == "" {
-			firstReceipt = receipt
+		} else {
+			if firstReceipt.ID == "" {
+				firstReceipt = receipt
+			}
+			s.storeSentItem(ctx, out.Channel, out.Account, outgoingThread(out.Thread, to), to, out.Subject, out.Body, plan.Attachments, receipt)
 		}
 		results = append(results, result)
 	}

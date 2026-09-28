@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +26,101 @@ type inboxClient struct {
 	readReceipt bool
 	readResult  core.Item
 	readErr     error
+	// readIDs logs every id Read was called with, in order — K8's
+	// body-fetch cache tests assert on this to prove a cached/in-flight
+	// id is never fetched twice. readResults, when non-nil, answers a
+	// specific id with its own Item instead of the single readResult
+	// (K8 needs a different fetched body per message).
+	readIDs     []string
+	readResults map[string]core.Item
+
+	threadCalls []threadCall
+	threadItems []core.Item
+	threadErr   error
+
+	readThreadCalls []readThreadCall
+	readThreadCount int
+	readThreadErr   error
+	presenceCalls   int
+	presenceResult  core.Presence
+	presenceErr     error
+	keepaliveCalls  []keepaliveCall
+	keepaliveErr    error
+	typingCalls     []typingCall
+	typingErr       error
+
+	organizeCalls  []inboxOrganizeCall
+	organizeResult core.Plan
+	organizeErr    error
+
+	downloadCalls  []downloadCall
+	downloadResult core.DownloadResult
+	downloadErr    error
+}
+
+// downloadCall records one Download call so K5/K6 download tests can
+// assert the exact (id, index, destPath, Force) it sent without a real
+// daemon or filesystem write.
+type downloadCall struct {
+	id       string
+	index    int
+	destPath string
+	opts     core.DownloadOptions
+}
+
+// threadCall/keepaliveCall/typingCall record every K5/K6 chat/thread RPC
+// call so tests can assert pagination bounds, the ≤20s keepalive cadence,
+// and the ≤5s typing throttle without a real daemon.
+type threadCall struct {
+	channel         core.Channel
+	account, thread string
+	before          time.Time
+	limit           int
+}
+type readThreadCall struct {
+	channel         core.Channel
+	account, thread string
+	receipt         bool
+}
+type keepaliveCall struct {
+	channel         core.Channel
+	account, thread string
+	focused         bool
+}
+type typingCall struct {
+	channel         core.Channel
+	account, thread string
+	composing       bool
+}
+
+func (c *inboxClient) Thread(_ context.Context, channel string, account, thread string, before time.Time, limit int) ([]core.Item, error) {
+	c.otherCalls++
+	c.threadCalls = append(c.threadCalls, threadCall{channel: core.Channel(channel), account: account, thread: thread, before: before, limit: limit})
+	return c.threadItems, c.threadErr
+}
+
+func (c *inboxClient) ReadThread(_ context.Context, channel string, account, thread string, receipt bool) (int, error) {
+	c.otherCalls++
+	c.readThreadCalls = append(c.readThreadCalls, readThreadCall{channel: core.Channel(channel), account: account, thread: thread, receipt: receipt})
+	return c.readThreadCount, c.readThreadErr
+}
+
+func (c *inboxClient) Presence(context.Context, string, string, string) (core.Presence, error) {
+	c.otherCalls++
+	c.presenceCalls++
+	return c.presenceResult, c.presenceErr
+}
+
+func (c *inboxClient) PresenceKeepalive(_ context.Context, channel string, account, thread string, focused bool) error {
+	c.otherCalls++
+	c.keepaliveCalls = append(c.keepaliveCalls, keepaliveCall{channel: core.Channel(channel), account: account, thread: thread, focused: focused})
+	return c.keepaliveErr
+}
+
+func (c *inboxClient) Typing(_ context.Context, channel string, account, thread string, composing bool) error {
+	c.otherCalls++
+	c.typingCalls = append(c.typingCalls, typingCall{channel: core.Channel(channel), account: account, thread: thread, composing: composing})
+	return c.typingErr
 }
 
 func (c *inboxClient) List(_ context.Context, filter core.Filter) ([]core.Item, error) {
@@ -43,6 +139,12 @@ func (c *inboxClient) Read(_ context.Context, id string, receipt bool) (core.Ite
 	c.readCalls++
 	c.readID = id
 	c.readReceipt = receipt
+	c.readIDs = append(c.readIDs, id)
+	if c.readResults != nil {
+		if item, ok := c.readResults[id]; ok {
+			return item, c.readErr
+		}
+	}
 	return c.readResult, c.readErr
 }
 
@@ -51,9 +153,31 @@ func (c *inboxClient) Reply(context.Context, string, string, []string, []string,
 	return core.Plan{}, core.Receipt{}, nil
 }
 
-func (c *inboxClient) Organize(context.Context, string, core.OrganizeOp, bool) (core.Plan, error) {
+// inboxOrganizeCall records one Organize call for tests that need to assert
+// on it via the shared inboxClient fake (K6's mark-\Seen-on-open, without
+// needing the separate markClient fake mark_test.go uses for its own
+// dry-run/confirm flow).
+type inboxOrganizeCall struct {
+	id     string
+	op     core.OrganizeOp
+	dryRun bool
+}
+
+func (c *inboxClient) Organize(_ context.Context, id string, op core.OrganizeOp, dryRun bool) (core.Plan, error) {
 	c.otherCalls++
-	return core.Plan{}, nil
+	c.organizeCalls = append(c.organizeCalls, inboxOrganizeCall{id: id, op: op, dryRun: dryRun})
+	return c.organizeResult, c.organizeErr
+}
+
+func (c *inboxClient) Send(context.Context, core.Outgoing, bool) (core.Plan, core.Receipt, error) {
+	c.otherCalls++
+	return core.Plan{}, core.Receipt{}, nil
+}
+
+func (c *inboxClient) Download(_ context.Context, id string, index int, destPath string, opts core.DownloadOptions) (core.DownloadResult, error) {
+	c.otherCalls++
+	c.downloadCalls = append(c.downloadCalls, downloadCall{id: id, index: index, destPath: destPath, opts: opts})
+	return c.downloadResult, c.downloadErr
 }
 
 func (c *inboxClient) Close() error { return nil }
@@ -144,7 +268,13 @@ func TestModelLoadsBoundedUnreadInboxAndCounts(t *testing.T) {
 func TestModelClampsOversizedResponseAndShowsErrors(t *testing.T) {
 	client := &inboxClient{counts: map[core.Channel]map[string]int{core.ChannelMail: {"a": 201}}}
 	for i := 0; i < 201; i++ {
-		client.items = append(client.items, item(strings.Repeat("x", i+1), core.ChannelMail, "a", "", time.Time{}))
+		it := item(strings.Repeat("x", i+1), core.ChannelMail, "a", "", time.Time{})
+		// A distinct sender per item (mail-sender-groups.md merges by
+		// From address): 201 separately collapsed sender rows, so the
+		// pane still has to truncate, not one merged row absorbing all
+		// 200 loaded threads.
+		it.From = core.Address{ID: fmt.Sprintf("sender%d@example.com", i)}
+		client.items = append(client.items, it)
 	}
 	model := NewModel(client)
 	updated, _ := model.Update(model.Init()())
@@ -173,15 +303,19 @@ func TestModelClampsOversizedResponseAndShowsErrors(t *testing.T) {
 func TestModelInboxNavigationDoesNotRead(t *testing.T) {
 	client := &inboxClient{}
 	model := NewModel(client)
+	// Distinct senders (mail-sender-groups.md merges by From address): two
+	// independently selectable, collapsed sender rows, not one merged row.
 	model.groups = []inboxGroup{
-		{items: []core.Item{{ID: "one", Channel: core.ChannelMail}}},
-		{items: []core.Item{{ID: "two", Channel: core.ChannelMail}}},
+		{items: []core.Item{{ID: "one", Channel: core.ChannelMail, From: core.Address{ID: "one@example.com"}}}},
+		{items: []core.Item{{ID: "two", Channel: core.ChannelMail, From: core.Address{ID: "two@example.com"}}}},
 	}
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	model = updated.(Model)
 	if model.selected != 1 {
 		t.Fatalf("selection = %d, want 1", model.selected)
 	}
+	// The now-selected row is a collapsed sender header: Enter toggles it
+	// (no RPC, no selection change), never a synchronous read.
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if client.otherCalls != 0 || updated.(Model).selected != 1 {
 		t.Fatalf("Enter performed a synchronous RPC or changed selection")

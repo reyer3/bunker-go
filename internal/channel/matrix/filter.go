@@ -16,12 +16,21 @@ import "maunium.net/go/mautrix"
 // of us asking for a not_rooms-shaped restriction, and the room timeline
 // is capped to a small limit with lazy-loaded members to keep /sync
 // responses light.
+//
+// Room.Ephemeral and Room.AccountData are likewise explicit, empty
+// filter parts (no Types/NotTypes restriction): read-sync needs every
+// room's m.receipt ephemeral events and m.fully_read account data
+// delivered, and leaving these two RoomFilter fields nil relies on
+// unspecified per-homeserver "no filter for this category" default
+// behavior instead of asking for them outright.
 func SyncFilter() *mautrix.Filter {
 	return &mautrix.Filter{
 		Presence: &mautrix.FilterPart{},
 		Room: &mautrix.RoomFilter{
-			Timeline: &mautrix.FilterPart{Limit: 50},
-			State:    &mautrix.FilterPart{LazyLoadMembers: true},
+			Timeline:    &mautrix.FilterPart{Limit: 50},
+			State:       &mautrix.FilterPart{LazyLoadMembers: true},
+			Ephemeral:   &mautrix.FilterPart{},
+			AccountData: &mautrix.FilterPart{},
 		},
 	}
 }

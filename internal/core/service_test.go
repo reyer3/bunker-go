@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -156,6 +157,10 @@ func (b bareAdapter) Run(ctx context.Context, sink core.Sink) error {
 // memStore is a minimal in-memory core.Store fake for Service tests.
 type memStore struct {
 	items map[string]core.Item
+	// upsertErr, when set, makes every Upsert fail instead of storing,
+	// for tests proving a failed sent-item write (R3) is logged rather
+	// than silently dropped.
+	upsertErr error
 }
 
 func newMemStore(items ...core.Item) *memStore {
@@ -167,6 +172,9 @@ func newMemStore(items ...core.Item) *memStore {
 }
 
 func (m *memStore) Upsert(ctx context.Context, item core.Item) error {
+	if m.upsertErr != nil {
+		return m.upsertErr
+	}
 	m.items[item.ID] = item
 	return nil
 }
@@ -181,6 +189,23 @@ func (m *memStore) MarkRead(ctx context.Context, id string, read bool) error {
 	return nil
 }
 
+func (m *memStore) MarkThreadReadUpTo(ctx context.Context, channel core.Channel, account, thread string, upTo time.Time) error {
+	for id, it := range m.items {
+		if it.Channel != channel || it.Account != account || it.Thread != thread {
+			continue
+		}
+		if it.FromMe || !it.Unread {
+			continue
+		}
+		if it.Timestamp.After(upTo) {
+			continue
+		}
+		it.Unread = false
+		m.items[id] = it
+	}
+	return nil
+}
+
 func (m *memStore) Delete(ctx context.Context, id string) error {
 	if _, ok := m.items[id]; !ok {
 		return core.ErrNotFound
@@ -191,6 +216,47 @@ func (m *memStore) Delete(ctx context.Context, id string) error {
 
 func (m *memStore) Cursor(ctx context.Context, key string) (string, error) { return "", nil }
 func (m *memStore) SetCursor(ctx context.Context, key, val string) error   { return nil }
+
+func (m *memStore) EditItem(ctx context.Context, id, body string) error {
+	it, ok := m.items[id]
+	if !ok {
+		return core.ErrNotFound
+	}
+	it.Body = body
+	it.Edited = true
+	m.items[id] = it
+	return nil
+}
+
+func (m *memStore) RevokeItem(ctx context.Context, id string) error {
+	it, ok := m.items[id]
+	if !ok {
+		return core.ErrNotFound
+	}
+	it.Body = ""
+	it.Deleted = true
+	m.items[id] = it
+	return nil
+}
+
+func (m *memStore) SetReaction(ctx context.Context, id string, reaction core.Reaction) error {
+	it, ok := m.items[id]
+	if !ok {
+		return core.ErrNotFound
+	}
+	var kept []core.Reaction
+	for _, r := range it.Reactions {
+		if r.Sender != reaction.Sender {
+			kept = append(kept, r)
+		}
+	}
+	if reaction.Emoji != "" {
+		kept = append(kept, reaction)
+	}
+	it.Reactions = kept
+	m.items[id] = it
+	return nil
+}
 
 func (m *memStore) Get(ctx context.Context, id string) (core.Item, error) {
 	it, ok := m.items[id]
@@ -217,6 +283,30 @@ func (m *memStore) List(ctx context.Context, filter core.Filter) ([]core.Item, e
 	return out, nil
 }
 
+// Thread is a minimal in-memory stand-in: it filters by
+// Channel/Account/Thread, sorts ascending by Timestamp, applies the
+// before/limit cursor the same way the real store's SQL does (strictly
+// before, most recent limit items within that window), and returns
+// oldest→newest.
+func (m *memStore) Thread(ctx context.Context, filter core.Filter, before time.Time, limit int) ([]core.Item, error) {
+	var matched []core.Item
+	for _, it := range m.items {
+		if it.Channel != filter.Channel || it.Account != filter.Account || it.Thread != filter.Thread {
+			continue
+		}
+		if !before.IsZero() && !it.Timestamp.Before(before) {
+			continue
+		}
+		matched = append(matched, it)
+	}
+	sort.Slice(matched, func(i, j int) bool { return matched[i].Timestamp.After(matched[j].Timestamp) })
+	if limit > 0 && len(matched) > limit {
+		matched = matched[:limit]
+	}
+	sort.Slice(matched, func(i, j int) bool { return matched[i].Timestamp.Before(matched[j].Timestamp) })
+	return matched, nil
+}
+
 func (m *memStore) Counts(ctx context.Context) (map[core.Channel]map[string]int, error) {
 	out := make(map[core.Channel]map[string]int)
 	for _, it := range m.items {
@@ -229,6 +319,51 @@ func (m *memStore) Counts(ctx context.Context) (map[core.Channel]map[string]int,
 		out[it.Channel][it.Account]++
 	}
 	return out, nil
+}
+
+func TestServiceThreadFiltersAndDefaultsLimit(t *testing.T) {
+	base := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	mk := func(id string, offsetMin int) core.Item {
+		return core.Item{
+			ID:        id,
+			Channel:   core.ChannelWhatsApp,
+			Account:   "personal",
+			Thread:    "5511999999999@s.whatsapp.net",
+			Timestamp: base.Add(time.Duration(offsetMin) * time.Minute),
+		}
+	}
+	other := core.Item{
+		ID: "whatsapp:personal:other", Channel: core.ChannelWhatsApp, Account: "personal",
+		Thread: "5511888888888@s.whatsapp.net", Timestamp: base,
+	}
+	store := newMemStore(mk("w:1", 0), mk("w:2", 1), mk("w:3", 2), other)
+	svc := core.NewService(store, core.NewRegistry())
+
+	items, err := svc.Thread(context.Background(), "whatsapp", "personal", "5511999999999@s.whatsapp.net", time.Time{}, 0)
+	if err != nil {
+		t.Fatalf("Thread: %v", err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("Thread() len = %d, want 3 (other thread must be excluded)", len(items))
+	}
+	for i := 0; i+1 < len(items); i++ {
+		if !items[i].Timestamp.Before(items[i+1].Timestamp) {
+			t.Fatalf("Thread() not oldest→newest: %v then %v", items[i].Timestamp, items[i+1].Timestamp)
+		}
+	}
+
+	// limit <= 0 must default to 50 (fewer than 50 items here, so this
+	// only proves the zero limit was not treated as "return nothing").
+	limited, err := svc.Thread(context.Background(), "whatsapp", "personal", "5511999999999@s.whatsapp.net", time.Time{}, 2)
+	if err != nil {
+		t.Fatalf("Thread (limit 2): %v", err)
+	}
+	if len(limited) != 2 {
+		t.Fatalf("Thread(limit=2) len = %d, want 2", len(limited))
+	}
+	if limited[0].ID != "w:2" || limited[1].ID != "w:3" {
+		t.Fatalf("Thread(limit=2) = %+v, want the 2 most recent, oldest→newest", limited)
+	}
 }
 
 func TestServiceReplyDryRunNeverCallsAdapter(t *testing.T) {
@@ -291,6 +426,68 @@ func TestServiceReplyExecutesAndReturnsReceipt(t *testing.T) {
 	}
 	if plan.Action != "reply" {
 		t.Fatalf("plan.Action = %q, want reply", plan.Action)
+	}
+}
+
+// TestServiceReplyStoresSentItemAsFromMe covers K7b (conversation-view.md,
+// Usability pass): most channels never echo bunker's own outgoing message
+// back as an ingest event (WhatsApp never delivers events.Message for a
+// linked device's own send), so without this a real Reply would never
+// appear in the chat view at all. A WhatsApp/Matrix Reply (never mail —
+// see the next test) must store the result as a FromMe item keyed by the
+// receipt's own id, grouped under the original item's Thread.
+func TestServiceReplyStoresSentItemAsFromMe(t *testing.T) {
+	item := core.Item{
+		ID: "whatsapp:personal:1", Channel: core.ChannelWhatsApp, Account: "personal",
+		Thread: "5511999@s.whatsapp.net", From: core.Address{ID: "5511999@s.whatsapp.net"},
+	}
+	store := newMemStore(item)
+	reg := core.NewRegistry()
+	spy := &spyAdapter{channel: core.ChannelWhatsApp, account: "personal"}
+	reg.Register(spy)
+	svc := core.NewService(store, reg)
+
+	_, receipt, err := svc.Reply(context.Background(), item.ID, "reply body", nil, nil, false)
+	if err != nil {
+		t.Fatalf("Reply returned error: %v", err)
+	}
+	stored, ok := store.items[receipt.ID]
+	if !ok {
+		t.Fatalf("Reply did not store the sent item under receipt.ID %q; store = %+v", receipt.ID, store.items)
+	}
+	if !stored.FromMe || stored.Unread {
+		t.Fatalf("stored item = %+v, want FromMe=true Unread=false", stored)
+	}
+	if stored.Thread != item.Thread || stored.Body != "reply body" {
+		t.Fatalf("stored item = %+v, want Thread=%q Body=%q", stored, item.Thread, "reply body")
+	}
+	if len(stored.To) != 1 || stored.To[0].ID != item.From.ID {
+		t.Fatalf("stored item.To = %+v, want [%s]", stored.To, item.From.ID)
+	}
+	if !stored.Timestamp.Equal(receipt.At) {
+		t.Fatalf("stored item.Timestamp = %v, want receipt.At = %v", stored.Timestamp, receipt.At)
+	}
+}
+
+// TestServiceReplyMailNeverStoresSentItem: mail already gets its sent
+// copies through the K2 Sent-folder sync (conversation-view.md), keyed by
+// its own UID-derived id once the message round-trips through IMAP. This
+// synthetic call has no way to learn that later id in advance, so a mail
+// Reply must not additionally store a second, differently-ID'd copy the
+// K2 sync could never dedupe against.
+func TestServiceReplyMailNeverStoresSentItem(t *testing.T) {
+	item := core.Item{ID: "mail:cl:1", Channel: core.ChannelMail, Account: "cl", Thread: "t1", From: core.Address{ID: "them@x.cl"}}
+	store := newMemStore(item)
+	reg := core.NewRegistry()
+	spy := &spyAdapter{channel: core.ChannelMail, account: "cl"}
+	reg.Register(spy)
+	svc := core.NewService(store, reg)
+
+	if _, _, err := svc.Reply(context.Background(), item.ID, "reply body", nil, nil, false); err != nil {
+		t.Fatalf("Reply returned error: %v", err)
+	}
+	if len(store.items) != 1 {
+		t.Fatalf("store has %d items after a mail Reply, want 1 (the original only, no synthetic sent copy): %+v", len(store.items), store.items)
 	}
 }
 
@@ -462,6 +659,111 @@ func TestServiceSendExecutes(t *testing.T) {
 	}
 	if receipt.ID != "sent-1" {
 		t.Fatalf("receipt = %+v", receipt)
+	}
+}
+
+// TestServiceSendStoresSentItemAsFromMe covers K7b: a real (non-dry-run)
+// Send must store the result as a FromMe item keyed by the receipt's own
+// id, so it appears in the chat view even though the channel itself never
+// echoes bunker's own send back as an ingest event.
+func TestServiceSendStoresSentItemAsFromMe(t *testing.T) {
+	store := newMemStore()
+	reg := core.NewRegistry()
+	spy := &spyAdapter{channel: core.ChannelWhatsApp, account: "personal"}
+	reg.Register(spy)
+	svc := core.NewService(store, reg)
+
+	out := core.Outgoing{Channel: core.ChannelWhatsApp, Account: "personal", To: []string{"5511999"}, Body: "hola"}
+	_, receipt, err := svc.Send(context.Background(), out, false)
+	if err != nil {
+		t.Fatalf("Send returned error: %v", err)
+	}
+	stored, ok := store.items[receipt.ID]
+	if !ok {
+		t.Fatalf("Send did not store the sent item under receipt.ID %q; store = %+v", receipt.ID, store.items)
+	}
+	if !stored.FromMe || stored.Unread {
+		t.Fatalf("stored item = %+v, want FromMe=true Unread=false", stored)
+	}
+	if stored.Body != "hola" || stored.Channel != core.ChannelWhatsApp || stored.Account != "personal" {
+		t.Fatalf("stored item = %+v, want the sent body/channel/account", stored)
+	}
+	if stored.Thread != "5511999" {
+		t.Fatalf("stored item.Thread = %q, want the recipient %q (no explicit Thread given)", stored.Thread, "5511999")
+	}
+	if len(stored.To) != 1 || stored.To[0].ID != "5511999" {
+		t.Fatalf("stored item.To = %+v, want [5511999]", stored.To)
+	}
+	if !stored.Timestamp.Equal(receipt.At) {
+		t.Fatalf("stored item.Timestamp = %v, want receipt.At = %v", stored.Timestamp, receipt.At)
+	}
+}
+
+// TestServiceSendDryRunNeverStoresSentItem is K7b's mutation-checked half:
+// a dry-run must NEVER store anything, since it never actually sent.
+func TestServiceSendDryRunNeverStoresSentItem(t *testing.T) {
+	store := newMemStore()
+	reg := core.NewRegistry()
+	spy := &spyAdapter{channel: core.ChannelWhatsApp, account: "personal"}
+	reg.Register(spy)
+	svc := core.NewService(store, reg)
+
+	out := core.Outgoing{Channel: core.ChannelWhatsApp, Account: "personal", To: []string{"5511999"}, Body: "hola"}
+	if _, _, err := svc.Send(context.Background(), out, true); err != nil {
+		t.Fatalf("Send dry-run returned error: %v", err)
+	}
+	if len(store.items) != 0 {
+		t.Fatalf("dry-run Send stored %d item(s), want 0: %+v", len(store.items), store.items)
+	}
+}
+
+// TestServiceSendUpsertIsIdempotentOnRepeatedReceiptID: the channel may
+// later echo the same message id back through its own ingest path; a
+// second store write for the same id must overwrite, never duplicate.
+func TestServiceSendUpsertIsIdempotentOnRepeatedReceiptID(t *testing.T) {
+	store := newMemStore()
+	reg := core.NewRegistry()
+	spy := &spyAdapter{channel: core.ChannelWhatsApp, account: "personal"} // always returns receipt ID "sent-1"
+	reg.Register(spy)
+	svc := core.NewService(store, reg)
+
+	out := core.Outgoing{Channel: core.ChannelWhatsApp, Account: "personal", To: []string{"5511999"}, Body: "hola"}
+	if _, _, err := svc.Send(context.Background(), out, false); err != nil {
+		t.Fatalf("first Send returned error: %v", err)
+	}
+	out.Body = "hola de nuevo"
+	if _, _, err := svc.Send(context.Background(), out, false); err != nil {
+		t.Fatalf("second Send returned error: %v", err)
+	}
+	if len(store.items) != 1 {
+		t.Fatalf("store has %d items, want exactly 1 (idempotent upsert by receipt.ID): %+v", len(store.items), store.items)
+	}
+	if store.items["sent-1"].Body != "hola de nuevo" {
+		t.Fatalf("stored body = %q, want the second call's body (last write wins)", store.items["sent-1"].Body)
+	}
+}
+
+// TestServiceSendMediaStoresSentItemWithAttachments covers K7b's
+// "attachments metadata" clause for the media (SendMedia) path.
+func TestServiceSendMediaStoresSentItemWithAttachments(t *testing.T) {
+	store := newMemStore()
+	reg := core.NewRegistry()
+	spy := &spyMediaAdapter{spyAdapter: spyAdapter{channel: core.ChannelWhatsApp, account: "personal"}, policy: imagePolicy(1 << 20)}
+	reg.Register(spy)
+	svc := core.NewService(store, reg)
+
+	path := writeTestFile(t, "pic.png", pngSignatureBytes)
+	out := core.Outgoing{Channel: core.ChannelWhatsApp, Account: "personal", To: []string{"5511999"}, Body: "mira", Attachments: []string{path}}
+	_, receipt, err := svc.Send(context.Background(), out, false)
+	if err != nil {
+		t.Fatalf("Send returned error: %v", err)
+	}
+	stored, ok := store.items[receipt.ID]
+	if !ok {
+		t.Fatalf("Send did not store the sent item under receipt.ID %q", receipt.ID)
+	}
+	if len(stored.Attachments) != 1 || stored.Attachments[0].Name != "pic.png" || stored.Attachments[0].MIME != "image/png" {
+		t.Fatalf("stored item.Attachments = %+v, want one pic.png/image/png entry", stored.Attachments)
 	}
 }
 
@@ -947,5 +1249,217 @@ func TestServiceFetchFallsBackToStoreWhenAdapterForgot(t *testing.T) {
 	}
 	if got.Body != "hola" {
 		t.Fatalf("Fetch = %+v, want the stored copy", got)
+	}
+}
+
+// TestServiceFetchFallsBackToServerWhenStoreLacksItem: mail-history H1.
+// A caller may need INBOX mails at UIDs older than the store's first
+// synced UID; those ids 404 from store.Get, but the
+// mail adapter's own Fetch (BODY.PEEK) can still get them from the
+// server. Fetch must resolve the (channel, account) from the id prefix,
+// fetch through the registered Fetcher, upsert the result into the
+// store, and return it.
+func TestServiceFetchFallsBackToServerWhenStoreLacksItem(t *testing.T) {
+	store := newMemStore() // empty: id "mail:cl:5" was never synced
+	reg := core.NewRegistry()
+	spy := &spyAdapter{channel: core.ChannelMail, account: "cl"}
+	reg.Register(spy)
+	svc := core.NewService(store, reg)
+
+	got, err := svc.Fetch(context.Background(), "mail:cl:5")
+	if err != nil {
+		t.Fatalf("Fetch error = %v, want the server-fetched item", err)
+	}
+	if spy.fetchCalls != 1 {
+		t.Fatalf("adapter.Fetch called %d times, want 1", spy.fetchCalls)
+	}
+	if got.Body != "fetched" {
+		t.Fatalf("Fetch body = %q, want fetched", got.Body)
+	}
+
+	stored, err := store.Get(context.Background(), "mail:cl:5")
+	if err != nil {
+		t.Fatalf("store.Get after Fetch error = %v, want the item to be upserted", err)
+	}
+	if stored.Body != "fetched" {
+		t.Fatalf("stored.Body = %q, want fetched", stored.Body)
+	}
+}
+
+// TestServiceFetchUnknownAccountStaysErrNotFound: an id whose account has
+// no registered adapter must never fall back to a different account's
+// adapter, and must stay ErrNotFound.
+func TestServiceFetchUnknownAccountStaysErrNotFound(t *testing.T) {
+	store := newMemStore()
+	reg := core.NewRegistry()
+	reg.Register(&spyAdapter{channel: core.ChannelMail, account: "cl"})
+	svc := core.NewService(store, reg)
+
+	_, err := svc.Fetch(context.Background(), "mail:unknown:5")
+	if !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("Fetch err = %v, want ErrNotFound", err)
+	}
+}
+
+// missingFetcher is a Fetcher whose server genuinely doesn't have the
+// requested id (e.g. a UID the mailbox never contained).
+type missingFetcher struct{ spyAdapter }
+
+func (f *missingFetcher) Fetch(ctx context.Context, id string) (core.Item, error) {
+	f.fetchCalls++
+	return core.Item{}, fmt.Errorf("mail: fetch %s: %w", id, core.ErrNotFound)
+}
+
+// TestServiceFetchServerMissingUIDStaysErrNotFound: the store lacks the
+// item AND the server reports it doesn't exist either (not merely "this
+// adapter instance forgot it", see TestServiceFetchFallsBackToStoreWhenAdapterForgot,
+// which is the opposite case of an adapter Fetcher that never actually
+// hits the server). Nothing is upserted.
+func TestServiceFetchServerMissingUIDStaysErrNotFound(t *testing.T) {
+	store := newMemStore()
+	reg := core.NewRegistry()
+	reg.Register(&missingFetcher{spyAdapter{channel: core.ChannelMail, account: "cl"}})
+	svc := core.NewService(store, reg)
+
+	_, err := svc.Fetch(context.Background(), "mail:cl:999")
+	if !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("Fetch err = %v, want ErrNotFound", err)
+	}
+	if _, err := store.Get(context.Background(), "mail:cl:999"); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("store.Get = %v, want ErrNotFound (nothing should be upserted)", err)
+	}
+}
+
+// spyBackfiller is a core.Backfiller double, mail-history H2's core-layer
+// dispatch tests: Service.Backfill must resolve the (channel, account)
+// adapter, require its Backfiller capability, and pass its own Store
+// through untouched (the adapter checks/upserts against it directly).
+type spyBackfiller struct {
+	spyAdapter
+	calls     int
+	gotStore  core.Store
+	gotFolder string
+	gotSince  time.Time
+	gotDryRun bool
+	result    core.BackfillResult
+	err       error
+}
+
+func (b *spyBackfiller) Backfill(ctx context.Context, store core.Store, folder string, since time.Time, dryRun bool) (core.BackfillResult, error) {
+	b.calls++
+	b.gotStore = store
+	b.gotFolder = folder
+	b.gotSince = since
+	b.gotDryRun = dryRun
+	return b.result, b.err
+}
+
+func TestServiceBackfillDelegatesToAdapter(t *testing.T) {
+	store := newMemStore()
+	reg := core.NewRegistry()
+	backfiller := &spyBackfiller{
+		spyAdapter: spyAdapter{channel: core.ChannelMail, account: "cl"},
+		result:     core.BackfillResult{Count: 3, FirstID: "mail:cl:1.1", LastID: "mail:cl:1.3"},
+	}
+	reg.Register(backfiller)
+	svc := core.NewService(store, reg)
+
+	since := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	result, err := svc.Backfill(context.Background(), core.ChannelMail, "cl", "INBOX", since, false)
+	if err != nil {
+		t.Fatalf("Backfill error = %v", err)
+	}
+	if backfiller.calls != 1 {
+		t.Fatalf("adapter.Backfill called %d times, want 1", backfiller.calls)
+	}
+	if backfiller.gotFolder != "INBOX" || !backfiller.gotSince.Equal(since) || backfiller.gotDryRun {
+		t.Errorf("Backfill args = folder=%q since=%v dryRun=%v, want INBOX/%v/false", backfiller.gotFolder, backfiller.gotSince, backfiller.gotDryRun, since)
+	}
+	if backfiller.gotStore == nil {
+		t.Error("Backfill did not receive the Service's store")
+	}
+	if result.Count != 3 || result.FirstID != "mail:cl:1.1" || result.LastID != "mail:cl:1.3" {
+		t.Errorf("result = %+v, want the adapter's BackfillResult verbatim", result)
+	}
+}
+
+func TestServiceBackfillUnsupportedCapability(t *testing.T) {
+	store := newMemStore()
+	reg := core.NewRegistry()
+	reg.Register(&spyAdapter{channel: core.ChannelMail, account: "cl"})
+	svc := core.NewService(store, reg)
+
+	_, err := svc.Backfill(context.Background(), core.ChannelMail, "cl", "INBOX", time.Now(), false)
+	if !errors.Is(err, core.ErrUnsupported) {
+		t.Fatalf("Backfill err = %v, want ErrUnsupported", err)
+	}
+}
+
+func TestServiceBackfillUnknownAccountIsUnsupported(t *testing.T) {
+	store := newMemStore()
+	reg := core.NewRegistry()
+	svc := core.NewService(store, reg)
+
+	_, err := svc.Backfill(context.Background(), core.ChannelMail, "ghost", "INBOX", time.Now(), false)
+	if !errors.Is(err, core.ErrUnsupported) {
+		t.Fatalf("Backfill err = %v, want ErrUnsupported", err)
+	}
+}
+
+// spySearcher is a core.Searcher double: Service.Search must resolve the
+// adapter, require its Searcher capability, and pass its own Store
+// through untouched.
+type spySearcher struct {
+	spyAdapter
+	calls       int
+	gotStore    core.Store
+	gotCriteria core.SearchCriteria
+	result      []core.Item
+	err         error
+}
+
+func (s *spySearcher) Search(ctx context.Context, store core.Store, criteria core.SearchCriteria) ([]core.Item, error) {
+	s.calls++
+	s.gotStore = store
+	s.gotCriteria = criteria
+	return s.result, s.err
+}
+
+func TestServiceSearchDelegatesToAdapter(t *testing.T) {
+	store := newMemStore()
+	reg := core.NewRegistry()
+	want := []core.Item{{ID: "mail:cl:1.1", Channel: core.ChannelMail, Account: "cl", Subject: "hi"}}
+	searcher := &spySearcher{spyAdapter: spyAdapter{channel: core.ChannelMail, account: "cl"}, result: want}
+	reg.Register(searcher)
+	svc := core.NewService(store, reg)
+
+	criteria := core.SearchCriteria{Folder: "INBOX", From: "alice@x"}
+	got, err := svc.Search(context.Background(), core.ChannelMail, "cl", criteria)
+	if err != nil {
+		t.Fatalf("Search error = %v", err)
+	}
+	if searcher.calls != 1 {
+		t.Fatalf("adapter.Search called %d times, want 1", searcher.calls)
+	}
+	if searcher.gotCriteria != criteria {
+		t.Errorf("Search criteria = %+v, want %+v", searcher.gotCriteria, criteria)
+	}
+	if searcher.gotStore == nil {
+		t.Error("Search did not receive the Service's store")
+	}
+	if len(got) != 1 || got[0].ID != want[0].ID {
+		t.Errorf("Search result = %+v, want %+v", got, want)
+	}
+}
+
+func TestServiceSearchUnsupportedCapability(t *testing.T) {
+	store := newMemStore()
+	reg := core.NewRegistry()
+	reg.Register(&spyAdapter{channel: core.ChannelMail, account: "cl"})
+	svc := core.NewService(store, reg)
+
+	_, err := svc.Search(context.Background(), core.ChannelMail, "cl", core.SearchCriteria{})
+	if !errors.Is(err, core.ErrUnsupported) {
+		t.Fatalf("Search err = %v, want ErrUnsupported", err)
 	}
 }

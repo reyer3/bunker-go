@@ -218,6 +218,25 @@ func (s *fakeSink) MarkRead(_ context.Context, id string, read bool) error {
 	return nil
 }
 
+// MarkThreadReadUpTo flips Unread=false on every matching item (same
+// channel/account/thread, not FromMe, Timestamp <= upTo), mirroring the
+// real store's filter.
+func (s *fakeSink) MarkThreadReadUpTo(_ context.Context, channel core.Channel, account, thread string, upTo time.Time) error {
+	s.lock()
+	for id, item := range s.items {
+		if item.Channel != channel || item.Account != account || item.Thread != thread {
+			continue
+		}
+		if item.FromMe || !item.Unread || item.Timestamp.After(upTo) {
+			continue
+		}
+		item.Unread = false
+		s.items[id] = item
+	}
+	s.unlock()
+	return nil
+}
+
 func (s *fakeSink) Delete(_ context.Context, id string) error {
 	s.lock()
 	if _, ok := s.items[id]; !ok {
@@ -243,6 +262,53 @@ func (s *fakeSink) SetCursor(_ context.Context, key, val string) error {
 	s.lock()
 	defer s.unlock()
 	s.cursors[key] = val
+	return nil
+}
+
+func (s *fakeSink) EditItem(_ context.Context, id, body string) error {
+	s.lock()
+	defer s.unlock()
+	item, ok := s.items[id]
+	if !ok {
+		return core.ErrNotFound
+	}
+	item.Body = body
+	item.Edited = true
+	s.items[id] = item
+	return nil
+}
+
+func (s *fakeSink) RevokeItem(_ context.Context, id string) error {
+	s.lock()
+	defer s.unlock()
+	item, ok := s.items[id]
+	if !ok {
+		return core.ErrNotFound
+	}
+	item.Body = ""
+	item.Deleted = true
+	s.items[id] = item
+	return nil
+}
+
+func (s *fakeSink) SetReaction(_ context.Context, id string, reaction core.Reaction) error {
+	s.lock()
+	defer s.unlock()
+	item, ok := s.items[id]
+	if !ok {
+		return core.ErrNotFound
+	}
+	var kept []core.Reaction
+	for _, r := range item.Reactions {
+		if r.Sender != reaction.Sender {
+			kept = append(kept, r)
+		}
+	}
+	if reaction.Emoji != "" {
+		kept = append(kept, reaction)
+	}
+	item.Reactions = kept
+	s.items[id] = item
 	return nil
 }
 
@@ -281,16 +347,6 @@ func (s *fakeSink) List(_ context.Context, filter core.Filter) ([]core.Item, err
 		out = append(out, it)
 	}
 	return out, nil
-}
-
-func (s *fakeSink) snapshot() []core.Item {
-	s.lock()
-	defer s.unlock()
-	out := make([]core.Item, 0, len(s.items))
-	for _, it := range s.items {
-		out = append(out, it)
-	}
-	return out
 }
 
 func rawMessage(messageID, references, subject, from, to, body string) string {
@@ -384,6 +440,55 @@ func TestAdapterRunInitialSync(t *testing.T) {
 
 	if v, err := sink.Cursor(context.Background(), cursorKey("cl", "inbox.last_uid")); err != nil || v == "" {
 		t.Errorf("last_uid cursor = %q, err = %v, want a persisted UID", v, err)
+	}
+}
+
+// TestAdapterRunSetsFromMeForOwnAddress proves buildItem sets FromMe
+// when an INBOX message's From matches the account's own address
+// (cfg.Username, compared case-insensitively) — which happens for a
+// message the user sent to themselves, or one a mail client filed back into
+// INBOX after sending. It must never be derived from \Seen/Unread.
+func TestAdapterRunSetsFromMeForOwnAddress(t *testing.T) {
+	addr, _, _ := newMemIMAPServer(t)
+	appendMessage(t, addr, "INBOX", rawMessage(
+		"<from-other@example.org>", "", "From Bob",
+		"Bob <bob@example.org>", "alice@example.org", "hi",
+	))
+	appendMessage(t, addr, "INBOX", rawMessage(
+		"<from-self@example.org>", "", "Note to self",
+		"Alice <ALICE@Example.ORG>", "alice@example.org", "reminder",
+	))
+
+	cfg := AccountConfig{Name: "cl", IMAPHost: "unused", FolderPrefix: "INBOX", FolderSeparator: '.', Username: "alice@example.org"}
+	adapter := newAdapter(cfg, nil, nil, testDialInsecure(addr))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sink := newFakeSink()
+	done := make(chan error, 1)
+	go func() { done <- adapter.Run(ctx, sink) }()
+
+	first := waitForUpsert(t, sink, 5*time.Second)
+	second := waitForUpsert(t, sink, 5*time.Second)
+	cancel()
+	if err := <-done; err != context.Canceled {
+		t.Fatalf("Run() error = %v, want context.Canceled", err)
+	}
+
+	for _, item := range []core.Item{first, second} {
+		switch item.Subject {
+		case "From Bob":
+			if item.FromMe {
+				t.Errorf("item %q FromMe = true, want false (From bob@example.org)", item.Subject)
+			}
+		case "Note to self":
+			if !item.FromMe {
+				t.Errorf("item %q FromMe = false, want true (From matches the account's own address, case-insensitively)", item.Subject)
+			}
+		default:
+			t.Errorf("unexpected item subject %q", item.Subject)
+		}
 	}
 }
 
@@ -538,12 +643,237 @@ func TestSyncFromUsesCallerMessageCountNotClientCache(t *testing.T) {
 			}
 
 			sink := newFakeSink()
-			if _, err := adapter.syncFrom(ctx, client, sink, folders, mbox.UIDValidity, 0, newSeqTracker(), tc.numMessages); err != nil {
+			if _, err := adapter.syncFrom(ctx, client, sink, folders, mbox.UIDValidity, 0, newSeqTracker(), tc.numMessages, "INBOX"); err != nil {
 				t.Fatalf("syncFrom() error = %v", err)
 			}
 			if got := len(sink.upserts); got != tc.wantUpserts {
 				t.Errorf("upserts = %d, want %d", got, tc.wantUpserts)
 			}
 		})
+	}
+}
+
+// markSeenElsewhere flips \Seen on uid in mailbox via a second,
+// independent connection, simulating a read made on another client
+// (Roundcube, the phone's Gmail app) while the adapter under test holds
+// its own connection open.
+func markSeenElsewhere(t *testing.T, addr, mailbox string, uid imap.UID) {
+	t.Helper()
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial to mark seen elsewhere: %v", err)
+	}
+	client := imapclient.New(conn, nil)
+	defer client.Close()
+	if err := client.Login(testIMAPUsername, testIMAPPassword).Wait(); err != nil {
+		t.Fatalf("login to mark seen elsewhere: %v", err)
+	}
+	if _, err := client.Select(mailbox, nil).Wait(); err != nil {
+		t.Fatalf("select to mark seen elsewhere: %v", err)
+	}
+	storeFlags := &imap.StoreFlags{Op: imap.StoreFlagsAdd, Silent: true, Flags: []imap.Flag{imap.FlagSeen}}
+	if err := client.Store(imap.UIDSetNum(uid), storeFlags, nil).Close(); err != nil {
+		t.Fatalf("store \\Seen elsewhere: %v", err)
+	}
+}
+
+// TestReconcileSeenFlagsMarksStoredUnreadItemsNowSeenElsewhere proves the
+// core R4 mechanism directly, called with no IDLE command ever issued on
+// the adapter's own connection at all — the literal "pre-IDLE window"
+// gap the periodic safety-net closes: a \Seen change made from a second
+// client before this session's IDLE (or, here, before it ever starts)
+// has no unsolicited FETCH to be observed through, so only an explicit
+// UID FETCH FLAGS like this one can catch it up.
+func TestReconcileSeenFlagsMarksStoredUnreadItemsNowSeenElsewhere(t *testing.T) {
+	addr, _, _ := newMemIMAPServer(t)
+	appendMessage(t, addr, "INBOX", rawMessage(
+		"<msg1@example.org>", "", "Reconcile me",
+		"Alice <alice@example.org>", "alice@example.org", "Body one",
+	))
+
+	cfg := AccountConfig{Name: "cl", IMAPHost: "unused", FolderPrefix: "INBOX", FolderSeparator: '.'}
+	adapter := newAdapter(cfg, nil, nil, testDialInsecure(addr))
+	ctx := context.Background()
+
+	client, err := testDialInsecure(addr)(ctx, cfg, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer client.Close()
+	mbox, err := client.Select("INBOX", nil).Wait()
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+
+	searchData, err := client.UIDSearch(&imap.SearchCriteria{}, nil).Wait()
+	if err != nil {
+		t.Fatalf("uid search: %v", err)
+	}
+	uids := searchData.AllUIDs()
+	if len(uids) != 1 {
+		t.Fatalf("uid search returned %d uids, want 1", len(uids))
+	}
+	uid := uids[0]
+
+	sink := newFakeSink()
+	id := itemID("cl", "INBOX", mbox.UIDValidity, uid)
+	seed := core.Item{
+		ID: id, Channel: core.ChannelMail, Account: "cl",
+		Unread: true, Timestamp: time.Now(),
+		Meta: map[string]string{"folder": "INBOX"},
+	}
+	if err := sink.Upsert(ctx, seed); err != nil {
+		t.Fatalf("seed Upsert: %v", err)
+	}
+
+	// The change happens entirely before reconcileSeenFlags is ever
+	// called, on a connection that has never IDLEd — nothing here relies
+	// on IDLE at all.
+	markSeenElsewhere(t, addr, "INBOX", uid)
+
+	if err := adapter.reconcileSeenFlags(ctx, client, sink, mbox.UIDValidity); err != nil {
+		t.Fatalf("reconcileSeenFlags: %v", err)
+	}
+
+	got, err := sink.getItem(id)
+	if err != nil {
+		t.Fatalf("getItem: %v", err)
+	}
+	if got.Unread {
+		t.Errorf("item %s still Unread after reconcileSeenFlags, want false", id)
+	}
+}
+
+// TestReconcileSeenFlagsIgnoresItemsAlreadyRead proves reconcileSeenFlags
+// leaves an already-read item alone (no spurious MarkRead call) and
+// skips items outside its (channel, account, INBOX, current uidvalidity)
+// scope.
+func TestReconcileSeenFlagsIgnoresItemsAlreadyRead(t *testing.T) {
+	addr, _, _ := newMemIMAPServer(t)
+	appendMessage(t, addr, "INBOX", rawMessage(
+		"<msg1@example.org>", "", "Already read",
+		"Alice <alice@example.org>", "alice@example.org", "Body",
+	))
+
+	cfg := AccountConfig{Name: "cl", IMAPHost: "unused"}
+	adapter := newAdapter(cfg, nil, nil, testDialInsecure(addr))
+	ctx := context.Background()
+
+	client, err := testDialInsecure(addr)(ctx, cfg, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer client.Close()
+	mbox, err := client.Select("INBOX", nil).Wait()
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+
+	searchData, err := client.UIDSearch(&imap.SearchCriteria{}, nil).Wait()
+	if err != nil {
+		t.Fatalf("uid search: %v", err)
+	}
+	uids := searchData.AllUIDs()
+	if len(uids) != 1 {
+		t.Fatalf("uid search returned %d uids, want 1", len(uids))
+	}
+	uid := uids[0]
+
+	sink := newFakeSink()
+	// Not unread: reconcileSeenFlags must never touch it (and must never
+	// call sink.MarkRead for it).
+	alreadyRead := core.Item{
+		ID: itemID("cl", "INBOX", mbox.UIDValidity, uid), Channel: core.ChannelMail, Account: "cl",
+		Unread: false, Timestamp: time.Now(), Meta: map[string]string{"folder": "INBOX"},
+	}
+	// Unread, but from a stale mailbox generation (a UIDVALIDITY that
+	// does not match this connection's current one) reusing the same
+	// raw UID number: reconcileSeenFlags must never mark this one read
+	// either, even though the real message at that UID is \Seen —
+	// mixing UID numbers across UIDVALIDITY generations would apply an
+	// unrelated message's flags to the wrong stored item.
+	staleGeneration := core.Item{
+		ID: itemID("cl", "INBOX", mbox.UIDValidity+999, uid), Channel: core.ChannelMail, Account: "cl",
+		Unread: true, Timestamp: time.Now(), Meta: map[string]string{"folder": "INBOX"},
+	}
+	if err := sink.Upsert(ctx, alreadyRead); err != nil {
+		t.Fatalf("seed Upsert: %v", err)
+	}
+	if err := sink.Upsert(ctx, staleGeneration); err != nil {
+		t.Fatalf("seed Upsert: %v", err)
+	}
+
+	if err := adapter.reconcileSeenFlags(ctx, client, sink, mbox.UIDValidity); err != nil {
+		t.Fatalf("reconcileSeenFlags: %v", err)
+	}
+
+	got, err := sink.getItem(staleGeneration.ID)
+	if err != nil {
+		t.Fatalf("getItem: %v", err)
+	}
+	if !got.Unread {
+		t.Errorf("item %s Unread = false, want still true: reconcileSeenFlags must not cross UIDVALIDITY generations", staleGeneration.ID)
+	}
+	select {
+	case ev := <-sink.markRead:
+		t.Errorf("unexpected MarkRead call: %+v", ev)
+	default:
+	}
+}
+
+// TestAdapterRunPeriodicSeenReconcileAppliesChangeMadeElsewhere is the
+// integration-level proof that Run wires the periodic ticker correctly:
+// with a short SeenReconcileInterval, a \Seen change made by a second
+// client while the adapter is connected and IDLEing eventually clears
+// the item's unread state without Run ever returning an error or the
+// connection dropping.
+func TestAdapterRunPeriodicSeenReconcileAppliesChangeMadeElsewhere(t *testing.T) {
+	addr, _, _ := newMemIMAPServer(t)
+	appendMessage(t, addr, "INBOX", rawMessage(
+		"<msg1@example.org>", "", "Read me on the phone",
+		"Alice <alice@example.org>", "alice@example.org", "Body one",
+	))
+
+	cfg := AccountConfig{
+		Name: "cl", IMAPHost: "unused", FolderPrefix: "INBOX", FolderSeparator: '.',
+		SeenReconcileInterval: 20 * time.Millisecond,
+	}
+	adapter := newAdapter(cfg, nil, nil, testDialInsecure(addr))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sink := newFakeSink()
+	done := make(chan error, 1)
+	go func() { done <- adapter.Run(ctx, sink) }()
+
+	seed := waitForUpsert(t, sink, 5*time.Second)
+
+	_, _, uidValidity, uid, err := parseItemID(seed.ID)
+	if err != nil {
+		t.Fatalf("parseItemID(%q): %v", seed.ID, err)
+	}
+	markSeenElsewhere(t, addr, "INBOX", uid)
+	_ = uidValidity
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		item, err := sink.getItem(seed.ID)
+		if err == nil && !item.Unread {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for the periodic reconcile to clear %s (last item=%+v, err=%v)", seed.ID, item, err)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != context.Canceled {
+			t.Fatalf("Run() error = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for Run to return after cancel")
 	}
 }

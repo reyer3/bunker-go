@@ -45,6 +45,34 @@ type Item struct {
 	Attachments []Attachment
 	Labels      []string
 	Unread      bool
-	Timestamp   time.Time
-	Meta        map[string]string
+	// FromMe reports whether the account owner is the sender: WhatsApp's
+	// IsFromMe, Matrix sender == own user, or mail whose From matches the
+	// account's own address (including a message synced from Sent). It
+	// drives the chat view's right-aligned bubbles and must never be
+	// derived from Unread, which mail's IMAP \Seen flag can set
+	// independently of who sent the message.
+	FromMe    bool
+	Timestamp time.Time
+	Meta      map[string]string
+	// Edited reports whether this item's Body was replaced by a
+	// channel-observed edit (see Sink.EditItem). Channel-agnostic: today
+	// only WhatsApp sets it, Matrix can adopt the same model later.
+	Edited bool
+	// Deleted reports whether this item was revoked/retracted at the
+	// source (see Sink.RevokeItem): the row is kept (its place in the
+	// conversation's history is preserved) but Body is cleared, and the
+	// TUI shows "mensaje eliminado" in its place.
+	Deleted bool
+	// Reactions lists every participant's current emoji reaction to this
+	// item, at most one per Sender (see Sink.SetReaction): a newer
+	// reaction from the same Sender replaces the previous one instead of
+	// appending.
+	Reactions []Reaction
+}
+
+// Reaction is one participant's emoji reaction to an Item, channel-
+// agnostic (WhatsApp today; Matrix can adopt the same shape later).
+type Reaction struct {
+	Sender string
+	Emoji  string
 }

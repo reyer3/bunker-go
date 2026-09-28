@@ -8,7 +8,7 @@
 # The export is guarded before anything is committed, and every guard fails
 # closed:
 #   - the working tree must be clean, so the snapshot is exactly HEAD;
-#   - private paths (odd/, .atl/, .codegraph/) are dropped;
+#   - private paths (odd/, .atl/, .codegraph/, .engram/) are dropped;
 #   - no line may match the denylist (real names, domains, IDs), which lives
 #     outside the repo because it is itself sensitive;
 #   - betterleaks must report no secrets;
@@ -24,7 +24,7 @@
 #   BUNKER_PUBLIC_AUTHOR     snapshot author (default reyer3 noreply)
 set -euo pipefail
 
-PRIVATE_PATHS=(odd .atl .codegraph)
+PRIVATE_PATHS=(odd .atl .codegraph .engram)
 
 die() { echo "release: $*" >&2; exit 1; }
 
@@ -63,7 +63,9 @@ for p in "${PRIVATE_PATHS[@]}"; do rm -rf "${stage:?}/$p"; done
 patterns="$(mktemp)"
 trap 'rm -rf "$stage" "$patterns"' EXIT
 grep -v '^[[:space:]]*$' "$denylist" > "$patterns" || die "denylist has no patterns"
-if grep -rInIiF -f "$patterns" "$stage" | sed "s#^$stage/##"; then
+# LICENSE is excluded: its copyright line must name the author, so a bare
+# first-name pattern can guard every other file.
+if grep -rInIiF --exclude=LICENSE -f "$patterns" "$stage" | sed "s#^$stage/##"; then
 	die "denylist match in the export (see above); sanitize the private tree first"
 fi
 

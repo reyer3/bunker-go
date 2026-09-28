@@ -93,25 +93,32 @@ func (s *sessionRecorder) typeSettled(tm *teatest.TestModel, text string) {
 }
 
 // TestWalkthroughNarrowListReadReplyCancel drives a full session through a
-// real Bubble Tea program (not just Model.Update): open the list, read an
-// item, start a reply, preview it, then cancel out at every stage without
-// ever sending, and quit. It runs at a narrow terminal width and its
-// recorded output is checked against a golden file (see testdata/).
+// real Bubble Tea program (not just Model.Update): open a mail item's K6
+// thread view, start a reply from the full editor, preview it, then
+// cancel out at every stage without ever sending, and quit. It runs at a
+// narrow terminal width and its recorded output is checked against a
+// golden file (see testdata/).
 func TestWalkthroughNarrowListReadReplyCancel(t *testing.T) {
 	at := time.Date(2026, 9, 26, 9, 0, 0, 0, time.UTC)
-	client := &replyClient{previewOut: core.Plan{
+	client := &replyClient{outgoingPreview: core.Plan{
 		Channel: core.ChannelMail, Account: "work", Recipients: []string{"alice@example.com"},
 	}}
 	client.items = []core.Item{item("mail:work:1", core.ChannelMail, "work", "", at)}
-	client.readResult = core.Item{
+	client.threadItems = []core.Item{{
 		ID: "mail:work:1", Channel: core.ChannelMail, Account: "work",
-		Subject: "Status update", From: core.Address{Name: "Alice"},
-		Body: "Please review the attached report.",
-	}
+		Subject: "Status update", From: core.Address{ID: "alice@example.com", Name: "Alice"},
+		Body: "Please review the attached report.", Timestamp: at,
+	}}
+	// K8 fetches the newest (auto-expanded) message's body on open via
+	// Read(id, receipt=false), the same way a real mail sync (headers
+	// only until fetched) needs it to; the fake's Read must answer with
+	// the same body Thread already carries here for the golden's "Please
+	// review..." text to still appear.
+	client.readResult = core.Item{Body: "Please review the attached report."}
 	// A real network round trip races the renderer for whether a transient
-	// frame ("Loading item...") gets its own flush before the result
-	// arrives; a small fixed delay makes that frame reliably observable
-	// (and part of the golden) instead of a coin flip under load.
+	// frame gets its own flush before the result arrives; a small fixed
+	// delay makes that frame reliably observable (and part of the golden)
+	// instead of a coin flip under load.
 	client.delay = 60 * time.Millisecond
 
 	model := NewModel(client)
@@ -124,27 +131,38 @@ func TestWalkthroughNarrowListReadReplyCancel(t *testing.T) {
 
 	rec.waitForText(t, "Cargando bandeja de entrada", 3*time.Second)
 	rec.waitForText(t, "leer", 3*time.Second)
-	tm.Send(tea.KeyMsg{Type: tea.KeyEnter}) // open (read) the item
-	rec.waitForText(t, "Loading item", 3*time.Second)
+	// Mail wraps this conversation under a collapsible sender row
+	// (mail-sender-groups.md): expand it and move onto the nested thread
+	// row before Enter opens it, matching what a user sees.
+	tm.Send(tea.KeyMsg{Type: tea.KeyRight})
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	tm.Send(tea.KeyMsg{Type: tea.KeyEnter}) // open the K6 mail thread view
 	rec.waitForText(t, "Please review", 3*time.Second)
 
-	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}}) // start a reply
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}}) // open the full reply editor
+	rec.waitForText(t, "Re: Status update", 3*time.Second)
 	rec.typeSettled(tm, "thanks, looking now")
 	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlS}) // mandatory dry-run preview
 	rec.waitForText(t, "alice@example.com", 3*time.Second)
 
-	tm.Send(tea.KeyMsg{Type: tea.KeyEsc}) // preview -> back to compose, nothing sent
-	tm.Send(tea.KeyMsg{Type: tea.KeyEsc}) // compose -> discard draft, back to detail
+	tm.Send(tea.KeyMsg{Type: tea.KeyEsc}) // preview -> back to editing, nothing sent
+	tm.Send(tea.KeyMsg{Type: tea.KeyEsc}) // editor -> discard draft, back to the thread
 	rec.waitForText(t, "Please review", 3*time.Second)
-	tm.Send(tea.KeyMsg{Type: tea.KeyEsc}) // detail -> back to inbox
+	tm.Send(tea.KeyMsg{Type: tea.KeyEsc}) // thread -> back to inbox
 	rec.waitForText(t, "leer", 3*time.Second)
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 
 	// WaitFinished only returns once the real tea.Program has torn itself
 	// down; a hung or panicking terminal restore would time out here.
 	tm.WaitFinished(t, teatest.WithFinalTimeout(3*time.Second))
-	if client.sendCalls() != 0 {
-		t.Fatalf("cancel walkthrough sent for real: calls=%+v", client.calls)
+	sends := 0
+	for _, c := range client.outgoingCalls {
+		if !c.dryRun {
+			sends++
+		}
+	}
+	if sends != 0 {
+		t.Fatalf("cancel walkthrough sent for real: calls=%+v", client.outgoingCalls)
 	}
 
 	rec.drain() // catch the teardown bytes written as the program exits

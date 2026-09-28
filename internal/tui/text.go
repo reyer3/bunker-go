@@ -30,6 +30,20 @@ func relativeTime(at, now time.Time) string {
 	return fmt.Sprintf("%02d-%s", at.Day(), spanishMonths[at.Month()-1])
 }
 
+// dayLabel formats the chat view's day separator ("hoy"/"ayer"/"dd-mmm"),
+// the same day-bucketing relativeTime uses but with "hoy" instead of a
+// clock time for today (a separator marks a whole day, not one moment).
+func dayLabel(at, now time.Time) string {
+	at = at.In(now.Location())
+	if sameDay(at, now) {
+		return "hoy"
+	}
+	if sameDay(at, now.AddDate(0, 0, -1)) {
+		return "ayer"
+	}
+	return fmt.Sprintf("%02d-%s", at.Day(), spanishMonths[at.Month()-1])
+}
+
 func sameDay(a, b time.Time) bool {
 	ay, am, ad := a.Date()
 	by, bm, bd := b.Date()

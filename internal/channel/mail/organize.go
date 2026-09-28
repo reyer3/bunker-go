@@ -31,7 +31,7 @@ func (a *Adapter) OrganizeMove(ctx context.Context, id string, op core.OrganizeO
 }
 
 func (a *Adapter) organize(ctx context.Context, id string, op core.OrganizeOp) (core.OrganizeMove, error) {
-	account, uidValidity, uid, err := parseItemID(id)
+	account, folder, uidValidity, uid, err := parseItemID(id)
 	if err != nil {
 		return core.OrganizeMove{}, err
 	}
@@ -49,10 +49,11 @@ func (a *Adapter) organize(ctx context.Context, id string, op core.OrganizeOp) (
 	if err != nil {
 		return core.OrganizeMove{}, fmt.Errorf("mail: organize %q: %w", id, err)
 	}
+	mailbox := folders.Resolve(folder)
 
-	mbox, err := client.Select("INBOX", nil).Wait()
+	mbox, err := client.Select(mailbox, nil).Wait()
 	if err != nil {
-		return core.OrganizeMove{}, fmt.Errorf("mail: organize %q: select INBOX: %w", id, err)
+		return core.OrganizeMove{}, fmt.Errorf("mail: organize %q: select %s: %w", id, mailbox, err)
 	}
 	if mbox.UIDValidity != uidValidity {
 		return core.OrganizeMove{}, fmt.Errorf("mail: organize %q: mailbox UIDVALIDITY changed: %w", id, core.ErrNotFound)

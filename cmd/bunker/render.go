@@ -53,7 +53,7 @@ func cmdRender(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	budgetCtx, cancel := context.WithTimeout(ctx, renderBudget)
 	defer cancel()
 
-	counts, daemonUp, err := renderCounts(budgetCtx)
+	counts, daemonUp, allConnected, err := renderCounts(budgetCtx)
 	if err != nil {
 		if *jsonOut {
 			writeJSON(stdout, map[string]any{"dead": true})
@@ -73,7 +73,7 @@ func cmdRender(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	}
 
 	if *jsonOut {
-		writeJSON(stdout, map[string]any{"segments": segments, "daemonUp": daemonUp})
+		writeJSON(stdout, map[string]any{"segments": segments, "daemonUp": daemonUp, "allConnected": allConnected})
 		return 0
 	}
 
@@ -89,29 +89,57 @@ func cmdRender(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		overrides = cfg.Render.Glyphs
 	}
 	if line := formatRender(segments, style, *hideEmpty, resolveGlyphs(overrides)); line != "" {
+		// R4: a "!" marker warns that at least one adapter is not
+		// connected, but only when the daemon actually answered within
+		// renderBudget (daemonUp) -- render stays exactly as before both
+		// when the daemon is down (handled above, before this point is
+		// ever reached) and when the health call itself didn't answer in
+		// time (allConnected defaults to true in that case, see
+		// renderCounts).
+		if daemonUp && !allConnected {
+			line += " " + notConnectedMarker
+		}
 		fmt.Fprintln(stdout, line)
 	}
 	return 0
 }
 
+// notConnectedMarker is the render segment suffix R4 appends when the
+// live daemon reports at least one adapter not in the "connected" state,
+// documented in docs/cli.md.
+const notConnectedMarker = "!"
+
 // renderCounts tries the live daemon first, then falls back to a
-// read-only open of the store file directly.
-func renderCounts(ctx context.Context) (map[core.Channel]map[string]int, bool, error) {
-	if client, err := rpc.Dial(rpc.DefaultSocketPath()); err == nil {
+// read-only open of the store file directly. allConnected is only
+// meaningful when daemonUp is true; it defaults to true (no warning)
+// whenever health isn't known one way or the other -- the daemon being
+// down, or its health call itself not answering within ctx's remaining
+// budget -- so a slow/partial health check never invents a false alarm.
+func renderCounts(ctx context.Context) (counts map[core.Channel]map[string]int, daemonUp, allConnected bool, err error) {
+	allConnected = true
+	if client, dialErr := rpc.Dial(rpc.DefaultSocketPath()); dialErr == nil {
 		defer client.Close()
-		if counts, err := client.Counts(ctx); err == nil {
-			return counts, true, nil
+		if counts, err = client.Counts(ctx); err == nil {
+			if adapters, healthErr := client.Health(ctx); healthErr == nil {
+				for _, a := range adapters {
+					if a.State != core.AdapterConnected {
+						allConnected = false
+						break
+					}
+				}
+			}
+			return counts, true, allConnected, nil
 		}
 	}
 
 	st, err := store.Open(config.StoreDBPath())
 	if err != nil {
-		return nil, false, fmt.Errorf("render: store fallback: %w", err)
+		return nil, false, true, fmt.Errorf("render: store fallback: %w", err)
 	}
 	defer st.Close()
-	counts, err := st.Counts(ctx)
+	counts, err = st.Counts(ctx)
 	if err != nil {
-		return nil, false, fmt.Errorf("render: store counts: %w", err)
+		return nil, false, true, fmt.Errorf("render: store counts: %w", err)
 	}
-	return counts, false, nil
+	return counts, false, true, nil
 }

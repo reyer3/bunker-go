@@ -32,6 +32,13 @@ folder_sep = "."
 # repo (e.g. ~/.config/bunker-go/cl.password). Omit it to rely on GOA
 # instead, if the .cl account is also registered there.
 password_env = "~/.config/bunker-go/cl.password"
+# initial_sync_limit bounds how many of the most recent INBOX messages a
+# FRESH (never-synced) store backfills on the first sync; it has no
+# effect once a sync cursor already exists. Defaults to 200 when unset;
+# must be > 0. Older history beyond this window is still reachable one
+# message at a time via `bunker read`/`download` (H1's server fallback)
+# or in bulk via `bunker backfill mail cl --since 2026-01-01`.
+initial_sync_limit = 200
 
 # --- WhatsApp: personal account, linked device ---
 [[account]]

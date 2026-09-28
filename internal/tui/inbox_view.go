@@ -45,12 +45,12 @@ func (m Model) inboxLinesAndHits() (lines []string, hits []inboxHit) {
 			separatorLine(styles, width),
 			footerLine(styles, width),
 		}
-		return lines, make([]inboxHit, len(lines))
+		return lines, repeatHit(inboxHit{kind: hitNone}, len(lines))
 	}
 
 	if m.loadErr != nil {
 		lines = append(lines, truncatePlain("Error: "+safeLine(m.loadErr.Error()), width))
-		hits = append(hits, inboxHit{})
+		hits = append(hits, inboxHit{kind: hitNone})
 	}
 	bodyHeight := m.height
 	if len(lines) > 0 && bodyHeight > 0 {
@@ -68,7 +68,7 @@ func (m Model) inboxLinesAndHits() (lines []string, hits []inboxHit) {
 	hits = append(hits, bodyHits...)
 
 	lines = append(lines, separatorLine(styles, width), footerLine(styles, width))
-	hits = append(hits, inboxHit{}, inboxHit{})
+	hits = append(hits, repeatHit(inboxHit{kind: hitNone}, 2)...)
 	return lines, hits
 }
 
@@ -96,18 +96,15 @@ func (m Model) overviewLines(styles rowStyles, glyphs map[core.Channel]string, w
 	offset := 0
 	for i, channel := range channelOrder {
 		focusTab := i + 1
-		groups := m.sectionGroups(channel)
+		groups := m.sectionRows(channel)
 		lines = append(lines,
 			sectionHeaderLine(channel, glyphs[channel], styles, m.counts, width),
 			sectionRuleLine(channel, styles, width),
 		)
-		hits = append(hits,
-			inboxHit{kind: hitFocus, tab: focusTab},
-			inboxHit{kind: hitFocus, tab: focusTab},
-		)
+		hits = append(hits, repeatHit(inboxHit{kind: hitFocus, tab: focusTab}, 2)...)
 		if len(groups) == 0 {
 			lines = append(lines, emptySectionLine(styles, width))
-			hits = append(hits, inboxHit{})
+			hits = append(hits, inboxHit{kind: hitNone})
 			continue
 		}
 		localSelected := -1
@@ -128,20 +125,17 @@ func (m Model) overviewLines(styles rowStyles, glyphs map[core.Channel]string, w
 // focusedSectionLines renders a single channel's section at full height,
 // scrolled to keep the selection visible. Its header/rule are clickable
 // (hitFocus is a no-op re-focus of the same tab); rows use hitRow indexed
-// directly into m.visibleGroups() (== this channel's sectionGroups()).
+// directly into m.visibleRows() (== this channel's sectionRows()).
 func (m Model) focusedSectionLines(channel core.Channel, styles rowStyles, glyphs map[core.Channel]string, width, height int) (lines []string, hits []inboxHit) {
 	focusTab := m.activeTab
-	groups := m.sectionGroups(channel)
+	groups := m.sectionRows(channel)
 	lines = []string{
 		sectionHeaderLine(channel, glyphs[channel], styles, m.counts, width),
 		sectionRuleLine(channel, styles, width),
 	}
-	hits = []inboxHit{
-		{kind: hitFocus, tab: focusTab},
-		{kind: hitFocus, tab: focusTab},
-	}
+	hits = repeatHit(inboxHit{kind: hitFocus, tab: focusTab}, 2)
 	if len(groups) == 0 {
-		return append(lines, emptySectionLine(styles, width)), append(hits, inboxHit{})
+		return append(lines, emptySectionLine(styles, width)), append(hits, inboxHit{kind: hitNone})
 	}
 
 	rowUnits := buildRowUnits(groups, m.selected, width, glyphs, m.counts, styles, m.clock())

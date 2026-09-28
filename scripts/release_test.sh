@@ -25,13 +25,14 @@ setup() {
 	git -C "$T/public" commit -q --allow-empty -m "initial"
 	git -C "$T/public" push -q origin main
 
-	mkdir -p "$T/private/odd" "$T/private/.atl"
+	mkdir -p "$T/private/odd" "$T/private/.atl" "$T/private/.engram"
 	cd "$T/private"
 	git init -q
 	printf 'module example.com/demo\n\ngo 1.22\n' > go.mod
 	printf 'package main\n\nfunc main() {}\n' > main.go
 	echo "private notes about Zorblax Quux" > odd/notes.md
 	echo "runtime state" > .atl/state.md
+	echo '{"project_name": "demo"}' > .engram/config.json
 	git add -A && git commit -q -m "private"
 
 	echo "zorblax quux" > "$T/denylist"
@@ -55,6 +56,7 @@ test_clean_release_commits_and_tags_without_push() {
 	[ -f "$T/public/main.go" ] || fail "main.go not exported"
 	[ ! -e "$T/public/odd" ] || fail "odd/ leaked into public"
 	[ ! -e "$T/public/.atl" ] || fail ".atl/ leaked into public"
+	[ ! -e "$T/public/.engram" ] || fail ".engram/ leaked into public"
 	git -C "$T/remote.git" rev-parse -q --verify refs/tags/v0.2.0 >/dev/null && fail "pushed without --push"
 	pass "clean release commits and tags without pushing"
 }
@@ -68,6 +70,27 @@ test_denylist_hit_aborts_before_commit() {
 	[ "$(public_head)" = "$before" ] || fail "public clone changed after denylist hit"
 	git -C "$T/public" rev-parse -q --verify refs/tags/v0.2.0 >/dev/null && fail "tag created after denylist hit"
 	pass "denylist hit aborts before commit (case-insensitive)"
+}
+
+test_denylist_ignores_license_copyright() {
+	setup
+	echo "Copyright 2026 Zorblax Quux" > LICENSE
+	git add LICENSE && git commit -qm "license"
+	if ! "$SCRIPT" v0.2.0 >/dev/null 2>&1; then fail "denylisted name in LICENSE aborted the release"; return; fi
+	[ -f "$T/public/LICENSE" ] || fail "LICENSE not exported"
+	pass "denylist ignores the LICENSE copyright line"
+}
+
+test_denylist_hit_in_comment_still_aborts_with_license_present() {
+	setup
+	echo "Copyright 2026 Zorblax Quux" > LICENSE
+	echo "// what zorblax sent" >> main.go
+	echo "zorblax" >> "$T/denylist"
+	git add -A && git commit -qm "leak in comment"
+	before="$(public_head)"
+	if "$SCRIPT" v0.2.0 >/dev/null 2>&1; then fail "bare name in a comment did not abort"; return; fi
+	[ "$(public_head)" = "$before" ] || fail "public clone changed after comment hit"
+	pass "bare denylisted name in code aborts even with LICENSE excluded"
 }
 
 test_betterleaks_finding_aborts() {

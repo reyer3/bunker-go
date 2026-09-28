@@ -211,6 +211,101 @@ func (c *Client) Download(ctx context.Context, id string, index int, destPath st
 	return res.Result, nil
 }
 
+// Thread returns one conversation's items, oldest→newest, with at most
+// limit items strictly before before (zero = newest). Backed by
+// core.Filter.Thread and a store index on (channel, account, thread,
+// timestamp), so this stays fast regardless of how large the store
+// grows.
+func (c *Client) Thread(ctx context.Context, channel, account, thread string, before time.Time, limit int) ([]core.Item, error) {
+	var res threadResult
+	err := c.call(ctx, MethodThread, threadParams{Channel: core.Channel(channel), Account: account, Thread: thread, Before: before, Limit: limit}, &res)
+	if err != nil {
+		return nil, err
+	}
+	return res.Items, nil
+}
+
+// ReadThread marks every unread, non-FromMe item of conversation
+// (channel, account, thread) read (see core.Service.ReadThread) and
+// returns how many it marked. Unless receipt is false, it also notifies
+// the channel itself. Fixes the K5/K6 read-on-open bug where opening a
+// conversation marked only its newest item read.
+func (c *Client) ReadThread(ctx context.Context, channel, account, thread string, receipt bool) (int, error) {
+	var res readThreadResult
+	err := c.call(ctx, MethodReadThread, readThreadParams{Channel: core.Channel(channel), Account: account, Thread: thread, Receipt: receipt}, &res)
+	if err != nil {
+		return 0, err
+	}
+	return res.Count, nil
+}
+
+// Presence returns (channel, account, thread)'s live presence: the
+// registered adapter's PresenceProvider when it has one, else State
+// "unknown". Channels without presence (mail) never error for this.
+func (c *Client) Presence(ctx context.Context, channel, account, thread string) (core.Presence, error) {
+	var res presenceResult
+	err := c.call(ctx, MethodPresence, presenceParams{Channel: core.Channel(channel), Account: account, Thread: thread}, &res)
+	if err != nil {
+		return core.Presence{}, err
+	}
+	return res.Presence, nil
+}
+
+// PresenceKeepalive renews (or revokes) the availability lease: the
+// daemon stays unavailable by default (WhatsApp only delivers others'
+// presence while WE are "available", which also shows the user online),
+// and becomes available only while a chat view is open AND focused. The
+// TUI calls this every <=20s while a chat view for thread is open;
+// focused=false, or no call for 60s, or the daemon shutting down all
+// revoke it. A channel without the availability gate (Matrix, mail)
+// treats this as a no-op success.
+func (c *Client) PresenceKeepalive(ctx context.Context, channel, account, thread string, focused bool) error {
+	return c.call(ctx, MethodPresenceKeepalive, presenceKeepaliveParams{Channel: core.Channel(channel), Account: account, Thread: thread, Focused: focused}, nil)
+}
+
+// Typing forwards a typing/composing notification to the registered
+// adapter's TypingSender. The TUI throttles the actual send rate itself
+// (at most every 5s while typing; composing=false on idle, send or
+// leave); this call is a thin, validated forward, never re-derived
+// timing.
+func (c *Client) Typing(ctx context.Context, channel, account, thread string, composing bool) error {
+	return c.call(ctx, MethodTyping, typingParams{Channel: core.Channel(channel), Account: account, Thread: thread, Composing: composing}, nil)
+}
+
+// Health returns every adapter's current health snapshot (R4): channel,
+// account, connection state, since when, its last error (if any) and how
+// many times it has been restarted.
+func (c *Client) Health(ctx context.Context) ([]core.AdapterHealth, error) {
+	var res healthResult
+	if err := c.call(ctx, MethodHealth, nil, &res); err != nil {
+		return nil, err
+	}
+	return res.Adapters, nil
+}
+
+// Backfill runs a server-side history search on (channel, account) since
+// a point in time (H2: mail-history), upserting whatever the store is
+// missing. See core.Backfiller's doc comment for the full contract.
+func (c *Client) Backfill(ctx context.Context, channel core.Channel, account, folder string, since time.Time, dryRun bool) (core.BackfillResult, error) {
+	var res backfillResult
+	err := c.call(ctx, MethodBackfill, backfillParams{Channel: channel, Account: account, Folder: folder, Since: since, DryRun: dryRun}, &res)
+	if err != nil {
+		return core.BackfillResult{}, err
+	}
+	return res.Result, nil
+}
+
+// Search runs a server-side search on (channel, account) (H3:
+// mail-history), upserting every match and returning them the way List
+// does.
+func (c *Client) Search(ctx context.Context, channel core.Channel, account string, criteria core.SearchCriteria) ([]core.Item, error) {
+	var res listResult
+	if err := c.call(ctx, MethodSearch, searchParams{Channel: channel, Account: account, Criteria: criteria}, &res); err != nil {
+		return nil, err
+	}
+	return res.Items, nil
+}
+
 // Avatar returns a local PNG path for (channel, account, thread)'s
 // conversation avatar, written by the daemon itself (see avatarResult and
 // core.Service.Avatar) — like Download, the bytes never travel over the

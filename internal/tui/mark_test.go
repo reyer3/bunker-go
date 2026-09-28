@@ -107,9 +107,16 @@ func TestMarkReadConfirmOrganizesAndOpeningNeverDoes(t *testing.T) {
 		t.Fatal("model did not exit the mark-read flow after success")
 	}
 
-	// Reading (opening) an item must never call Organize, regardless of
-	// whether a mark-read confirm ran before it.
-	model.groups = []inboxGroup{{items: []core.Item{{ID: "mail:a:1", Channel: core.ChannelMail}}}}
+	// Opening a WhatsApp item (K5's chat view) marks it read via Read's
+	// receipt, never Organize — Organize is K6's mail-\Seen-on-open
+	// mechanism specifically, exercised above via the explicit "m" flow.
+	// (A mail item's Enter now also marks \Seen via Organize on open by
+	// design — see conversation-view.md's Decisions — so this invariant
+	// is checked on a channel where Organize is never involved at all.)
+	model.groups = []inboxGroup{{items: []core.Item{{ID: "whatsapp:a:1", Channel: core.ChannelWhatsApp, Account: "a", Thread: "t"}}}}
+	// WhatsApp is never sender-wrapped (Mail only): its one thread is
+	// row 0, not the row 1 readyModel's Mail fixture selected.
+	model.selected = 0
 	client.calls = nil
 	updated, readCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(Model)
@@ -174,6 +181,9 @@ func TestMarkReadNoDoubleOrganizeWhileOneIsInFlight(t *testing.T) {
 	model = updated.(Model)
 	if again != nil {
 		t.Fatal("second Enter launched another Organize while one was in flight")
+	}
+	if !model.markSending {
+		t.Fatal("second Enter cleared the markSending guard; the in-flight Organize should still hold it")
 	}
 	close(client.block)
 	<-done

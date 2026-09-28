@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 
@@ -53,6 +54,12 @@ type Adapter struct {
 	items      map[string]core.Item
 	lastSend   time.Time
 	groupNames map[string]groupNameCacheEntry
+	// presence caches the last known live presence per thread (K3),
+	// updated from events.Presence/events.ChatPresence — WhatsApp only
+	// delivers these while this account is itself "available" (see
+	// SetPresenceAvailable), so Presence answers from this cache instead
+	// of a network round trip.
+	presence map[string]core.Presence
 	// sink is set once, at the top of Run, so DownloadAttachment (called
 	// independently, e.g. over RPC while Run is still active in the
 	// daemon) can read/write the same core.Sink handleEvent and
@@ -86,6 +93,7 @@ func NewAdapter(account string, cli waClient, minSendInterval ...time.Duration) 
 		cli:             cli,
 		minSendInterval: interval,
 		items:           make(map[string]core.Item),
+		presence:        make(map[string]core.Presence),
 		sleep:           time.Sleep,
 		rand01:          rand.Float64,
 		httpGet:         httpGetURL,
@@ -179,8 +187,12 @@ func (a *Adapter) Run(ctx context.Context, sink core.Sink) error {
 func (a *Adapter) handleEvent(ctx context.Context, sink core.Sink, evt any, done chan<- error) {
 	switch e := evt.(type) {
 	case *events.Message:
-		// Contacts' status updates are feed noise, not conversations.
-		if e.Info.Chat.String() == statusBroadcastJID {
+		// Statuses and channel (newsletter) posts are feed noise, not
+		// conversations.
+		if isFeedChat(e.Info.Chat.String()) {
+			return
+		}
+		if a.handleEditOrRevoke(ctx, sink, e) || a.handleReaction(ctx, sink, e) {
 			return
 		}
 		item := toItem(a.account, e)
@@ -190,19 +202,40 @@ func (a *Adapter) handleEvent(ctx context.Context, sink core.Sink, evt any, done
 		item = a.enrichItem(ctx, item, e.Info.Chat, e.Info.Sender, string(e.Info.ID), e.Info.PushName)
 		a.persistMediaDescriptor(ctx, sink, item, e.Message)
 		a.cacheItem(item)
-		_ = sink.Upsert(ctx, item)
+		if err := sink.Upsert(ctx, item); err != nil {
+			core.LogSinkError(core.ChannelWhatsApp, a.account, "upsert", err)
+		}
 
 	case *events.Receipt:
-		if e.Type != types.ReceiptTypeRead && e.Type != types.ReceiptTypeReadSelf {
+		// ReceiptTypeRead means someone ELSE read a message WE sent (blue
+		// ticks on our own outgoing message): it says nothing about our
+		// own unread state and must never clear it. Only ReceiptTypeReadSelf
+		// (we read this chat from a different device) does.
+		if e.Type != types.ReceiptTypeReadSelf {
 			return
 		}
 		for _, id := range e.MessageIDs {
 			full := itemID(a.account, e.Chat.String(), string(id))
-			_ = sink.MarkRead(ctx, full, true)
+			if err := sink.MarkRead(ctx, full, true); err != nil {
+				core.LogSinkError(core.ChannelWhatsApp, a.account, "mark_read", err)
+			}
 		}
+		// A ReadSelf does not always list every unread message of the
+		// chat (Evidence gap (a)), so also mark the whole thread read up
+		// to the receipt's timestamp.
+		a.markThreadReadBothForms(ctx, sink, e.Chat, e.Timestamp)
+
+	case *events.MarkChatAsRead:
+		a.handleMarkChatAsRead(ctx, sink, e)
 
 	case *events.HistorySync:
 		a.handleHistorySync(ctx, sink, e.Data)
+
+	case *events.Presence:
+		a.handlePresence(e)
+
+	case *events.ChatPresence:
+		a.handleChatPresence(e)
 
 	case *events.LoggedOut:
 		select {
@@ -210,6 +243,77 @@ func (a *Adapter) handleEvent(ctx context.Context, sink core.Sink, evt any, done
 		default:
 		}
 	}
+}
+
+// markThreadReadBothForms marks chat's thread read up to upTo, both
+// under chat's own address form and under its stored LID/PN counterpart
+// (see waClient.GetAltJID): an item's Thread key is whichever form the
+// message that created the conversation first arrived in (Evidence gap
+// (b)), which a read receipt's chat address does not always match.
+func (a *Adapter) markThreadReadBothForms(ctx context.Context, sink core.Sink, chat types.JID, upTo time.Time) {
+	if err := sink.MarkThreadReadUpTo(ctx, core.ChannelWhatsApp, a.account, chat.String(), upTo); err != nil {
+		core.LogSinkError(core.ChannelWhatsApp, a.account, "mark_thread_read_up_to", err)
+	}
+	alt, err := a.cli.GetAltJID(ctx, chat)
+	if err != nil || alt.IsEmpty() || alt == chat {
+		return
+	}
+	if err := sink.MarkThreadReadUpTo(ctx, core.ChannelWhatsApp, a.account, alt.String(), upTo); err != nil {
+		core.LogSinkError(core.ChannelWhatsApp, a.account, "mark_thread_read_up_to", err)
+	}
+}
+
+// handleMarkChatAsRead handles the phone's own "mark chat as read/unread"
+// app-state mutation (Evidence gap (c)). Action.Read == true marks the
+// chat's thread read up to the action's message-range cutoff (falling
+// back to the event's own timestamp when the range carries none);
+// Action.Read == false is a no-op, since bunker never re-marks an item
+// unread from this signal.
+func (a *Adapter) handleMarkChatAsRead(ctx context.Context, sink core.Sink, e *events.MarkChatAsRead) {
+	if e.Action == nil || !e.Action.GetRead() {
+		return
+	}
+	upTo := e.Timestamp
+	if ts := e.Action.GetMessageRange().GetLastMessageTimestamp(); ts > 0 {
+		upTo = time.Unix(ts, 0)
+	}
+	a.markThreadReadBothForms(ctx, sink, e.JID, upTo)
+}
+
+// handleEditOrRevoke handles a WhatsApp message edit or revoke (S2),
+// both delivered as a ProtocolMessage referencing the target message's
+// Key. It reports whether e was one of these (so handleEvent stops
+// there instead of also falling through to toItem/Upsert).
+func (a *Adapter) handleEditOrRevoke(ctx context.Context, sink core.Sink, e *events.Message) bool {
+	proto := e.Message.GetProtocolMessage()
+	if proto == nil || proto.GetKey() == nil {
+		return false
+	}
+	id := itemID(a.account, e.Info.Chat.String(), proto.GetKey().GetID())
+	switch proto.GetType() {
+	case waE2E.ProtocolMessage_MESSAGE_EDIT:
+		body, _, _ := bodyAndMedia(proto.GetEditedMessage())
+		_ = sink.EditItem(ctx, id, body)
+		return true
+	case waE2E.ProtocolMessage_REVOKE:
+		_ = sink.RevokeItem(ctx, id)
+		return true
+	default:
+		return false
+	}
+}
+
+// handleReaction handles a WhatsApp reaction (S2): stores {sender,
+// emoji} on the target item (an empty emoji removes it), and reports
+// whether e was a reaction at all.
+func (a *Adapter) handleReaction(ctx context.Context, sink core.Sink, e *events.Message) bool {
+	reaction := e.Message.GetReactionMessage()
+	if reaction == nil || reaction.GetKey() == nil {
+		return false
+	}
+	id := itemID(a.account, e.Info.Chat.String(), reaction.GetKey().GetID())
+	_ = sink.SetReaction(ctx, id, core.Reaction{Sender: e.Info.Sender.String(), Emoji: reaction.GetText()})
+	return true
 }
 
 func (a *Adapter) cacheItem(item core.Item) {

@@ -32,6 +32,16 @@ type replyClient struct {
 	// scheduler on whether that frame gets flushed before the result
 	// arrives (see teatest_walkthrough_test.go).
 	delay time.Duration
+
+	// sendCalls/sendOutgoingOut/sendOutgoingErr back K6's mail thread
+	// editor (reply-all/forward via Send, not Reply): same block/delay
+	// knobs, tracked separately since Send's shape differs from Reply's.
+	outgoingCalls      []outgoingCall
+	outgoingPreview    core.Plan
+	outgoingPreviewErr error
+	outgoingSent       core.Plan
+	outgoingSentRcpt   core.Receipt
+	outgoingSentErr    error
 }
 
 type replyCall struct {
@@ -39,6 +49,27 @@ type replyCall struct {
 	cc, attach  []string
 	dryRun      bool
 	hasDeadline bool
+}
+
+type outgoingCall struct {
+	out         core.Outgoing
+	dryRun      bool
+	hasDeadline bool
+}
+
+func (c *replyClient) Send(ctx context.Context, out core.Outgoing, dryRun bool) (core.Plan, core.Receipt, error) {
+	_, hasDeadline := ctx.Deadline()
+	c.outgoingCalls = append(c.outgoingCalls, outgoingCall{out: out, dryRun: dryRun, hasDeadline: hasDeadline})
+	if c.block != nil {
+		<-c.block
+	}
+	if c.delay > 0 {
+		time.Sleep(c.delay)
+	}
+	if dryRun {
+		return c.outgoingPreview, core.Receipt{}, c.outgoingPreviewErr
+	}
+	return c.outgoingSent, c.outgoingSentRcpt, c.outgoingSentErr
 }
 
 func (c *replyClient) Reply(ctx context.Context, id, body string, cc, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
@@ -96,14 +127,32 @@ func readyModel(client Client, id string) Model {
 	// Real item ids are shaped "<channel>:<account>:<native>" (see
 	// core.Item.ID); the fixed test id "mail:a:1" carries a real channel
 	// so it survives the sectioned inbox's per-channel filtering.
-	model.groups = []inboxGroup{{items: []core.Item{{ID: id, Channel: core.ChannelMail, Account: "a"}}}}
+	item := core.Item{ID: id, Channel: core.ChannelMail, Account: "a", From: core.Address{ID: "sender@example.com"}}
+	model.groups = []inboxGroup{{items: []core.Item{item}}}
+	// Mail wraps every conversation under a collapsible sender row
+	// (mail-sender-groups.md); expand it and select the nested thread row
+	// so "r"/"m"/Enter act on this item the same way they did before that
+	// change — the fixtures below emulate a user who already expanded it.
+	model = model.setSenderExpanded(senderKey(item), true)
+	model.selected = 1
 	return model
 }
 
+// typeRunes types text one rune at a time. Any single non-nil command a
+// keystroke returns (e.g. the chat view's throttled typing(composing=true)
+// notification, K5) is invoked once and its result fed back into Update,
+// the same way a real tea.Program would deliver it — but only one level
+// deep: nothing here returns a further command of its own.
 func typeRunes(model Model, text string) Model {
 	for _, r := range text {
-		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 		model = updated.(Model)
+		if cmd != nil {
+			if msg := cmd(); msg != nil {
+				updated, _ := model.Update(msg)
+				model = updated.(Model)
+			}
+		}
 	}
 	return model
 }
@@ -121,8 +170,8 @@ func TestReplyRequiresExplicitPreviewBeforeSend(t *testing.T) {
 	model = typeRunes(model, "hi there")
 	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(Model)
-	if len(client.calls) != 0 || !strings.Contains(model.draftBody, "\n") {
-		t.Fatalf("Enter while composing must insert a newline, not send: calls=%d body=%q", len(client.calls), model.draftBody)
+	if cmd != nil || len(client.calls) != 0 || !strings.Contains(model.composer.Value(), "\n") {
+		t.Fatalf("Enter while composing must insert a newline, not send: cmd=%v calls=%d body=%q", cmd, len(client.calls), model.composer.Value())
 	}
 
 	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
@@ -169,7 +218,7 @@ func TestReplyPreviewShowsRecipientAndConfirmSends(t *testing.T) {
 	if !client.calls[len(client.calls)-1].hasDeadline {
 		t.Fatal("real send call had no deadline")
 	}
-	if model.composing || model.previewing || model.sending || model.draftBody != "" {
+	if model.composing || model.previewing || model.sending || model.composer.Value() != "" {
 		t.Fatalf("model did not reset after a successful send: %+v", model)
 	}
 }
@@ -182,7 +231,7 @@ func TestReplyEscCancelsWithoutSendingAtAnyStage(t *testing.T) {
 	model = typeRunes(updated.(Model), "draft text")
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	model = updated.(Model)
-	if model.composing || model.draftBody != "" {
+	if model.composing || model.composer.Value() != "" {
 		t.Fatalf("esc from compose did not discard the draft: %+v", model)
 	}
 
@@ -196,7 +245,7 @@ func TestReplyEscCancelsWithoutSendingAtAnyStage(t *testing.T) {
 	}
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	model = updated.(Model)
-	if model.previewing || !model.composing || model.draftBody != "second draft" {
+	if model.previewing || !model.composing || model.composer.Value() != "second draft" {
 		t.Fatalf("esc from preview must return to compose with the draft kept: %+v", model)
 	}
 
@@ -234,6 +283,9 @@ func TestReplyNoDoubleSendWhileOneIsInFlight(t *testing.T) {
 	if again != nil {
 		t.Fatal("second Enter launched another send while one was in flight")
 	}
+	if !model.sending {
+		t.Fatal("second Enter cleared the sending guard; the in-flight send should still hold it")
+	}
 	close(client.block)
 	<-done
 	if client.sendCalls() != 1 {
@@ -250,7 +302,7 @@ func TestReplyDraftKeptOnPreviewError(t *testing.T) {
 	updated, _ = updated.(Model).Update(cmd())
 	model = updated.(Model)
 
-	if !model.composing || model.previewing || model.draftBody != "keep me" {
+	if !model.composing || model.previewing || model.composer.Value() != "keep me" {
 		t.Fatalf("preview error must keep the draft and stay in compose: %+v", model)
 	}
 	if !strings.Contains(model.View(), "offline") {
@@ -278,7 +330,7 @@ func TestReplyDraftKeptOnSendErrorAndNoAutoRetry(t *testing.T) {
 	updated, _ = model.Update(sendCmd())
 	model = updated.(Model)
 
-	if model.draftBody != "important text" {
+	if model.composer.Value() != "important text" {
 		t.Fatalf("send error wiped the draft: %+v", model)
 	}
 	if model.sending || model.previewing {
@@ -314,8 +366,8 @@ func TestReplyEditAfterPreviewRequiresFreshPreviewBeforeSend(t *testing.T) {
 	if enterCmd != nil || client.sendCalls() != 0 {
 		t.Fatal("Enter while composing must never send directly, even after a prior preview")
 	}
-	if model.draftBody != "draft one edited\n" {
-		t.Fatalf("draft body = %q", model.draftBody)
+	if model.composer.Value() != "draft one edited\n" {
+		t.Fatalf("draft body = %q", model.composer.Value())
 	}
 }
 
@@ -323,8 +375,15 @@ func TestReplyTargetsSelectedItemOrOpenDetail(t *testing.T) {
 	client := &replyClient{}
 	model := NewModel(client)
 	model.loaded = true
-	model.groups = []inboxGroup{{items: []core.Item{{ID: "first", Channel: core.ChannelMail}}}, {items: []core.Item{{ID: "second", Channel: core.ChannelMail}}}}
-	model.selected = 1
+	// Distinct senders (mail-sender-groups.md merges by From address), both
+	// pre-expanded, so each item still gets its own selectable thread row.
+	model.groups = []inboxGroup{
+		{items: []core.Item{{ID: "first", Channel: core.ChannelMail, From: core.Address{ID: "first@example.com"}}}},
+		{items: []core.Item{{ID: "second", Channel: core.ChannelMail, From: core.Address{ID: "second@example.com"}}}},
+	}
+	model = model.setSenderExpanded(senderKey(model.groups[0].items[0]), true)
+	model = model.setSenderExpanded(senderKey(model.groups[1].items[0]), true)
+	model.selected = 3 // rows: sender(first), thread(first), sender(second), thread(second)
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 	model = updated.(Model)

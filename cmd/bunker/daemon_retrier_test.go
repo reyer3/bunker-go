@@ -69,8 +69,8 @@ func TestStartAdaptersCallsRetryUndecryptableBeforeRun(t *testing.T) {
 	reg.Register(fake)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	var stdout bytes.Buffer
-	wg := startAdapters(ctx, reg, st, &stdout)
+	var stdout, stderr bytes.Buffer
+	wg := startAdapters(ctx, reg, st, &stdout, &stderr, nil)
 
 	select {
 	case <-fake.runStarted:

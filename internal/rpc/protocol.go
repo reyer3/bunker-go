@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/reyer3/bunker-go/internal/core"
 )
@@ -36,17 +37,25 @@ const (
 
 // Method names understood by the server.
 const (
-	MethodList       = "list"
-	MethodGet        = "get"
-	MethodFetch      = "fetch"
-	MethodRead       = "read"
-	MethodCounts     = "counts"
-	MethodReply      = "reply"
-	MethodSend       = "send"
-	MethodOrganize   = "organize"
-	MethodPostStatus = "status"
-	MethodDownload   = "download"
-	MethodAvatar     = "avatar"
+	MethodList              = "list"
+	MethodGet               = "get"
+	MethodFetch             = "fetch"
+	MethodRead              = "read"
+	MethodCounts            = "counts"
+	MethodReply             = "reply"
+	MethodSend              = "send"
+	MethodOrganize          = "organize"
+	MethodPostStatus        = "status"
+	MethodDownload          = "download"
+	MethodAvatar            = "avatar"
+	MethodThread            = "thread"
+	MethodReadThread        = "read_thread"
+	MethodPresence          = "presence"
+	MethodPresenceKeepalive = "presence_keepalive"
+	MethodTyping            = "typing"
+	MethodHealth            = "health"
+	MethodBackfill          = "backfill"
+	MethodSearch            = "search"
 )
 
 type listParams struct {
@@ -61,6 +70,26 @@ type idParams struct {
 }
 type itemResult struct {
 	Item core.Item `json:"item"`
+}
+
+// backfillParams is MethodBackfill's params (H2: mail-history).
+type backfillParams struct {
+	Channel core.Channel `json:"channel"`
+	Account string       `json:"account"`
+	Folder  string       `json:"folder"`
+	Since   time.Time    `json:"since"`
+	DryRun  bool         `json:"dryRun"`
+}
+type backfillResult struct {
+	Result core.BackfillResult `json:"result"`
+}
+
+// searchParams is MethodSearch's params (H3: mail-history). Its result
+// reuses listResult: Search prints exactly like list.
+type searchParams struct {
+	Channel  core.Channel        `json:"channel"`
+	Account  string              `json:"account"`
+	Criteria core.SearchCriteria `json:"criteria"`
 }
 
 // readParams is MethodRead's params: fetch item ID's full body and,
@@ -137,6 +166,73 @@ type avatarParams struct {
 }
 type avatarResult struct {
 	Result core.AvatarResult `json:"result"`
+}
+
+// threadParams is MethodThread's params: one conversation's items,
+// oldest→newest, at most Limit items strictly before Before (zero =
+// newest). Channel/Account/Thread together identify the conversation,
+// the same triple avatarParams uses.
+type threadParams struct {
+	Channel core.Channel `json:"channel"`
+	Account string       `json:"account"`
+	Thread  string       `json:"thread"`
+	Before  time.Time    `json:"before"`
+	Limit   int          `json:"limit"`
+}
+type threadResult struct {
+	Items []core.Item `json:"items"`
+}
+
+// readThreadParams is MethodReadThread's params: mark every unread,
+// non-FromMe item of one conversation read (see core.Service.ReadThread).
+// Unless Receipt is false (the CLI's --no-receipt), it also notifies the
+// channel itself (WhatsApp/Matrix read receipts, mail \Seen).
+type readThreadParams struct {
+	Channel core.Channel `json:"channel"`
+	Account string       `json:"account"`
+	Thread  string       `json:"thread"`
+	Receipt bool         `json:"receipt"`
+}
+type readThreadResult struct {
+	Count int `json:"count"`
+}
+
+// presenceParams is MethodPresence's params: the same (channel, account,
+// thread) triple avatarParams/threadParams use.
+type presenceParams struct {
+	Channel core.Channel `json:"channel"`
+	Account string       `json:"account"`
+	Thread  string       `json:"thread"`
+}
+type presenceResult struct {
+	Presence core.Presence `json:"presence"`
+}
+
+// presenceKeepaliveParams is MethodPresenceKeepalive's params: the
+// availability lease (see internal/core/presence.go) the TUI renews by
+// calling this every <=20s while a chat view for Thread is open.
+type presenceKeepaliveParams struct {
+	Channel core.Channel `json:"channel"`
+	Account string       `json:"account"`
+	Thread  string       `json:"thread"`
+	Focused bool         `json:"focused"`
+}
+
+// typingParams is MethodTyping's params: a thin, validated forward to
+// the adapter's TypingSender. The TUI throttles the send rate itself
+// (at most every 5s while typing; Composing=false on idle, send or
+// leave); the daemon never re-derives that timing.
+type typingParams struct {
+	Channel   core.Channel `json:"channel"`
+	Account   string       `json:"account"`
+	Thread    string       `json:"thread"`
+	Composing bool         `json:"composing"`
+}
+
+// healthResult is MethodHealth's result: every adapter's current
+// core.AdapterHealth (R4), in the order core.Service.Health returns it.
+type healthResult struct {
+	Adapters []core.AdapterHealth `json:"adapters"`
 }
 
 // DefaultSocketPath returns BUNKER_SOCKET if set, else
