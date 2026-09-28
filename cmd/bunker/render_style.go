@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/reyer3/bunker-go/internal/core"
 	"github.com/reyer3/bunker-go/internal/style"
@@ -66,6 +67,70 @@ func formatRender(segments []renderSegment, style renderStyle, hideEmpty bool, g
 		}
 	}
 	return strings.Join(parts, "  ")
+}
+
+// callColor is the ringing/live call accent: impossible to miss in a
+// status line.
+const callColor = "#e06c75"
+
+// formatCallSegment renders the most relevant call for the status line
+// (issue #15): a ringing incoming call first ("📞 Ana"), else a live one
+// with its connected time ("📞 Ana 2:35"), else an outgoing call still
+// ringing ("📞 → Ana"). It returns "" when there is no call.
+func formatCallSegment(calls []core.Call, style renderStyle, now time.Time) string {
+	var pick *core.Call
+	rank := func(c core.Call) int {
+		switch {
+		case c.Direction == core.CallIncoming && c.State == core.CallStateRinging:
+			return 3
+		case c.State == core.CallStateActive || c.State == core.CallStateConnecting:
+			return 2
+		case c.State != core.CallStateEnded:
+			return 1
+		}
+		return 0
+	}
+	for i := range calls {
+		if rank(calls[i]) > 0 && (pick == nil || rank(calls[i]) > rank(*pick)) {
+			pick = &calls[i]
+		}
+	}
+	if pick == nil {
+		return ""
+	}
+	name := pick.PeerName
+	if name == "" {
+		name = strings.SplitN(pick.Peer, "@", 2)[0]
+	}
+	name = strings.Map(func(r rune) rune {
+		// The name is remote-controlled: keep tmux's #[...] and control
+		// characters out of the status line.
+		if r == '#' || r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, name)
+	text := "📞 " + name
+	switch rank(*pick) {
+	case 2:
+		if d := pick.Duration(now); d > 0 {
+			text += " " + core.FormatCallDuration(d)
+		}
+	case 1:
+		text = "📞 → " + name
+	}
+	switch style {
+	case renderTmux:
+		attr := ""
+		if rank(*pick) == 3 {
+			attr = ",bold,blink"
+		}
+		return fmt.Sprintf("#[fg=%s%s]%s#[default]", callColor, attr, text)
+	case renderANSI:
+		r, g, b := hexRGB(callColor)
+		return fmt.Sprintf("\x1b[38;2;%d;%d;%dm%s\x1b[0m", r, g, b, text)
+	}
+	return text
 }
 
 // hexRGB parses a "#rrggbb" color; malformed input yields black.

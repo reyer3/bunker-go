@@ -79,7 +79,7 @@ Commands:
                                                              (WhatsApp, opt-in;
                                                              audio plays on the
                                                              daemon's machine)
-  call answer|reject|hangup <call-id>
+  call answer|reject|hangup <call-id|latest>
        [--dry-run] [--json]                                 control a live call
   calls [--json]                                           list live calls
   counts [--json]                                          unread counts

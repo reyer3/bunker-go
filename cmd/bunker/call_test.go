@@ -77,3 +77,31 @@ func TestCmdCalls(t *testing.T) {
 		t.Fatalf("json empty: %q", out)
 	}
 }
+
+func TestCmdCallLatest(t *testing.T) {
+	backend := &fakeBackend{calls: []core.Call{
+		{ID: "old", Direction: core.CallIncoming, State: core.CallStateActive},
+		{ID: "ring", Direction: core.CallIncoming, State: core.CallStateRinging},
+	}}
+	if code, _, stderr := runCallCmd(t, backend, "call", "answer", "latest"); code != 0 {
+		t.Fatalf("answer latest: exit %d %s", code, stderr)
+	}
+	if got := backend.controlCallCalls[0].ID; got != "ring" {
+		t.Errorf("answer latest picked %q, want the ringing call", got)
+	}
+	if code, _, _ := runCallCmd(t, backend, "call", "hangup", "latest"); code != 0 {
+		t.Fatal("hangup latest failed")
+	}
+	if got := backend.controlCallCalls[1].ID; got != "ring" {
+		t.Errorf("hangup latest picked %q, want the newest live call", got)
+	}
+
+	empty := &fakeBackend{}
+	code, _, stderr := runCallCmd(t, empty, "call", "answer", "latest")
+	if code == 0 || !strings.Contains(stderr, "no hay ninguna llamada entrante") {
+		t.Errorf("answer latest with no call: exit %d, stderr %q", code, stderr)
+	}
+	if len(empty.controlCallCalls) != 0 {
+		t.Error("nothing should be controlled when no call matches")
+	}
+}
