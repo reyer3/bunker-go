@@ -942,6 +942,30 @@ reused as-is.
   key, mail's `BODY.PEEK` failure, Matrix's unsupported-capability
   error) — `Esc` closes the result or backs out of an error to retry.
 
+## Inline images in the TUI's chat view (kitty graphics)
+
+When the TUI runs directly in a terminal that speaks the kitty graphics
+protocol (Ghostty, kitty), an image attachment in a WhatsApp or Matrix
+chat shows as a thumbnail inside its bubble, instead of the
+`📎 name (bytes)` row.
+
+- **Opening full size:** `Ctrl+O` opens the newest image, and a click on
+  a thumbnail opens that one. `←`/`→` browse the conversation's images;
+  `Esc` or a click closes the viewer and returns to the chat.
+- **Fetching:** thumbnails go through the same `Client.Download` as
+  `Ctrl+D`. Each attachment is downloaded once, up to 25 MB, into
+  `$XDG_CACHE_HOME/bunker-go/media`, which is created private, and reused
+  after that. JPEG, PNG, GIF and still WebP images are supported. One
+  that cannot be decoded keeps its text row.
+- **Drawing:** images use kitty graphics unicode placeholders. Each image
+  is uploaded once and then drawn in ordinary text cells, so it scrolls
+  and redraws with the rest of the chat.
+- **Detection:** `TERM_PROGRAM=ghostty`, `TERM=xterm-ghostty`,
+  `TERM=xterm-kitty` or `KITTY_WINDOW_ID` enable images. They stay off
+  inside tmux (`$TMUX`), which does not forward the protocol by default.
+  `BUNKER_GRAPHICS=kitty` or `BUNKER_GRAPHICS=none` overrides detection.
+  With images off, the TUI renders exactly as before.
+
 ## `bunker render [--tmux] [--json]`
 
 Renders the tmux status segment: one glyph and unread count per channel,

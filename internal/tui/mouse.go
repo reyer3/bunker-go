@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/reyer3/bunker-go/internal/core"
 )
@@ -141,6 +143,12 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.helpOpen || m.previewing || m.marking {
 		return m, nil
 	}
+	if m.viewer != nil {
+		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
+			return m.closeViewer()
+		}
+		return m, nil
+	}
 	if m.detail {
 		if m.chatMode {
 			return m.updateChatMouse(msg)
@@ -198,11 +206,21 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 // updateChatMouse handles the wheel while the K7 chat view is open: it
 // scrolls the message window by chatWheelScroll lines, loading an older
 // page once scrolled as far up as the loaded content allows (the same
-// contract PgUp/the plain "Up" key already have). A click is a no-op
-// here: unlike the plain inbox's rows, a chat bubble is not a click
-// target.
+// contract PgUp/the plain "Up" key already have). A click on an image
+// thumbnail opens it full size; any other click is a no-op.
 func (m Model) updateChatMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	switch msg.Button {
+	case tea.MouseButtonLeft:
+		if msg.Action != tea.MouseActionPress || m.downloadActive {
+			return m, nil
+		}
+		lines := strings.Split(m.View(), "\n")
+		if msg.Y >= 0 && msg.Y < len(lines) {
+			if key, ok := m.imageKeyAt(lines[msg.Y]); ok {
+				return m.openViewer(key)
+			}
+		}
+		return m, nil
 	case tea.MouseButtonWheelUp:
 		return m.scrollChatUp(chatWheelScroll)
 	case tea.MouseButtonWheelDown:

@@ -32,6 +32,9 @@ func (m Model) View() string {
 		m.writeDownload(&out)
 		return wrapView(out.String(), m.width)
 	}
+	if m.viewer != nil {
+		return m.viewerView()
+	}
 	if m.detail && m.chatMode {
 		return wrapView(strings.Join(m.chatViewLines(), "\n"), m.width)
 	}

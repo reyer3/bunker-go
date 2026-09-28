@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/reyer3/bunker-go/internal/config"
 	"github.com/reyer3/bunker-go/internal/core"
+	"github.com/reyer3/bunker-go/internal/kittygfx"
 	"github.com/reyer3/bunker-go/internal/style"
 )
 
@@ -82,6 +83,17 @@ type Model struct {
 	tmuxPassthrough bool
 	lastNotifyAt    time.Time
 	pendingNotify   int
+
+	// Inline images (issue #4, media.go): gfx is the terminal's graphics
+	// support, gfxOut the locked writer image uploads go through, media
+	// the per-session cache of uploaded images (shared across Model
+	// copies), mediaDir where attachment bytes are cached on disk, and
+	// viewer the full-size overlay (nil when closed).
+	gfx      kittygfx.Mode
+	gfxOut   io.Writer
+	media    *mediaCache
+	mediaDir string
+	viewer   *imageViewer
 
 	// Chat view (K5): opening a WhatsApp/Matrix conversation sets
 	// detail=true and chatMode=true instead of the plain single-item
@@ -270,9 +282,16 @@ func Run(client Client, input io.Reader, output io.Writer) error {
 	}
 	model := NewModel(client).withGlyphs(glyphs)
 	model.render = lipgloss.NewRenderer(output)
+	output = lockOutput(output)
 	model.notifyEnabled = resolveNotifyEnabled(notify, os.Getenv)
 	model.notifyWriter = output
 	model.tmuxPassthrough = os.Getenv("TMUX") != ""
+	model.gfx = kittygfx.Detect(os.Getenv)
+	if model.gfx == kittygfx.Kitty {
+		model.gfxOut = output
+		model.media = newMediaCache()
+		model.mediaDir = mediaCacheDir()
+	}
 	_, err := tea.NewProgram(model, tea.WithInput(input), tea.WithOutput(output), tea.WithMouseCellMotion(), tea.WithReportFocus()).Run()
 	return err
 }

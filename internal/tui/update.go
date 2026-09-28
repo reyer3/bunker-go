@@ -8,8 +8,25 @@ import (
 	"github.com/reyer3/bunker-go/internal/core"
 )
 
+// Update is the tea.Model entry point. After every step it also starts
+// fetching any image thumbnails the chat view now shows but the media
+// cache does not hold yet (a no-op without kitty graphics).
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	nm, ok := next.(Model)
+	if !ok {
+		return next, cmd
+	}
+	if media := nm.requestChatMedia(); media != nil {
+		return nm, tea.Batch(cmd, media)
+	}
+	return nm, cmd
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case mediaReadyMsg:
+		return m.handleMediaReady(msg)
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -307,6 +324,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.downloadActive {
 			return m.updateDownload(msg)
+		}
+		if m.viewer != nil {
+			return m.updateViewer(msg)
 		}
 		if m.chatMode {
 			return m.updateChat(msg)
@@ -687,6 +707,10 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "pgdown":
 		m.chatScroll = clampScroll(m.chatScroll-m.chatScrollBudget(), len(m.chatBodyLines()), m.chatScrollBudget())
 		return m, nil
+	case "ctrl+o":
+		// Open the newest image full size (issue #4): like Ctrl+D, a
+		// control key, since the composer has focus.
+		return m.openViewer("")
 	case "ctrl+d":
 		// The composer always has focus in the chat view, so a plain "d"
 		// is text ("de acuerdo"); download the newest attachment on
