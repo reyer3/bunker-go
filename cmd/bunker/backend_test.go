@@ -12,6 +12,7 @@ import (
 type fakeBackend struct {
 	items map[string]core.Item
 
+	sendDryRuns   []bool
 	contacts      []core.Contact
 	contactsErr   error
 	contactsCalls []core.ContactFilter
@@ -237,6 +238,7 @@ func (f *fakeBackend) Reply(ctx context.Context, id, body string, cc, attachment
 
 func (f *fakeBackend) Send(ctx context.Context, out core.Outgoing, dryRun bool) (core.Plan, core.Receipt, error) {
 	f.sendCalls = append(f.sendCalls, out)
+	f.sendDryRuns = append(f.sendDryRuns, dryRun)
 	if f.sendErr != nil {
 		return core.Plan{}, core.Receipt{}, f.sendErr
 	}

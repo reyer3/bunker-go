@@ -1081,6 +1081,51 @@ previewed and confirmed `Reply` as the text:
   `Backspace` on an empty draft removes the last one.
 - **Empty text:** a message may carry only attachments.
 
+## `bunker mcp [--allow-send]`
+
+Serves bunker to AI agents (Claude Code, Zed's agent panel, any MCP host)
+as an [MCP](https://modelcontextprotocol.io) server on stdio. Every tool
+call is one daemon RPC on a fresh connection, so the server survives
+daemon restarts. A dead daemon is a tool error.
+
+| Tool | What it does |
+|---|---|
+| `counts` | unread counts per channel and account |
+| `list` | newest items with a 200-character snippet (`channel`, `account`, `unread`, `limit` ≤ 100) |
+| `read` | one item with its body (capped at 20,000 characters); **never marks it read** |
+| `thread` | a conversation's newest messages, oldest first |
+| `contacts` | the same matches as `bunker contacts` |
+| `calls` | live voice calls |
+| `send` | a new message; `to` takes an address or a contact name, resolved like the CLI |
+| `reply` | a reply to an item |
+
+Reads are annotated read-only; `send` and `reply` are annotated
+destructive.
+
+**Sending is opt-in twice:**
+- `send` and `reply` always build the dry-run plan first. By default they
+  return only that plan.
+- A real send needs the server started with `--allow-send` **and** the
+  call to pass `confirm: true`. A confirm on a plans-only server returns
+  the plan with an error saying nothing was sent.
+- The daemon's WhatsApp pacing and fan-out limits still apply. There is no
+  bulk tool: one message per call.
+
+Claude Code:
+
+```sh
+claude mcp add bunker -- bunker mcp                # plans only
+claude mcp add bunker -- bunker mcp --allow-send   # can send after confirm
+```
+
+Zed (`settings.json`; check Zed's docs if the key has changed):
+
+```json
+"context_servers": {
+  "bunker": { "source": "custom", "command": "bunker", "args": ["mcp"] }
+}
+```
+
 ## `bunker app [--dry-run]`
 
 Opens the TUI in a terminal window of its own, so images and videos draw
