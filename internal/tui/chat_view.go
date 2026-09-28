@@ -343,6 +343,9 @@ func (m Model) chatTailLines() []string {
 	if attach, ok := m.chatAttachLine(); ok {
 		lines = append(lines, attach)
 	}
+	if m.mediaErr != nil {
+		lines = append(lines, "Error: "+safeLine(m.mediaErr.Error()))
+	}
 	switch {
 	case m.chatPreviewPending:
 		lines = append(lines, "Preparando…")
@@ -474,7 +477,11 @@ func chatBubbleLines(r *lipgloss.Renderer, item core.Item, width int, showName b
 			// terminal renders as its thumbnail instead of a text row.
 			if thumb != nil {
 				if t, ok := thumb(mediaKey(item.ID, i)); ok {
-					if tl := thumbBubbleLines(t, bodyStyle, bubbleWidth, width, item.FromMe); tl != nil {
+					caption := ""
+					if isVideoAttachment(attachment) {
+						caption = videoCaption(attachment)
+					}
+					if tl := thumbBubbleLines(t, bodyStyle, bubbleWidth, width, item.FromMe, caption); tl != nil {
 						lines = append(lines, tl...)
 						continue
 					}

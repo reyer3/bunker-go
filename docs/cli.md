@@ -965,6 +965,24 @@ chat shows as a thumbnail inside its bubble, instead of the
   inside tmux (`$TMUX`), which does not forward the protocol by default.
   `BUNKER_GRAPHICS=kitty` or `BUNKER_GRAPHICS=none` overrides detection.
   With images off, the TUI renders exactly as before.
+## Videos in the TUI's chat view
+
+- **Thumbnail:** with kitty graphics on, a video attachment shows a frame
+  in its bubble with a `▶ name · clic para reproducir` line. The frame is
+  grabbed with `ffmpeg` as an external process. The video is downloaded
+  once, up to 64 MB, into the same media cache as images. When `ffmpeg`
+  is missing or fails, the video keeps its text row.
+- **Playing:** a click on the thumbnail plays the video, and so does
+  `Enter` on a video in the full-size viewer. The TUI suspends while the
+  player runs and comes back when it exits.
+  - The player is `mpv`. With kitty graphics on it draws inside the
+    terminal (`--vo=kitty`); otherwise it opens its own window.
+  - `BUNKER_VIDEO_PLAYER="vlc --play-and-exit"` swaps in another player;
+    the file path is appended as the last argument.
+  - A missing player is reported in the chat.
+- **Without graphics:** inside tmux or a plain terminal, `Ctrl+O` plays
+  the conversation's newest video in `mpv`'s own window.
+
 ## Emoji completion in the TUI's chat composer
 
 Typing `:` followed by at least two letters at the end of a chat draft

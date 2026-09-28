@@ -94,6 +94,10 @@ type Model struct {
 	media    *mediaCache
 	mediaDir string
 	viewer   *imageViewer
+	// mediaErr is the last video/preview failure (issue #6), shown in
+	// the chat tail and the viewer; getenv overrides os.Getenv in tests.
+	mediaErr error
+	getenv   func(string) string
 
 	// Chat view (K5): opening a WhatsApp/Matrix conversation sets
 	// detail=true and chatMode=true instead of the plain single-item
