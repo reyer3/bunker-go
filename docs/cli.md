@@ -980,6 +980,26 @@ keywords all match, with or without accents (`:corazon`, `:corazón`).
   starts the draft or follows a space. Times (`12:30`) and URLs
   (`http://`) never open it.
 
+## Attachments in the TUI's chat composer
+
+A chat message (WhatsApp/Matrix) can carry files, sent through the same
+previewed and confirmed `Reply` as the text:
+
+- **Drag and drop:** dropping files on the terminal pastes their paths.
+  When a paste consists only of absolute paths to existing files, the
+  files are attached instead of typed. Plain paths, `file://` URIs, quoted
+  paths and backslash-escaped spaces all work, one or several at a time.
+  Any other paste goes into the draft as text.
+- **Clipboard image (`Ctrl+V`):** attaches the clipboard's image, such as
+  a screenshot. It reads the clipboard with `wl-paste` on Wayland or
+  `xclip` on X11. A missing tool, a missing graphical session or a
+  clipboard with no image shows a clear error in the chat; nothing is
+  silently skipped. The image is saved to a private (0600) temp file,
+  which is deleted once sent, removed, or when you leave the chat.
+- **Chips:** attachments show as chips below the composer.
+  `Backspace` on an empty draft removes the last one.
+- **Empty text:** a message may carry only attachments.
+
 ## `bunker render [--tmux] [--json]`
 
 Renders the tmux status segment: one glyph and unread count per channel,

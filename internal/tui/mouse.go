@@ -122,6 +122,7 @@ func (m Model) leaveChat() (Model, tea.Cmd) {
 	m.chatTypingOn = false
 	m.chatPreviewPending = false
 	m.chatOptimistic = nil
+	m = m.clearChatAttachments()
 	return m, leaveChatCmd(m.client, channel, account, thread)
 }
 
