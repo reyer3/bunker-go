@@ -82,6 +82,8 @@ Commands:
   call answer|reject|hangup <call-id|latest>
        [--dry-run] [--json]                                 control a live call
   calls [--json]                                           list live calls
+  unread <id> [--json]                                     put an item back in
+                                                             the unread inbox
   contacts [query] [--channel c] [--account a]
        [--limit n] [--json]                                 address books and
                                                              conversations; send
@@ -177,6 +179,8 @@ func runWithBackend(ctx context.Context, backend Backend, args []string, stdin i
 		return cmdCalls(ctx, backend, args[1:], stdout, stderr)
 	case "contacts":
 		return cmdContacts(ctx, backend, args[1:], stdout, stderr)
+	case "unread":
+		return cmdUnread(ctx, backend, args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n%s", args[0], topLevelUsage)
 		return 2
@@ -771,4 +775,34 @@ func printFanoutResult(jsonOut, dryRun bool, plan core.Plan, receipt core.Receip
 		}
 	}
 	return exitCode
+}
+
+// cmdUnread puts an item back in the unread inbox. It is not an outbound
+// action (nothing is sent to anyone), so it has no --dry-run.
+func cmdUnread(ctx context.Context, backend Backend, args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("unread", stderr)
+	jsonOut := fs.Bool("json", false, "emit JSON")
+	positionals, err := parseInterspersed(fs, args)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if len(positionals) != 1 {
+		fmt.Fprintln(stderr, "usage: bunker unread <id> [--json]")
+		return 2
+	}
+	local, err := backend.MarkUnread(ctx, positionals[0])
+	if err != nil {
+		return fail(*jsonOut, stdout, stderr, err)
+	}
+	if *jsonOut {
+		writeJSON(stdout, map[string]any{"id": positionals[0], "local_only": local})
+		return 0
+	}
+	if local {
+		fmt.Fprintf(stdout, "unread in bunker only (the channel cannot mark it unread): %s\n", positionals[0])
+		return 0
+	}
+	fmt.Fprintf(stdout, "unread: %s\n", positionals[0])
+	return 0
 }

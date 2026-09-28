@@ -44,6 +44,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.chatTempFiles = append(m.chatTempFiles, msg.path)
 		return m.addChatAttachments(msg.path), nil
+	case unreadDoneMsg:
+		return m.handleUnreadDone(msg)
 	case contactsLoadedMsg:
 		return m.handleContactsLoaded(msg)
 	case mediaReadyMsg:
@@ -81,6 +83,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.chatPresence = msg.presence
 		m.chatPresenceErr = msg.presenceErr
+		if msg.readErr == nil && m.unreadOnOpen != "" {
+			m = m.rememberRead(m.unreadOnOpen)
+			m.unreadOnOpen = ""
+		}
 		return m, tea.Batch(nextChatKeepalive(m.chatToken), nextChatTypingIdleTick(m.chatToken))
 	case chatKeepaliveTickMsg:
 		if msg.token != m.chatToken || !m.chatMode {
@@ -128,6 +134,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.threadLoading = false
 		m.threadLoadErr = msg.itemsErr
 		m.threadSeenErr = msg.seenErr
+		if msg.seenErr == nil && m.unreadOnOpen != "" {
+			m = m.rememberRead(m.unreadOnOpen)
+			m.unreadOnOpen = ""
+		}
 		if msg.itemsErr == nil {
 			m.threadItems = msg.items
 			m.threadSelected = max(0, len(m.threadItems)-1)
@@ -177,6 +187,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mailPreviewing = false
 			return m, nil
 		}
+		delete(m.mailDrafts, mailDraftKey(m.mailAction, m.mailTargetID))
 		m.mailComposing = false
 		m.mailPreviewing = false
 		m.mailPlan = core.Plan{}
@@ -249,6 +260,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.composing = true
 			return m, nil
 		}
+		delete(m.drafts, replyDraftKey(m.draftID))
 		m.composing = false
 		m.previewing = false
 		m.draftID = ""
@@ -280,11 +292,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.markConfirm = false
 			return m, nil
 		}
+		m = m.rememberRead(m.markID)
 		m.marking = false
 		m.markID = ""
 		m.markPlan = core.Plan{}
 		m.markErr = nil
-		return m, nil
+		return m.withFlash("marcado como leído · u deshacer"), nil
 	case itemReadMsg:
 		if !m.detail || msg.token != m.readToken || msg.id != m.readID {
 			return m, nil
@@ -468,6 +481,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.composing = true
 				m.draftID = id
 				m.composer = newComposer(m.width, m.renderer())
+				if draft, ok := m.drafts[replyDraftKey(id)]; ok {
+					m.composer.SetValue(draft)
+				}
 				m.attachments = nil
 				m.attaching = false
 				m.attachInput = ""
@@ -477,6 +493,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "n":
 			if !m.detail {
 				return m.openPicker()
+			}
+		case "u":
+			if !m.detail {
+				return m.undoRead()
 			}
 		case "m":
 			if id, ok := m.selectedItemID(); ok && m.client != nil {
@@ -525,6 +545,11 @@ func (m Model) selectedItemID() (string, bool) {
 func (m Model) updateCompose(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
+		if next, kept := m.keepDraft(replyDraftKey(m.draftID), m.composer.Value()); kept {
+			m = next.withFlash("borrador guardado")
+		} else {
+			m = next
+		}
 		m.composing = false
 		m.draftID = ""
 		m.composer.Reset()
@@ -988,6 +1013,7 @@ func (m Model) openMailEditor(action string) (tea.Model, tea.Cmd) {
 	}
 	m.composer.SetValue("\n\n" + quoteOriginal(item))
 	m.composer.CursorStart()
+	m = m.restoreMailDraft()
 	m = m.withMailFocusApplied()
 	return m, nil
 }
@@ -1037,8 +1063,12 @@ func (m Model) updateMailEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "esc":
+		if m.mailDrafts == nil {
+			m.mailDrafts = map[string]mailDraft{}
+		}
+		m.mailDrafts[mailDraftKey(m.mailAction, m.mailTargetID)] = mailDraft{to: m.mailTo.Value(), cc: m.mailCc.Value(), subject: m.mailSubject.Value(), body: m.composer.Value()}
 		m.mailComposing = false
-		return m, nil
+		return m.withFlash("borrador guardado"), nil
 	case "tab":
 		m.mailFocus = (m.mailFocus + 1) % 4
 		m = m.withMailFocusApplied()

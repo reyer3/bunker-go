@@ -174,14 +174,21 @@ the help overlay, or returns from a focused section to the overview),
 with scrolling, `0` returns to the overview, `Tab`/`Shift+Tab` cycle
 overview → Mail → WhatsApp → Matrix → overview, `r` starts a reply to the
 selected/open item, `m` marks it read (dry-run preview, then `Enter` to
-confirm), `n` starts a new conversation (see below), `g` refreshes the
-inbox now, `?` opens the help overlay, `q`
+confirm; on WhatsApp this sends the other side a read receipt), `u`
+undoes the last mark-read, including opening a chat or mail thread (see
+`bunker unread`), `n` starts a new conversation (see below), `g`
+refreshes the inbox now, `?` opens the help overlay, `q`
 quits (asks again first if a reply preview/send is in flight). A directly
 opened single-item detail view (kept for parity; every current channel
 instead opens its own chat/thread view below) scrolls a long body with
 `j`/`k`, arrows, `PgUp`/`PgDown`, `G` (jump to the end) and the mouse
 wheel, the footer keymap hint always keeps `q` visible even at a narrow
 (40-column) terminal width.
+
+Drafts are kept for the session. Leaving a chat, or closing the reply
+composer or the mail editor with `Esc`, keeps the unsent text (the status
+line says `borrador guardado`), and reopening the same conversation or
+reply restores it. A successful send forgets it.
 
 New conversation (`n`): a contact picker over `bunker contacts`.
 - **Picking:** typing filters by name or address, ignoring accents.
@@ -650,6 +657,17 @@ none). A connected call also shows how long it has been connected:
 3EB0C4... whatsapp/wa outgoing Ana (51999999999@s.whatsapp.net) active 2:35
 ```
  `--json` returns `{"calls": [...]}` with the shape above.
+
+## `bunker unread <id> [--json]`
+
+Puts an item back in the unread inbox.
+- **Mail:** the server's `\Seen` flag is cleared too.
+- **WhatsApp and Matrix:** they cannot mark a message unread, so only
+  bunker's store changes. The command says so (`unread in bunker only`,
+  `"local_only": true`). The read receipt the other side already got is
+  not taken back.
+
+The TUI's `u` key uses this to undo the last mark-read.
 
 ## `bunker contacts [query] [--channel c] [--account a] [--limit n] [--json]`
 

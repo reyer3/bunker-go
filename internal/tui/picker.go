@@ -198,6 +198,7 @@ func (m Model) openNewMail(c core.Contact) Model {
 	m.composer = newComposer(m.width, m.renderer())
 	m.mailTo.SetValue(c.Address)
 	m.mailFocus = 2
+	m = m.restoreMailDraft()
 	return m.withMailFocusApplied()
 }
 

@@ -55,6 +55,10 @@ func (m Model) openItem(index int) (Model, tea.Cmd) {
 // loads the thread and marks the whole conversation \Seen immediately via
 // ReadThread (no confirm — opening is the explicit action).
 func (m Model) openThread(item core.Item) (Model, tea.Cmd) {
+	m.unreadOnOpen = ""
+	if item.Unread {
+		m.unreadOnOpen = item.ID
+	}
 	m.detail = true
 	m.threadMode = true
 	m.threadChannel = item.Channel
@@ -92,6 +96,10 @@ func (m Model) openChat(item core.Item) (Model, tea.Cmd) {
 	}
 	m.chatDraftID = item.ID
 	m.chatNewTo = ""
+	m.unreadOnOpen = ""
+	if item.Unread {
+		m.unreadOnOpen = item.ID
+	}
 	m.chatName, _ = rowTitle(item)
 	m.chatScroll = 0
 	m.chatItems = nil
@@ -108,6 +116,10 @@ func (m Model) openChat(item core.Item) (Model, tea.Cmd) {
 	m.chatOptimistic = nil
 	m.chatToken++
 	m.composer = newChatComposer(chatComposerWidth(m.width), m.renderer())
+	if draft, ok := m.drafts[chatDraftKey(m.chatChannel, m.chatAccount, m.chatThread)]; ok {
+		m.composer.SetValue(draft)
+		m = m.resizeChatComposer()
+	}
 	return m, openChatCmd(m.client, m.chatChannel, m.chatAccount, m.chatThread, m.chatToken)
 }
 
@@ -116,6 +128,11 @@ func (m Model) openChat(item core.Item) (Model, tea.Cmd) {
 // if this call never lands, e.g. on a hard quit).
 func (m Model) leaveChat() (Model, tea.Cmd) {
 	channel, account, thread := m.chatChannel, m.chatAccount, m.chatThread
+	if next, kept := m.keepDraft(chatDraftKey(channel, account, thread), m.composer.Value()); kept {
+		m = next.withFlash("borrador guardado")
+	} else {
+		m = next
+	}
 	m.detail = false
 	m.chatMode = false
 	m.chatConfirm = false

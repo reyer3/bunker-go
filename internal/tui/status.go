@@ -47,6 +47,9 @@ func (m Model) statusLine() (string, bool) {
 		}
 		return line + " · inícialo con: systemctl --user start bunker", true
 	}
+	if flash, ok := m.currentFlash(); ok {
+		return flash, true
+	}
 	var down []string
 	for _, h := range m.adapterHealth {
 		var state string

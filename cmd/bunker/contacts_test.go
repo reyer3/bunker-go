@@ -97,3 +97,14 @@ func TestCmdSendAddressSkipsContacts(t *testing.T) {
 		t.Fatal("an address should go straight through, without a contacts lookup")
 	}
 }
+
+func TestCmdUnread(t *testing.T) {
+	backend := &fakeBackend{unreadLocal: true}
+	code, out, _ := runCallCmd(t, backend, "unread", "whatsapp:wa:1", "--json")
+	if code != 0 || len(backend.unreadCalls) != 1 || !strings.Contains(out, `"local_only":true`) {
+		t.Fatalf("code %d, calls %v, out %q", code, backend.unreadCalls, out)
+	}
+	if code, _, _ := runCallCmd(t, backend, "unread"); code != 2 {
+		t.Fatalf("missing id: code %d, want usage error", code)
+	}
+}

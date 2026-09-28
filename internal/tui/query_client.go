@@ -202,6 +202,24 @@ func (c *queryClient) ReadThread(ctx context.Context, channel string, account, t
 	return client.ReadThread(ctx, channel, account, thread, receipt)
 }
 
+// MarkUnread changes state, so like Organize it is forwarded once and
+// never retried after a transport failure.
+func (c *queryClient) MarkUnread(ctx context.Context, id string) (bool, error) {
+	if err := c.acquire(ctx); err != nil {
+		return false, err
+	}
+	defer c.release()
+	client, err := c.activeClient()
+	if err != nil {
+		return false, err
+	}
+	marker, ok := client.(UnreadMarker)
+	if !ok {
+		return false, fmt.Errorf("tui: mark unread: %w", core.ErrUnsupported)
+	}
+	return marker.MarkUnread(ctx, id)
+}
+
 // Health is an idempotent query; it errors with core.ErrUnsupported when
 // the connection underneath has no health listing.
 func (c *queryClient) Health(ctx context.Context) ([]core.AdapterHealth, error) {

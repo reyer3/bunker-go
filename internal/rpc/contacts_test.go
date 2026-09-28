@@ -21,3 +21,14 @@ func TestClientContacts(t *testing.T) {
 		t.Fatalf("no match = %+v, %v", none, err)
 	}
 }
+
+func TestClientMarkUnread(t *testing.T) {
+	client, _, _ := startTestServer(t)
+	// The fake mail adapter is an Organizer: the seeded item goes back to unread.
+	if _, err := client.MarkUnread(context.Background(), "mail:cl:1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.MarkUnread(context.Background(), "mail:cl:nope"); err == nil {
+		t.Fatal("an unknown id should be an error")
+	}
+}

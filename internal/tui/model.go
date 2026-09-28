@@ -81,8 +81,19 @@ type Model struct {
 	helpOpen       bool
 	// helpCtx and helpScroll are the help overlay's section (the view
 	// it was opened from) and scroll offset (issue #36).
-	helpCtx         string
-	helpScroll      int
+	helpCtx    string
+	helpScroll int
+	// readUndo, flash/flashAt and drafts back issue #37: the mark-reads u
+	// can undo, the status line's short notice, and the per-target drafts
+	// kept for the session (see undo.go).
+	readUndo   []string
+	flash      string
+	flashAt    time.Time
+	drafts     map[string]string
+	mailDrafts map[string]mailDraft
+	// unreadOnOpen is the item that opening the current chat or mail
+	// thread marks read, remembered for u once the mark succeeds.
+	unreadOnOpen    string
 	glyphs          map[core.Channel]string
 	render          *lipgloss.Renderer
 	now             func() time.Time
