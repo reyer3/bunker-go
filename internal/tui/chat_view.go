@@ -270,10 +270,11 @@ func (m Model) chatBodyLines() []string {
 	optIdx := -1
 	if m.chatOptimistic != nil {
 		synthetic := core.Item{
-			Channel:   m.chatChannel,
-			FromMe:    true,
-			Body:      m.chatOptimistic.body,
-			Timestamp: m.chatOptimistic.at,
+			Channel:     m.chatChannel,
+			FromMe:      true,
+			Body:        m.chatOptimistic.body,
+			Timestamp:   m.chatOptimistic.at,
+			Attachments: m.chatOptimistic.attachments,
 		}
 		items = append(append([]core.Item(nil), items...), synthetic)
 		optIdx = len(items) - 1
@@ -339,6 +340,9 @@ func (m Model) chatTailLines() []string {
 		lines[0] = completion
 	}
 	lines = append(lines, strings.Split(m.composerBox(), "\n")...)
+	if attach, ok := m.chatAttachLine(); ok {
+		lines = append(lines, attach)
+	}
 	switch {
 	case m.chatPreviewPending:
 		lines = append(lines, "Preparando…")

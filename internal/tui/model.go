@@ -138,10 +138,19 @@ type Model struct {
 	// emojiSel is the highlighted entry of the emoji completion list
 	// (emoji.go), and emojiDismissed the draft Esc dismissed it on: the
 	// list stays hidden until the draft changes again.
-	emojiSel       int
-	emojiDismissed string
-	chatTypingAt   time.Time
-	chatTypingOn   bool
+	// chatAttachments are the files the next chat send carries (issue
+	// #5, chat_attach.go), chatTempFiles the ones pasted from the
+	// clipboard (deleted once sent or dropped), chatAttachErr the last
+	// attach failure, and clipboard reads pasted images (nil disables
+	// Ctrl+V image paste).
+	chatAttachments []string
+	chatTempFiles   []string
+	chatAttachErr   error
+	clipboard       clipboardReader
+	emojiSel        int
+	emojiDismissed  string
+	chatTypingAt    time.Time
+	chatTypingOn    bool
 	// chatScroll is how many lines the chat body's rendered window is
 	// scrolled up from the bottom (0 = pinned to the newest message,
 	// bottom-aligned just above the composer — the fitInbox-style height
@@ -291,6 +300,7 @@ func Run(client Client, input io.Reader, output io.Writer) error {
 	model.notifyEnabled = resolveNotifyEnabled(notify, os.Getenv)
 	model.notifyWriter = output
 	model.tmuxPassthrough = os.Getenv("TMUX") != ""
+	model.clipboard = newExecClipboard()
 	model.gfx = kittygfx.Detect(os.Getenv)
 	if model.gfx == kittygfx.Kitty {
 		model.gfxOut = output

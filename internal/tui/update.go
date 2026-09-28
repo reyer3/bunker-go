@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"strings"
 	"unicode/utf8"
 
@@ -25,6 +26,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case clipboardImageMsg:
+		if msg.err != nil {
+			m.chatAttachErr = msg.err
+			return m, nil
+		}
+		if !m.chatMode {
+			os.Remove(msg.path)
+			return m, nil
+		}
+		m.chatTempFiles = append(m.chatTempFiles, msg.path)
+		return m.addChatAttachments(msg.path), nil
 	case mediaReadyMsg:
 		return m.handleMediaReady(msg)
 	case tea.WindowSizeMsg:
@@ -178,6 +190,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.chatConfirm = false
 		m.chatPlan = core.Plan{}
 		m.chatSendErr = nil
+		m = m.clearChatAttachments()
 		if m.chatOptimistic != nil {
 			m.chatOptimistic.id = msg.receipt.ID
 		}
@@ -679,12 +692,27 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.chatOptimistic = &chatOptimisticMsg{body: draft, at: m.clock()}
 			m.composer.Reset()
 			m = m.resizeChatComposer()
-			return m, sendChatReply(m.client, m.chatDraftID, draft, m.chatReplyToken)
+			if err := validateAttachments(m.chatAttachments); err != nil {
+				m.chatSending = false
+				m.chatOptimistic = nil
+				m.composer.SetValue(draft)
+				m.chatSendErr = err
+				return m.resizeChatComposer(), nil
+			}
+			m.chatOptimistic.attachments = attachmentNames(m.chatAttachments)
+			return m, sendChatReply(m.client, m.chatDraftID, draft, m.chatAttachments, m.chatReplyToken)
 		}
 		return m, nil
 	}
 	if next, ok := m.updateEmojiCompletion(msg); ok {
 		return next, nil
+	}
+	if msg.Paste {
+		// Issue #5: files dropped on the terminal arrive as a pasted
+		// list of their paths; attach them instead of typing the paths.
+		if paths, ok := parseDroppedPaths(string(msg.Runes)); ok {
+			return m.addChatAttachments(paths...), nil
+		}
 	}
 	switch msg.String() {
 	case "esc":
@@ -694,13 +722,29 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.resizeChatComposer(), nil
 	case "enter":
 		body := strings.TrimSpace(m.composer.Value())
-		if body == "" {
+		if body == "" && len(m.chatAttachments) == 0 {
+			return m, nil
+		}
+		if err := validateAttachments(m.chatAttachments); err != nil {
+			m.chatSendErr = err
 			return m, nil
 		}
 		m.chatSendErr = nil
 		m.chatReplyToken++
 		m.chatPreviewPending = true
-		return m, previewChatReply(m.client, m.chatDraftID, m.composer.Value(), m.chatReplyToken)
+		return m, previewChatReply(m.client, m.chatDraftID, m.composer.Value(), m.chatAttachments, m.chatReplyToken)
+	case "ctrl+v":
+		// Issue #5: paste an image (e.g. a screenshot) from the clipboard
+		// as an attachment. Text is pasted by the terminal itself
+		// (Ctrl+Shift+V), which arrives as a bracketed paste instead.
+		if m.clipboard == nil {
+			return m, nil
+		}
+		return m, pasteClipboardImageCmd(m.clipboard)
+	case "backspace":
+		if m.composer.Value() == "" && len(m.chatAttachments) > 0 {
+			return m.removeLastChatAttachment(), nil
+		}
 	case "up":
 		if m.composer.Line() == 0 && !m.chatLoading && len(m.chatItems) > 0 {
 			return m.loadOlderChat()

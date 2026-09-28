@@ -141,6 +141,23 @@ type chatOptimisticMsg struct {
 	body   string
 	at     time.Time
 	failed bool
+	// attachments names the files riding on this send (issue #5), so
+	// the optimistic bubble lists them like the stored item will.
+	attachments []core.Attachment
+}
+
+// attachmentNames describes local attachment paths the way a stored
+// item lists its attachments (name and size), for the optimistic bubble.
+func attachmentNames(paths []string) []core.Attachment {
+	out := make([]core.Attachment, 0, len(paths))
+	for _, p := range paths {
+		name, size, err := statAttachment(p)
+		if err != nil {
+			continue
+		}
+		out = append(out, core.Attachment{Name: name, Size: size})
+	}
+	return out
 }
 
 // chatSendReloadMsg carries the K10 post-send reload: once a chat send
@@ -154,20 +171,20 @@ type chatSendReloadMsg struct {
 	err       error
 }
 
-func previewChatReply(client Client, id, body string, token uint64) tea.Cmd {
+func previewChatReply(client Client, id, body string, attachments []string, token uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), previewTimeout)
 		defer cancel()
-		plan, _, err := client.Reply(ctx, id, body, nil, nil, true)
+		plan, _, err := client.Reply(ctx, id, body, nil, attachments, true)
 		return chatReplyPreviewMsg{token: token, plan: plan, err: err}
 	}
 }
 
-func sendChatReply(client Client, id, body string, token uint64) tea.Cmd {
+func sendChatReply(client Client, id, body string, attachments []string, token uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), sendTimeout)
 		defer cancel()
-		_, receipt, err := client.Reply(ctx, id, body, nil, nil, false)
+		_, receipt, err := client.Reply(ctx, id, body, nil, attachments, false)
 		return chatReplySentMsg{token: token, receipt: receipt, err: err}
 	}
 }
