@@ -1,4 +1,4 @@
-.PHONY: build test vet race fmt-check release release-test
+.PHONY: build test vet race fmt-check install dev hooks denylist
 
 # All targets always build with -tags goolm for the pure-Go Matrix
 # adapter (mautrix-go built with goolm, no libolm/CGO). build additionally
@@ -25,11 +25,26 @@ fmt-check:
 		exit 1; \
 	fi
 
-# release publishes a sanitized snapshot to the public repo; see
-# scripts/release.sh. Usage: make release VERSION=v0.2.0 [PUSH=--push]
-release:
-	@test -n "$(VERSION)" || { echo "usage: make release VERSION=vX.Y.Z [PUSH=--push]"; exit 1; }
-	scripts/release.sh $(VERSION) $(PUSH)
+# install builds bunker into $(PREFIX)/bin, where deploy/systemd's unit
+# expects it. dev also restarts the daemon when it runs as that user
+# service, so "git pull && make dev" is the whole local test loop.
+PREFIX ?= $(HOME)/.local
 
-release-test:
-	scripts/release_test.sh
+install:
+	CGO_ENABLED=0 go build -tags goolm -trimpath -o $(PREFIX)/bin/bunker ./cmd/bunker
+
+dev: install
+	@if systemctl --user is-active --quiet bunker 2>/dev/null; then \
+		systemctl --user restart bunker && echo "bunker.service restarted"; \
+	else \
+		echo "installed $(PREFIX)/bin/bunker; restart your 'bunker daemon' to pick it up"; \
+	fi
+
+# hooks installs the pre-commit denylist check (scripts/check-denylist.sh).
+hooks:
+	ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
+	@echo "pre-commit hook installed"
+
+# denylist checks every tracked file against the local denylist.
+denylist:
+	scripts/check-denylist.sh

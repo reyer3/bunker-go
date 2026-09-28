@@ -186,6 +186,35 @@ func (c *Client) Organize(ctx context.Context, id string, op core.OrganizeOp, dr
 	return res.Plan, nil
 }
 
+// PlaceCall starts a voice call to to on channel/account.
+func (c *Client) PlaceCall(ctx context.Context, channel core.Channel, account, to string, dryRun bool) (core.Plan, core.Call, error) {
+	var res planCallResult
+	err := c.call(ctx, MethodCall, callParams{Channel: channel, Account: account, To: to, DryRun: dryRun}, &res)
+	if err != nil {
+		return core.Plan{}, core.Call{}, err
+	}
+	return res.Plan, res.Call, nil
+}
+
+// ControlCall answers, rejects or hangs up the live call id.
+func (c *Client) ControlCall(ctx context.Context, id string, action core.CallAction, dryRun bool) (core.Plan, core.Call, error) {
+	var res planCallResult
+	err := c.call(ctx, MethodCallControl, callControlParams{ID: id, Action: action, DryRun: dryRun}, &res)
+	if err != nil {
+		return core.Plan{}, core.Call{}, err
+	}
+	return res.Plan, res.Call, nil
+}
+
+// Calls lists every account's live calls.
+func (c *Client) Calls(ctx context.Context) ([]core.Call, error) {
+	var res callsResult
+	if err := c.call(ctx, MethodCalls, nil, &res); err != nil {
+		return nil, err
+	}
+	return res.Calls, nil
+}
+
 // PostStatus publishes a status/story on channel/account.
 func (c *Client) PostStatus(ctx context.Context, channel core.Channel, account string, status core.Status, dryRun bool) (core.Plan, core.Receipt, error) {
 	var res planReceiptResult

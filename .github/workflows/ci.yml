@@ -31,6 +31,17 @@ jobs:
       - run: go run golang.org/x/vuln/cmd/govulncheck@latest -tags goolm ./...
       - run: go run honnef.co/go/tools/cmd/staticcheck@latest -tags goolm ./...
 
+  # Names, domains and IDs that must never be published. The list is itself
+  # sensitive, so it lives in the RELEASE_DENYLIST secret, not the repo;
+  # the check reports file:line only. PRs from forks get no secret and skip.
+  denylist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/check-denylist.sh
+        env:
+          RELEASE_DENYLIST: ${{ secrets.RELEASE_DENYLIST }}
+
   secrets:
     runs-on: ubuntu-latest
     steps:

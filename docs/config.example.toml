@@ -54,6 +54,21 @@ name = "personal"
 # (default 10; see docs/cli.md's Fan-out section). broadcast_pause_min_
 # seconds/broadcast_pause_max_seconds bound the randomized pause between
 # recipients (default 3/8).
+#
+# Voice calls (bunker call / calls) are opt-in and experimental: they run
+# meowcaller, an unofficial pure-Go implementation of WhatsApp's VoIP
+# stack. Audio uses the daemon machine's microphone and speaker through
+# two external commands that stream raw s16le mono 16 kHz PCM (stdout for
+# capture, stdin for playback); the defaults are PulseAudio's parec/pacat,
+# which PipeWire serves too. An empty list disables that direction.
+# calls = true
+# call_capture_command = ["parec", "--raw", "--format=s16le", "--rate=16000", "--channels=1", "--latency-msec=60"]
+# call_playback_command = ["pacat", "--playback", "--raw", "--format=s16le", "--rate=16000", "--channels=1", "--latency-msec=60"]
+# call_capture_gain / call_playback_gain scale your microphone / what you
+# hear in software (1 = unchanged, 1.5 = +50%, capped at 8); raise them
+# when the call sounds quiet. Too high a gain clips (distorts) the audio.
+# call_capture_gain = 1.5
+# call_playback_gain = 1.5
 
 # --- Matrix: the company homeserver, E2EE ---
 [[account]]

@@ -75,6 +75,13 @@ Commands:
        [--move folder] [--seen|--unseen] [--dry-run] [--json]
   status post <channel> <account> <text>
        [--media path] [--dry-run] [--json]                 publish a status
+  call <channel> <account> <to> [--dry-run] [--json]      place a voice call
+                                                             (WhatsApp, opt-in;
+                                                             audio plays on the
+                                                             daemon's machine)
+  call answer|reject|hangup <call-id>
+       [--dry-run] [--json]                                 control a live call
+  calls [--json]                                           list live calls
   counts [--json]                                          unread counts
   health [--json]                                          per-adapter connection
                                                              state, since when,
@@ -153,6 +160,10 @@ func runWithBackend(ctx context.Context, backend Backend, args []string, stdin i
 		return cmdBackfill(ctx, backend, args[1:], stdout, stderr)
 	case "search":
 		return cmdSearch(ctx, backend, args[1:], stdout, stderr)
+	case "call":
+		return cmdCall(ctx, backend, args[1:], stdout, stderr)
+	case "calls":
+		return cmdCalls(ctx, backend, args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n%s", args[0], topLevelUsage)
 		return 2

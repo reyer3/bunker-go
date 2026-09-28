@@ -253,6 +253,35 @@ func (s *Server) call(ctx context.Context, req Request) (any, error) {
 		}
 		return nil, nil
 
+	case MethodCall:
+		var p callParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		plan, call, err := s.svc.PlaceCall(ctx, p.Channel, p.Account, p.To, p.DryRun)
+		if err != nil {
+			return nil, err
+		}
+		return planCallResult{Plan: plan, Call: call}, nil
+
+	case MethodCallControl:
+		var p callControlParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		plan, call, err := s.svc.ControlCall(ctx, p.ID, p.Action, p.DryRun)
+		if err != nil {
+			return nil, err
+		}
+		return planCallResult{Plan: plan, Call: call}, nil
+
+	case MethodCalls:
+		calls, err := s.svc.Calls(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return callsResult{Calls: calls}, nil
+
 	case MethodHealth:
 		adapters, err := s.svc.Health(ctx)
 		if err != nil {

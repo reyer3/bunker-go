@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Git pre-commit hook: blocks a commit whose staged files contain a
+# denylisted string (see scripts/check-denylist.sh). Install with
+# "make hooks".
+exec "$(git rev-parse --show-toplevel)/scripts/check-denylist.sh" --cached

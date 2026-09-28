@@ -48,6 +48,49 @@ type fakeBackend struct {
 	searchCalls []searchCall
 	searchItems []core.Item
 	searchErr   error
+
+	placeCallCalls   []placeCallCall
+	controlCallCalls []controlCallCall
+	call             core.Call
+	calls            []core.Call
+	callErr          error
+}
+
+type placeCallCall struct {
+	Channel core.Channel
+	Account string
+	To      string
+	DryRun  bool
+}
+
+type controlCallCall struct {
+	ID     string
+	Action core.CallAction
+	DryRun bool
+}
+
+func (f *fakeBackend) PlaceCall(ctx context.Context, channel core.Channel, account, to string, dryRun bool) (core.Plan, core.Call, error) {
+	f.placeCallCalls = append(f.placeCallCalls, placeCallCall{channel, account, to, dryRun})
+	if f.callErr != nil {
+		return core.Plan{}, core.Call{}, f.callErr
+	}
+	plan := core.Plan{Action: "call", Channel: channel, Account: account, Target: to}
+	if dryRun {
+		return plan, core.Call{}, nil
+	}
+	return plan, f.call, nil
+}
+
+func (f *fakeBackend) ControlCall(ctx context.Context, id string, action core.CallAction, dryRun bool) (core.Plan, core.Call, error) {
+	f.controlCallCalls = append(f.controlCallCalls, controlCallCall{id, action, dryRun})
+	if f.callErr != nil {
+		return core.Plan{}, core.Call{}, f.callErr
+	}
+	return core.Plan{Action: "call " + string(action), Channel: f.call.Channel, Account: f.call.Account, Target: f.call.Peer}, f.call, nil
+}
+
+func (f *fakeBackend) Calls(ctx context.Context) ([]core.Call, error) {
+	return f.calls, f.callErr
 }
 
 type backfillCall struct {

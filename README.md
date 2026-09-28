@@ -13,7 +13,7 @@ bunker <command> ──unix socket──> daemon
 ## Features
 
 - **Mail**: IMAP IDLE push, full-body fetch without marking read, send and reply with multiple recipients, Cc and attachments, move to folders, labels (IMAP keywords and Gmail labels, read back into the store), and reconciliation with changes made from other clients.
-- **WhatsApp**: linked device through QR, contact and group names, bounded history import, text and media (images, video, audio, documents), status posts, read receipts, and human-paced sends with presence and typing emulation.
+- **WhatsApp**: linked device through QR, contact and group names, bounded history import, text and media (images, video, audio, documents), status posts, read receipts, human-paced sends with presence and typing emulation, and opt-in voice calls (place, answer, reject, hang up) through the daemon machine's microphone and speaker.
 - **Matrix**: SSO login, end-to-end encryption in pure Go (goolm), recovery-key and key-export import, re-decryption of old events, typing notifications, read receipts, and encrypted media.
 - **Safety by design**:
   - every outbound action has `--dry-run`, which returns a plan and never touches the network;
@@ -53,13 +53,17 @@ The full command reference and JSON shapes are in [docs/cli.md](docs/cli.md).
 make test   # go test -tags goolm ./...
 make race
 make vet
+make dev    # install to ~/.local/bin and restart the daemon service
+make hooks  # pre-commit check against your private denylist
 ```
 
 Tests never touch real servers. They use in-process fakes for IMAP, SMTP, the Matrix homeserver and the WhatsApp client.
 
+Releases are automated: commits follow [Conventional Commits](https://www.conventionalcommits.org/), release-please keeps a release PR with the next version and changelog, and merging it publishes the binaries.
+
 ## Notes
 
-- WhatsApp support uses [whatsmeow](https://github.com/tulir/whatsmeow), an unofficial client. Automated or bulk messaging can get an account banned, so keep usage human-paced; the built-in limits exist for that reason.
+- WhatsApp support uses [whatsmeow](https://github.com/tulir/whatsmeow), an unofficial client. Voice calls add [meowcaller](https://github.com/purpshell/meowcaller), an experimental, unofficial VoIP implementation; they are off unless an account sets `calls = true`. Automated or bulk messaging can get an account banned, so keep usage human-paced; the built-in limits exist for that reason.
 - Secrets never go into the config file. Mail uses GNOME Online Accounts or a 0600 password file; WhatsApp and Matrix sessions live in a 0700 state directory.
 
 ## License

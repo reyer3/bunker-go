@@ -43,3 +43,9 @@ changelog:
       - "^docs:"
       - "^test:"
       - "^chore:"
+
+# release-please creates the GitHub Release (with its CHANGELOG notes)
+# before goreleaser runs; keep those notes and only attach the artifacts.
+# A hand-pushed tag has no release yet, so goreleaser creates it.
+release:
+  mode: keep-existing
