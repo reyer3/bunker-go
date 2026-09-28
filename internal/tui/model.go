@@ -107,6 +107,11 @@ type Model struct {
 	chatAccount string
 	chatThread  string
 	chatDraftID string
+	// chatNewTo is the address of a chat opened from the contact picker
+	// (issue #26): with no item to reply to, the draft is sent to it.
+	chatNewTo string
+	// picker is the "n" contact picker, nil when closed.
+	picker *contactPicker
 	// chatName is the header's contact/group display name (K7), resolved
 	// once at open time the same way an inbox row's title is (rowTitle):
 	// ThreadName, then Subject, then the opening item's sender — never a

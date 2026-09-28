@@ -11,6 +11,9 @@ func (m Model) View() string {
 	if m.helpOpen {
 		return m.helpView()
 	}
+	if m.picker != nil {
+		return m.pickerView()
+	}
 	var out strings.Builder
 	if m.composing {
 		m.writeCompose(&out)
@@ -56,6 +59,7 @@ func (m Model) helpView() string {
 		"j/k, ↑/↓    mover selección",
 		"↵           leer",
 		"r           responder",
+		"n           nuevo mensaje (elegir contacto)",
 		"m           marcar leído",
 		"g           refrescar",
 		"1/2/3       enfocar Mail/WhatsApp/Matrix",

@@ -190,7 +190,7 @@ func joinAddresses(addrs []core.Address) string {
 // needs a download that is not implemented yet), and, once Ctrl+S was
 // pressed, the dry-run preview/send confirm.
 func (m Model) writeMailEditor(out *strings.Builder) {
-	titles := map[string]string{"reply": "Responder", "replyAll": "Responder a todos", "forward": "Reenviar"}
+	titles := map[string]string{"reply": "Responder", "replyAll": "Responder a todos", "forward": "Reenviar", "new": "Nuevo correo"}
 	fmt.Fprintf(out, "%s\n\n", titles[m.mailAction])
 	fmt.Fprintf(out, "To: %s\n", m.mailTo.View())
 	fmt.Fprintf(out, "Cc: %s\n", m.mailCc.View())

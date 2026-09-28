@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -199,6 +200,18 @@ func (c *queryClient) ReadThread(ctx context.Context, channel string, account, t
 		return 0, err
 	}
 	return client.ReadThread(ctx, channel, account, thread, receipt)
+}
+
+// Contacts is an idempotent query; it errors with core.ErrUnsupported when
+// the connection underneath has no contact listing.
+func (c *queryClient) Contacts(ctx context.Context, filter core.ContactFilter) ([]core.Contact, error) {
+	return query(c, ctx, func(client Client) ([]core.Contact, error) {
+		lister, ok := client.(ContactsClient)
+		if !ok {
+			return nil, fmt.Errorf("tui: contacts: %w", core.ErrUnsupported)
+		}
+		return lister.Contacts(ctx, filter)
+	})
 }
 
 func (c *queryClient) Presence(ctx context.Context, channel string, account, thread string) (core.Presence, error) {

@@ -91,6 +91,7 @@ func (m Model) openChat(item core.Item) (Model, tea.Cmd) {
 		m.chatThread = item.ID
 	}
 	m.chatDraftID = item.ID
+	m.chatNewTo = ""
 	m.chatName, _ = rowTitle(item)
 	m.chatScroll = 0
 	m.chatItems = nil
@@ -138,6 +139,9 @@ func (m Model) leaveChat() (Model, tea.Cmd) {
 // wheel scrolls the draft there, but every other mouse action stays a
 // no-op, same as these other overlays.
 func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.picker != nil {
+		return m.updatePickerMouse(msg)
+	}
 	if m.composing {
 		return m.updateComposeMouse(msg)
 	}

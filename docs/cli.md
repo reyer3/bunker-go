@@ -164,13 +164,25 @@ the help overlay, or returns from a focused section to the overview),
 with scrolling, `0` returns to the overview, `Tab`/`Shift+Tab` cycle
 overview → Mail → WhatsApp → Matrix → overview, `r` starts a reply to the
 selected/open item, `m` marks it read (dry-run preview, then `Enter` to
-confirm), `g` refreshes the inbox now, `?` opens the help overlay, `q`
+confirm), `n` starts a new conversation (see below), `g` refreshes the
+inbox now, `?` opens the help overlay, `q`
 quits (asks again first if a reply preview/send is in flight). A directly
 opened single-item detail view (kept for parity; every current channel
 instead opens its own chat/thread view below) scrolls a long body with
 `j`/`k`, arrows, `PgUp`/`PgDown`, `G` (jump to the end) and the mouse
 wheel, the footer keymap hint always keeps `q` visible even at a narrow
 (40-column) terminal width.
+
+New conversation (`n`): a contact picker over `bunker contacts`.
+- **Picking:** typing filters by name or address, ignoring accents.
+  `↑`/`↓` (or `Tab`) choose, and `Enter` or a click opens the contact.
+  `Esc` cancels.
+- **Chat contacts (WhatsApp, Matrix):** the chat view opens, with an empty
+  history if you have never talked. The first message is a fresh send to
+  the contact, still previewed and confirmed like a reply.
+- **Mail contacts:** the full editor opens with the address in To and the
+  cursor on the subject.
+
 Composing a reply: the draft is a real multi-line text editor (a shared
 [bubbles](https://github.com/charmbracelet/bubbles) textarea), so arrows,
 Home/End, word motions and paste move and edit the cursor position instead
