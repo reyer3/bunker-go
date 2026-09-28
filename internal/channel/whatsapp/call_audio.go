@@ -22,10 +22,15 @@ var (
 
 // commandAudio implements callAudio by spawning one capture process
 // (microphone -> stdout) and one playback process (stdin -> speaker) per
-// call. An empty command disables that direction.
+// call. An empty command disables that direction. captureGain and
+// playbackGain scale the samples in software (0 means 1, unchanged), so
+// volume can be raised with any capture/playback tool, not only those
+// with a volume flag of their own.
 type commandAudio struct {
-	capture  []string
-	playback []string
+	capture      []string
+	playback     []string
+	captureGain  float32
+	playbackGain float32
 }
 
 func (c commandAudio) Open() (meowcaller.AudioSource, meowcaller.AudioSink, error) {
@@ -40,6 +45,9 @@ func (c commandAudio) Open() (meowcaller.AudioSource, meowcaller.AudioSink, erro
 			return nil, nil, fmt.Errorf("whatsapp: call capture %q: %w", c.capture[0], err)
 		}
 		src = meowcaller.PCMStream(&procReader{ReadCloser: out, cmd: cmd})
+		if g := c.captureGain; g > 0 && g != 1 {
+			src = gainSource{AudioSource: src, gain: g}
+		}
 	}
 	var sink meowcaller.AudioSink
 	if len(c.playback) > 0 {
@@ -53,7 +61,7 @@ func (c commandAudio) Open() (meowcaller.AudioSource, meowcaller.AudioSink, erro
 			closeAudio(src, nil)
 			return nil, nil, fmt.Errorf("whatsapp: call playback %q: %w", c.playback[0], err)
 		}
-		sink = &pcmSink{w: in, cmd: cmd}
+		sink = &pcmSink{w: in, cmd: cmd, gain: c.playbackGain}
 	}
 	return src, sink, nil
 }
@@ -80,6 +88,7 @@ type pcmSink struct {
 	w      io.WriteCloser
 	cmd    *exec.Cmd
 	buf    []byte
+	gain   float32
 	closed bool
 }
 
@@ -89,7 +98,7 @@ func (s *pcmSink) WriteFrame(frame []float32) error {
 	if s.closed {
 		return io.ErrClosedPipe
 	}
-	s.buf = encodeS16LE(s.buf[:0], frame)
+	s.buf = encodeS16LE(s.buf[:0], frame, s.gain)
 	_, err := s.w.Write(s.buf)
 	return err
 }
@@ -107,16 +116,38 @@ func (s *pcmSink) Close() error {
 	return nil
 }
 
-// encodeS16LE appends frame, clamped to [-1, 1], as signed 16-bit
-// little-endian PCM.
-func encodeS16LE(dst []byte, frame []float32) []byte {
+// gainSource scales every frame of its AudioSource by gain.
+type gainSource struct {
+	meowcaller.AudioSource
+	gain float32
+}
+
+func (g gainSource) ReadFrame() ([]float32, error) {
+	frame, err := g.AudioSource.ReadFrame()
+	for i, v := range frame {
+		frame[i] = clampSample(v * g.gain)
+	}
+	return frame, err
+}
+
+func clampSample(v float32) float32 {
+	if v > 1 {
+		return 1
+	}
+	if v < -1 {
+		return -1
+	}
+	return v
+}
+
+// encodeS16LE appends frame, scaled by gain (0 means 1) and clamped to
+// [-1, 1], as signed 16-bit little-endian PCM.
+func encodeS16LE(dst []byte, frame []float32, gain float32) []byte {
+	if gain <= 0 {
+		gain = 1
+	}
 	for _, v := range frame {
-		if v > 1 {
-			v = 1
-		} else if v < -1 {
-			v = -1
-		}
-		dst = binary.LittleEndian.AppendUint16(dst, uint16(int16(v*32767)))
+		dst = binary.LittleEndian.AppendUint16(dst, uint16(int16(clampSample(v*gain)*32767)))
 	}
 	return dst
 }

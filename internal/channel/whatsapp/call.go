@@ -232,6 +232,9 @@ func (a *Adapter) startCallAudio(callID string) {
 	if ok {
 		rec.info.State = core.CallStateActive
 		rec.answered = true
+		if rec.info.ConnectedAt.IsZero() {
+			rec.info.ConnectedAt = time.Now()
+		}
 	}
 	a.callMu.Unlock()
 	if !ok || audio == nil {
@@ -263,6 +266,7 @@ func (a *Adapter) endCall(ctx context.Context, callID, reason string) core.Call 
 		delete(a.liveCalls, callID)
 		rec.info.State = core.CallStateEnded
 		rec.info.EndReason = reason
+		rec.info.EndedAt = time.Now()
 	}
 	a.callMu.Unlock()
 	if !ok {
@@ -286,6 +290,9 @@ func (a *Adapter) endCallOr(ctx context.Context, rec *callRecord, reason string)
 	if info.EndReason == "" {
 		info.EndReason = reason
 	}
+	if info.EndedAt.IsZero() {
+		info.EndedAt = time.Now()
+	}
 	return info
 }
 
@@ -308,8 +315,10 @@ func (a *Adapter) writeCallItem(ctx context.Context, rec *callRecord) {
 	case incoming && !rec.answered:
 		item.Body = "📞 Llamada perdida"
 		item.Unread = true
+	case rec.info.ConnectedAt.IsZero() && !incoming:
+		item.Body = "📞 Llamada sin respuesta"
 	default:
-		item.Body = "📞 Llamada finalizada (" + formatCallDuration(time.Since(rec.info.StartedAt)) + ")"
+		item.Body = "📞 Llamada finalizada (" + core.FormatCallDuration(rec.info.Duration(time.Now())) + ")"
 	}
 	a.cacheItem(item)
 
@@ -322,11 +331,6 @@ func (a *Adapter) writeCallItem(ctx context.Context, rec *callRecord) {
 	if err := sink.Upsert(ctx, item); err != nil {
 		core.LogSinkError(core.ChannelWhatsApp, a.account, "upsert_call", err)
 	}
-}
-
-func formatCallDuration(d time.Duration) string {
-	s := int(d.Round(time.Second) / time.Second)
-	return fmt.Sprintf("%d:%02d", s/60, s%60)
 }
 
 func closeAudio(src meowcaller.AudioSource, sink meowcaller.AudioSink) {

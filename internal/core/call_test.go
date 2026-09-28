@@ -102,3 +102,24 @@ func TestServiceCallsSortedAcrossAccounts(t *testing.T) {
 		t.Fatalf("Calls = %+v, %v", calls, err)
 	}
 }
+
+func TestCallDurationAndFormat(t *testing.T) {
+	start := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
+	c := core.Call{StartedAt: start}
+	if d := c.Duration(start.Add(time.Minute)); d != 0 {
+		t.Fatalf("unconnected duration = %v", d)
+	}
+	c.ConnectedAt = start.Add(10 * time.Second)
+	if d := c.Duration(start.Add(75 * time.Second)); d != 65*time.Second {
+		t.Fatalf("live duration = %v", d)
+	}
+	c.EndedAt = start.Add(40 * time.Second)
+	if d := c.Duration(start.Add(time.Hour)); d != 30*time.Second {
+		t.Fatalf("ended duration = %v", d)
+	}
+	for d, want := range map[time.Duration]string{0: "0:00", 65 * time.Second: "1:05", 3725 * time.Second: "1:02:05"} {
+		if got := core.FormatCallDuration(d); got != want {
+			t.Errorf("FormatCallDuration(%v) = %q, want %q", d, got, want)
+		}
+	}
+}

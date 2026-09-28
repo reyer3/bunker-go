@@ -64,6 +64,11 @@ name = "personal"
 # calls = true
 # call_capture_command = ["parec", "--raw", "--format=s16le", "--rate=16000", "--channels=1", "--latency-msec=60"]
 # call_playback_command = ["pacat", "--playback", "--raw", "--format=s16le", "--rate=16000", "--channels=1", "--latency-msec=60"]
+# call_capture_gain / call_playback_gain scale your microphone / what you
+# hear in software (1 = unchanged, 1.5 = +50%, capped at 8); raise them
+# when the call sounds quiet. Too high a gain clips (distorts) the audio.
+# call_capture_gain = 1.5
+# call_playback_gain = 1.5
 
 # --- Matrix: the company homeserver, E2EE ---
 [[account]]

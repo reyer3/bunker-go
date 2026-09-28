@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/reyer3/bunker-go/internal/core"
 )
@@ -97,6 +98,9 @@ func formatCall(c core.Call) string {
 		peer = fmt.Sprintf("%s (%s)", c.PeerName, c.Peer)
 	}
 	s := fmt.Sprintf("%s %s/%s %s %s %s", c.ID, c.Channel, c.Account, c.Direction, peer, c.State)
+	if !c.ConnectedAt.IsZero() {
+		s += " " + core.FormatCallDuration(c.Duration(time.Now()))
+	}
 	if c.EndReason != "" {
 		s += " (" + c.EndReason + ")"
 	}

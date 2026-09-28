@@ -591,12 +591,16 @@ call ok: 3EB0C4... whatsapp/personal outgoing +51999999999@s.whatsapp.net callin
 ```json
 {"ID": "3EB0C4...", "Channel": "whatsapp", "Account": "personal",
  "Peer": "51999999999@s.whatsapp.net", "PeerName": "Ana",
- "Direction": "outgoing", "State": "calling",
- "StartedAt": "2026-09-28T10:00:00Z", "EndReason": ""}
+ "Direction": "outgoing", "State": "active",
+ "StartedAt": "2026-09-28T10:00:00Z", "ConnectedAt": "2026-09-28T10:00:07Z",
+ "EndedAt": "0001-01-01T00:00:00Z", "EndReason": ""}
 ```
 
 `Direction` is `incoming` or `outgoing`; `State` moves `ringing`/`calling`
-→ `connecting` → `active` → `ended`.
+→ `connecting` → `active` → `ended`. `StartedAt` is when the call started
+ringing, `ConnectedAt` when media started flowing (zero until then) and
+`EndedAt` when it ended (zero while live). The call's duration counts from
+`ConnectedAt`, so ringing time is not included.
 
 ## `bunker call answer|reject|hangup <call-id> [--dry-run] [--json]`
 
@@ -609,13 +613,19 @@ Incoming calls are never answered on their own. Each one is also written
 to its conversation as an item, so it shows in `list`, `counts` and the
 tmux segment: `📞 Llamada entrante` (unread) while ringing, then
 `📞 Llamada perdida` (still unread) if nobody answered, or
-`📞 Llamada finalizada (m:ss)` once an answered call ends. Its `Meta`
+`📞 Llamada finalizada (m:ss)` once an answered call ends. An outgoing call
+nobody answered becomes `📞 Llamada sin respuesta`. Its `Meta`
 carries `wa_call_id`, `wa_call` (direction) and `wa_state`.
 
 ## `bunker calls [--json]`
 
 Lists every live call, oldest first (`no active calls` when there are
-none). `--json` returns `{"calls": [...]}` with the shape above.
+none). A connected call also shows how long it has been connected:
+
+```
+3EB0C4... whatsapp/wa outgoing Ana (51999999999@s.whatsapp.net) active 2:35
+```
+ `--json` returns `{"calls": [...]}` with the shape above.
 
 ## `bunker counts [--json]`
 

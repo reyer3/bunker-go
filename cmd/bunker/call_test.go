@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/reyer3/bunker-go/internal/core"
 )
@@ -66,6 +67,10 @@ func TestCmdCalls(t *testing.T) {
 	code, out, _ = runCallCmd(t, backend, "calls")
 	if code != 0 || !strings.Contains(out, "IN1 whatsapp/personal incoming Ana (519@s.whatsapp.net) ringing") {
 		t.Fatalf("exit %d out %q", code, out)
+	}
+	live := &fakeBackend{calls: []core.Call{{ID: "C2", Channel: core.ChannelWhatsApp, Account: "wa", Direction: core.CallOutgoing, Peer: "519@s.whatsapp.net", State: core.CallStateActive, ConnectedAt: time.Now().Add(-65 * time.Second)}}}
+	if code, out, _ = runCallCmd(t, live, "calls"); code != 0 || !strings.Contains(out, "active 1:05") {
+		t.Fatalf("live duration: exit %d out %q", code, out)
 	}
 	code, out, _ = runCallCmd(t, &fakeBackend{}, "calls", "--json")
 	if code != 0 || strings.TrimSpace(out) != `{"calls":[]}` {

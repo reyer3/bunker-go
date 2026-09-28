@@ -118,6 +118,9 @@ func NewFromAccount(acc config.Account) (core.Adapter, error) {
 		adapter.EnableCalls(meowEngine{meowcaller.NewClient(cli.Client)}, commandAudio{
 			capture:  stringSliceOption(acc.Options, "call_capture_command", defaultCaptureCommand),
 			playback: stringSliceOption(acc.Options, "call_playback_command", defaultPlaybackCommand),
+			// Gains above maxCallGain only add clipping, never loudness.
+			captureGain:  gainOption(acc.Options, "call_capture_gain"),
+			playbackGain: gainOption(acc.Options, "call_playback_gain"),
 		})
 	}
 	return adapter, nil
@@ -153,6 +156,31 @@ func boolOption(opts map[string]interface{}, key string, def bool) bool {
 		return v
 	}
 	return def
+}
+
+// maxCallGain caps call_capture_gain/call_playback_gain.
+const maxCallGain = 8
+
+// gainOption reads a software audio gain (1 = unchanged), accepting an
+// integer or a fractional TOML number. A missing, non-positive or
+// non-numeric value means 1; anything above maxCallGain is capped.
+func gainOption(opts map[string]interface{}, key string) float32 {
+	var g float64
+	switch n := opts[key].(type) {
+	case int64:
+		g = float64(n)
+	case float64:
+		g = n
+	default:
+		return 1
+	}
+	if g <= 0 {
+		return 1
+	}
+	if g > maxCallGain {
+		g = maxCallGain
+	}
+	return float32(g)
 }
 
 // stringSliceOption reads a TOML string array option (decoded as

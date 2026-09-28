@@ -250,7 +250,7 @@ func TestControlUnknownCall(t *testing.T) {
 }
 
 func TestEncodeS16LE(t *testing.T) {
-	got := encodeS16LE(nil, []float32{0, 1, -1, 2})
+	got := encodeS16LE(nil, []float32{0, 1, -1, 2}, 0)
 	want := []byte{0, 0, 0xff, 0x7f, 0x01, 0x80, 0xff, 0x7f}
 	if string(got) != string(want) {
 		t.Fatalf("encodeS16LE = %x, want %x", got, want)
@@ -303,5 +303,61 @@ func TestCommandAudioEmptyDisablesDirection(t *testing.T) {
 	src, sink, err := commandAudio{}.Open()
 	if err != nil || src != nil || sink != nil {
 		t.Fatalf("Open() = %v, %v, %v; want nil, nil, nil", src, sink, err)
+	}
+}
+
+func TestCallDurationCountsFromConnect(t *testing.T) {
+	a, engine, _, sink := newCallAdapter(t)
+	live := &fakeLiveCall{id: "CALL1", peer: callPeer}
+	engine.next = live
+	if _, err := a.PlaceCall(context.Background(), "51999888777"); err != nil {
+		t.Fatal(err)
+	}
+	if c := a.ActiveCalls()[0]; !c.ConnectedAt.IsZero() {
+		t.Fatalf("ConnectedAt set while ringing: %+v", c)
+	}
+	live.onReady()
+	c := a.ActiveCalls()[0]
+	if c.ConnectedAt.IsZero() || c.ConnectedAt.Before(c.StartedAt) {
+		t.Fatalf("ConnectedAt = %v, StartedAt = %v", c.ConnectedAt, c.StartedAt)
+	}
+	ended, _ := a.ControlCall(context.Background(), "CALL1", core.CallHangup)
+	if ended.EndedAt.IsZero() {
+		t.Fatalf("EndedAt not set: %+v", ended)
+	}
+	if item := lastUpsert(t, sink); item.Body != "📞 Llamada finalizada (0:00)" {
+		t.Fatalf("body = %q", item.Body)
+	}
+}
+
+func TestOutgoingCallUnanswered(t *testing.T) {
+	a, engine, _, sink := newCallAdapter(t)
+	live := &fakeLiveCall{id: "CALL1", peer: callPeer}
+	engine.next = live
+	if _, err := a.PlaceCall(context.Background(), "51999888777"); err != nil {
+		t.Fatal(err)
+	}
+	live.onEnd("timeout")
+	if item := lastUpsert(t, sink); item.Body != "📞 Llamada sin respuesta" || item.Unread {
+		t.Fatalf("item = %+v", item)
+	}
+}
+
+func TestCallGain(t *testing.T) {
+	got := encodeS16LE(nil, []float32{0.25, 0.75}, 2)
+	want := encodeS16LE(nil, []float32{0.5, 1}, 1)
+	if string(got) != string(want) {
+		t.Fatalf("gain 2 = %x, want %x", got, want)
+	}
+	src := gainSource{AudioSource: &fakeAudioEnd{}, gain: 3}
+	if frame, err := src.ReadFrame(); err != nil || len(frame) != meowcaller.FrameSamples {
+		t.Fatalf("gainSource.ReadFrame = %d, %v", len(frame), err)
+	}
+
+	opts := map[string]interface{}{"i": int64(2), "f": 1.5, "neg": -1.0, "big": 100.0, "s": "x"}
+	for key, want := range map[string]float32{"i": 2, "f": 1.5, "neg": 1, "big": maxCallGain, "s": 1, "missing": 1} {
+		if got := gainOption(opts, key); got != want {
+			t.Errorf("gainOption(%q) = %v, want %v", key, got, want)
+		}
 	}
 }

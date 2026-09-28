@@ -37,7 +37,37 @@ type Call struct {
 	Direction string
 	State     string
 	StartedAt time.Time
-	EndReason string
+	// ConnectedAt is when media started flowing (zero until then, and
+	// forever for a call nobody answered); EndedAt is when it ended.
+	// Duration counts from ConnectedAt, so ringing time is excluded.
+	ConnectedAt time.Time
+	EndedAt     time.Time
+	EndReason   string
+}
+
+// Duration is how long the call has been (or was) connected as of now:
+// zero while it has not connected yet.
+func (c Call) Duration(now time.Time) time.Duration {
+	if c.ConnectedAt.IsZero() {
+		return 0
+	}
+	end := now
+	if !c.EndedAt.IsZero() {
+		end = c.EndedAt
+	}
+	if end.Before(c.ConnectedAt) {
+		return 0
+	}
+	return end.Sub(c.ConnectedAt)
+}
+
+// FormatCallDuration renders d as m:ss (h:mm:ss from one hour up).
+func FormatCallDuration(d time.Duration) string {
+	s := int(d.Round(time.Second) / time.Second)
+	if s >= 3600 {
+		return fmt.Sprintf("%d:%02d:%02d", s/3600, s/60%60, s%60)
+	}
+	return fmt.Sprintf("%d:%02d", s/60, s%60)
 }
 
 // CallAction is what Service.ControlCall does to a live call.
