@@ -31,16 +31,16 @@ func (m Model) threadHeadLines() []string {
 	}
 	lines := []string{m.styles().title.Render(subject)}
 	if m.threadLoading {
-		lines = append(lines, "Loading thread...")
+		lines = append(lines, "Cargando conversación…")
 	}
 	if m.threadLoadErr != nil {
-		lines = append(lines, "Error: "+safeLine(m.threadLoadErr.Error()))
+		lines = append(lines, "Error: "+humanError(m.threadLoadErr))
 	}
 	if m.threadSeenErr != nil {
-		lines = append(lines, "Mark \\Seen error: "+safeLine(m.threadSeenErr.Error()))
+		lines = append(lines, "No se pudo marcar como leído: "+humanError(m.threadSeenErr))
 	}
 	if m.threadBodyErr != nil {
-		lines = append(lines, "Body error: "+safeLine(m.threadBodyErr.Error()))
+		lines = append(lines, "No se pudo cargar el mensaje: "+humanError(m.threadBodyErr))
 	}
 	return wrapLines(lines, m.width)
 }
@@ -113,9 +113,9 @@ func (m Model) threadBodyLinesWithStarts() (lines []string, starts []int) {
 		bodyText := m.threadItemBody(item)
 		if m.threadExpanded[i] {
 			raw = append(raw,
-				fmt.Sprintf("%sFrom: %s", marker, formatFromLine(item)),
-				"  To: "+safeLine(joinAddresses(item.To)),
-				"  Date: "+safeLine(item.Timestamp.Format("02-01-2006 15:04")),
+				fmt.Sprintf("%sDe: %s", marker, formatFromLine(item)),
+				"  Para: "+safeLine(joinAddresses(item.To)),
+				"  Fecha: "+safeLine(item.Timestamp.Format("02-01-2006 15:04")),
 				"",
 			)
 			body := sanitizeTerminalText(bodyText)
@@ -192,32 +192,32 @@ func joinAddresses(addrs []core.Address) string {
 func (m Model) writeMailEditor(out *strings.Builder) {
 	titles := map[string]string{"reply": "Responder", "replyAll": "Responder a todos", "forward": "Reenviar", "new": "Nuevo correo"}
 	fmt.Fprintf(out, "%s\n\n", titles[m.mailAction])
-	fmt.Fprintf(out, "To: %s\n", m.mailTo.View())
+	fmt.Fprintf(out, "Para: %s\n", m.mailTo.View())
 	fmt.Fprintf(out, "Cc: %s\n", m.mailCc.View())
-	fmt.Fprintf(out, "Subject: %s\n\n", m.mailSubject.View())
+	fmt.Fprintf(out, "Asunto: %s\n\n", m.mailSubject.View())
 	out.WriteString(m.composer.View())
 	out.WriteString("\n")
 	if len(m.mailAttachInfo) > 0 {
-		out.WriteString("\nAttachments (original, re-attaching not implemented yet):\n")
+		out.WriteString("\nAdjuntos del original (todavía no se reenvían):\n")
 		for _, attachment := range m.mailAttachInfo {
 			fmt.Fprintf(out, "- %s (%d bytes)\n", safeLine(attachment.Name), attachment.Size)
 		}
 	}
 	if m.mailPreviewing {
-		fmt.Fprintf(out, "\nTo: %s\n", safeLine(strings.Join(m.mailPlan.Recipients, ", ")))
+		fmt.Fprintf(out, "\nPara: %s\n", safeLine(strings.Join(m.mailPlan.Recipients, ", ")))
 		if len(m.mailPlan.Cc) > 0 {
 			fmt.Fprintf(out, "Cc: %s\n", safeLine(strings.Join(m.mailPlan.Cc, ", ")))
 		}
 		if m.mailSending {
-			out.WriteString("\nSending...\n")
+			out.WriteString("\nEnviando…\n")
 		} else if m.mailSendErr != nil {
-			fmt.Fprintf(out, "\nSend error: %s\n", safeLine(m.mailSendErr.Error()))
+			fmt.Fprintf(out, "\nNo se pudo enviar: %s\n", humanError(m.mailSendErr))
 		}
-		out.WriteString("\nEnter to send · Esc to edit\n")
+		out.WriteString("\n↵ enviar · Esc editar\n")
 		return
 	}
 	if m.mailSendErr != nil {
-		fmt.Fprintf(out, "\nError: %s\n", safeLine(m.mailSendErr.Error()))
+		fmt.Fprintf(out, "\nError: %s\n", humanError(m.mailSendErr))
 	}
 	out.WriteString("\nTab siguiente campo · Ctrl+S previsualizar · Esc cancelar\n")
 }

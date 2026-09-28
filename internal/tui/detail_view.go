@@ -13,7 +13,7 @@ import (
 // fixed block in the chat/thread views, so a narrow terminal wrapping it
 // onto two physical rows is already accounted for in the height budget.
 func detailTailLines(width int) []string {
-	return wrapLines([]string{"", "Esc to inbox · q to quit"}, width)
+	return wrapLines([]string{"", "Esc volver · q salir"}, width)
 }
 
 // detailHeadLines renders the always-visible Subject/From/Channel block
@@ -21,9 +21,9 @@ func detailTailLines(width int) []string {
 // same guarantee the chat/thread views give their own header.
 func (m Model) detailHeadLines(item core.Item) []string {
 	lines := []string{
-		fmt.Sprintf("Subject: %s", safeLine(item.Subject)),
-		fmt.Sprintf("From: %s", formatFromLine(item)),
-		fmt.Sprintf("Channel: %s/%s", safeLine(string(item.Channel)), safeLine(item.Account)),
+		fmt.Sprintf("Asunto: %s", safeLine(item.Subject)),
+		fmt.Sprintf("De: %s", formatFromLine(item)),
+		fmt.Sprintf("Cuenta: %s/%s", safeLine(string(item.Channel)), safeLine(item.Account)),
 	}
 	return wrapLines(lines, m.width)
 }
@@ -32,10 +32,10 @@ func (m Model) detailHeadLines(item core.Item) []string {
 // the body text (sanitized and linkified, same ordering as before this
 // task) followed by the attachments list.
 func (m Model) detailBodyLines(item core.Item) []string {
-	raw := []string{"", "Body:"}
+	raw := []string{"", "Mensaje:"}
 	body := sanitizeTerminalText(item.Body)
 	if body == "" {
-		raw = append(raw, "(empty)")
+		raw = append(raw, "(vacío)")
 	} else {
 		// linkifyURLs only ever runs on text sanitizeTerminalText has
 		// already stripped: the escapes it adds are bunker's own, never
@@ -75,10 +75,10 @@ func (m Model) detailScrollBudget() int {
 // screen — the same fix the chat/thread views already have.
 func (m Model) detailViewLines() []string {
 	if m.reading {
-		return append([]string{"Loading item..."}, detailTailLines(m.width)...)
+		return append([]string{"Cargando…"}, detailTailLines(m.width)...)
 	}
 	if m.readErr != nil {
-		return append([]string{fmt.Sprintf("Read error: %s", safeLine(m.readErr.Error()))}, detailTailLines(m.width)...)
+		return append([]string{fmt.Sprintf("No se pudo abrir: %s", humanError(m.readErr))}, detailTailLines(m.width)...)
 	}
 
 	item := m.readItem

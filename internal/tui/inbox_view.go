@@ -41,7 +41,7 @@ func (m Model) inboxLinesAndHits() (lines []string, hits []inboxHit) {
 
 	if !m.loaded {
 		lines := []string{
-			truncatePlain("Cargando bandeja de entrada...", width),
+			truncatePlain("Cargando bandeja de entrada…", width),
 			separatorLine(styles, width),
 			footerLine(styles, width),
 		}
@@ -49,7 +49,7 @@ func (m Model) inboxLinesAndHits() (lines []string, hits []inboxHit) {
 	}
 
 	if m.loadErr != nil {
-		lines = append(lines, truncatePlain("Error: "+safeLine(m.loadErr.Error()), width))
+		lines = append(lines, truncatePlain("Error: "+humanError(m.loadErr), width))
 		hits = append(hits, inboxHit{kind: hitNone})
 	}
 	bodyHeight := m.height

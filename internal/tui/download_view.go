@@ -7,7 +7,7 @@ import (
 
 // writeDownload renders the K5/K6 attachment download overlay: the
 // picker (2+ attachments), the editable destination path, the
-// "¿Sobrescribir?" confirm, an in-flight "Descargando...", the saved
+// "¿Sobrescribir?" confirm, an in-flight "Descargando…", the saved
 // result, or a clear error.
 func (m Model) writeDownload(out *strings.Builder) {
 	out.WriteString("Descargar adjunto\n\n")
@@ -36,12 +36,12 @@ func (m Model) writeDownload(out *strings.Builder) {
 		return
 	}
 	if m.downloadSending {
-		fmt.Fprintf(out, "Destino: %s\n\nDescargando...\n", safeLine(m.downloadPath))
+		fmt.Fprintf(out, "Destino: %s\n\nDescargando…\n", safeLine(m.downloadPath))
 		return
 	}
 	fmt.Fprintf(out, "Destino: %s\n", safeLine(m.downloadPath))
 	if m.downloadErr != nil {
-		fmt.Fprintf(out, "\nError: %s\n", safeLine(m.downloadErr.Error()))
+		fmt.Fprintf(out, "\nError: %s\n", humanError(m.downloadErr))
 	}
 	out.WriteString("\nEnter confirmar · Esc cancelar\n")
 }

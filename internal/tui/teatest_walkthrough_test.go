@@ -187,7 +187,7 @@ func TestWalkthroughWideListReadReplySend(t *testing.T) {
 		sendOut:    core.Plan{Channel: core.ChannelMatrix, Account: "team", Recipients: []string{"#general:example.org"}},
 	}
 	client.items = []core.Item{item("matrix:team:2", core.ChannelMatrix, "team", "", at)}
-	// See the narrow test's comment: makes the "Sending..." transient
+	// See the narrow test's comment: makes the "Enviando…" transient
 	// frame reliably observable instead of racing the renderer under load.
 	client.delay = 60 * time.Millisecond
 
@@ -208,7 +208,7 @@ func TestWalkthroughWideListReadReplySend(t *testing.T) {
 	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlS}) // mandatory dry-run preview
 	rec.waitForText(t, "#general:example.org", 3*time.Second)
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter}) // explicit confirm: real send
-	rec.waitForText(t, "Sending...", 3*time.Second)
+	rec.waitForText(t, "Enviando…", 3*time.Second)
 	rec.waitForText(t, "leer", 3*time.Second)
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 

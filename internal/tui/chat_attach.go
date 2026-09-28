@@ -267,7 +267,7 @@ func removeTempFile(temps []string, path string) []string {
 // attach error) for the tail below the composer.
 func (m Model) chatAttachLine() (string, bool) {
 	if m.chatAttachErr != nil {
-		return "Adjuntar: " + safeLine(m.chatAttachErr.Error()), true
+		return "Adjuntar: " + humanError(m.chatAttachErr), true
 	}
 	if len(m.chatAttachments) == 0 {
 		return "", false

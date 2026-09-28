@@ -89,32 +89,32 @@ func (m Model) helpView() string {
 }
 
 func (m Model) writeCompose(out *strings.Builder) {
-	out.WriteString("Reply\n\n")
+	out.WriteString("Responder\n\n")
 	out.WriteString(m.composer.View())
 	out.WriteString("\n")
 	if len(m.attachments) > 0 {
-		out.WriteString("\nAttachments: ")
+		out.WriteString("\nAdjuntos: ")
 		out.WriteString(attachmentChips(m.attachments))
 		out.WriteString("\n")
 	}
 	if m.attaching {
-		fmt.Fprintf(out, "\nAttach path: %s█\n", safeLine(m.attachInput))
+		fmt.Fprintf(out, "\nRuta del adjunto: %s█\n", safeLine(m.attachInput))
 	}
 	if m.replyErr != nil {
-		fmt.Fprintf(out, "\nError: %s\n", safeLine(m.replyErr.Error()))
+		fmt.Fprintf(out, "\nError: %s\n", humanError(m.replyErr))
 	}
-	out.WriteString("\nCtrl+S to preview · Ctrl+A to attach · Ctrl+X to remove last · Esc to cancel\n")
+	out.WriteString("\nCtrl+S vista previa · Ctrl+A adjuntar · Ctrl+X quitar el último · Esc cancelar\n")
 }
 
 func (m Model) writePreview(out *strings.Builder) {
-	out.WriteString("Reply preview\n\n")
-	fmt.Fprintf(out, "Channel: %s/%s\n", safeLine(string(m.previewPlan.Channel)), safeLine(m.previewPlan.Account))
-	fmt.Fprintf(out, "To: %s\n", safeLine(strings.Join(m.previewPlan.Recipients, ", ")))
+	out.WriteString("Vista previa de la respuesta\n\n")
+	fmt.Fprintf(out, "Cuenta: %s/%s\n", safeLine(string(m.previewPlan.Channel)), safeLine(m.previewPlan.Account))
+	fmt.Fprintf(out, "Para: %s\n", safeLine(strings.Join(m.previewPlan.Recipients, ", ")))
 	if len(m.previewPlan.Cc) > 0 {
 		fmt.Fprintf(out, "Cc: %s\n", safeLine(strings.Join(m.previewPlan.Cc, ", ")))
 	}
 	if len(m.previewPlan.Attachments) > 0 {
-		out.WriteString("Attachments:\n")
+		out.WriteString("Adjuntos:\n")
 		for _, attachment := range m.previewPlan.Attachments {
 			fmt.Fprintf(out, "- %s (%s, %d bytes)\n", safeLine(attachment.Name), safeLine(attachment.MIME), attachment.Size)
 		}
@@ -123,37 +123,36 @@ func (m Model) writePreview(out *strings.Builder) {
 	out.WriteString(sanitizeTerminalText(m.composer.Value()))
 	out.WriteString("\n")
 	if m.sending {
-		out.WriteString("\nSending...\n")
+		out.WriteString("\nEnviando…\n")
 	} else if m.replyErr != nil {
-		fmt.Fprintf(out, "\nSend error: %s\n", safeLine(m.replyErr.Error()))
+		fmt.Fprintf(out, "\nNo se pudo enviar: %s\n", humanError(m.replyErr))
 	}
 	if m.quitConfirm {
-		out.WriteString("\nPress q again to discard this draft and quit\n")
+		out.WriteString("\nPulsa q otra vez para descartar el borrador y salir\n")
 	}
-	out.WriteString("\nEnter to send · Esc to edit · q to quit\n")
+	out.WriteString("\n↵ enviar · Esc editar · q salir\n")
 }
 
 func (m Model) writeMark(out *strings.Builder) {
-	out.WriteString("Mark read\n\n")
-	fmt.Fprintf(out, "Item: %s\n\n", safeLine(m.markID))
+	out.WriteString("Marcar como leído\n\n")
 	if m.markLoading {
-		out.WriteString("Loading...\n\nEsc to cancel\n")
+		out.WriteString("Cargando…\n\nEsc cancelar\n")
 		return
 	}
 	if m.markSending {
-		out.WriteString("Marking read...\n")
+		out.WriteString("Marcando como leído…\n")
 		return
 	}
 	if m.markErr != nil {
-		fmt.Fprintf(out, "Error: %s\n\nEsc to dismiss\n", safeLine(m.markErr.Error()))
+		fmt.Fprintf(out, "Error: %s\n\nEsc cerrar\n", humanError(m.markErr))
 		return
 	}
 	if m.markConfirm {
-		fmt.Fprintf(out, "Channel: %s/%s\n\nMark this item read? Enter to confirm · Esc to cancel\n",
+		fmt.Fprintf(out, "¿Marcar como leído en %s/%s? ↵ confirmar · Esc cancelar\n",
 			safeLine(string(m.markPlan.Channel)), safeLine(m.markPlan.Account))
 		return
 	}
-	out.WriteString("Esc to cancel\n")
+	out.WriteString("Esc cancelar\n")
 }
 
 func safeLine(value string) string {

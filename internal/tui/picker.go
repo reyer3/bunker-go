@@ -229,7 +229,7 @@ func (m Model) pickerView() string {
 	glyphs := m.resolvedGlyphs()
 	switch {
 	case p.err != nil:
-		lines = append(lines, "Error: "+safeLine(p.err.Error()))
+		lines = append(lines, "Error: "+humanError(p.err))
 	case p.loading && len(p.results) == 0:
 		lines = append(lines, "buscando…")
 	case len(p.results) == 0:

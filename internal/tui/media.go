@@ -400,7 +400,7 @@ func (m Model) viewerView() string {
 	}
 	lines := []string{safeLine(header)}
 	if m.mediaErr != nil {
-		lines = append(lines, "Error: "+safeLine(m.mediaErr.Error()))
+		lines = append(lines, "Error: "+humanError(m.mediaErr))
 	}
 	t := m.media.thumbs[fullKey(v.keys[v.index])]
 	switch {
