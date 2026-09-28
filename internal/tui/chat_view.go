@@ -260,6 +260,14 @@ func (m Model) chatBodyLines() []string {
 		lines = append(lines, "Error: "+humanError(m.chatLoadErr))
 	}
 	r := m.renderer()
+	// Issue #39: say what an empty body means, instead of a blank pane.
+	if len(m.chatItems) == 0 && m.chatOptimistic == nil && m.chatLoadErr == nil {
+		dim := r.NewStyle().Foreground(lipgloss.Color(style.ColorDim))
+		if m.chatLoading {
+			return append(lines, dim.Render("cargando mensajes…"))
+		}
+		return append(lines, dim.Render("sin mensajes todavía · escribe abajo para empezar"))
+	}
 	// K10: the optimistic own bubble, if any, renders as one more item
 	// appended after the loaded conversation — it goes through the exact
 	// same day-pill/showName logic as a real item, so it never doubles up

@@ -52,9 +52,13 @@ func (m Model) inboxLinesAndHits() (lines []string, hits []inboxHit) {
 		lines = append(lines, truncatePlain(status, width))
 		hits = append(hits, inboxHit{kind: hitNone})
 	}
+	if filter, ok := m.filterLine(); ok {
+		lines = append(lines, truncatePlain(filter, width))
+		hits = append(hits, inboxHit{kind: hitNone})
+	}
 	bodyHeight := m.height
-	if len(lines) > 0 && bodyHeight > 0 {
-		bodyHeight--
+	if bodyHeight > 0 {
+		bodyHeight = max(0, bodyHeight-len(lines))
 	}
 
 	var bodyLines []string
@@ -103,7 +107,7 @@ func (m Model) overviewLines(styles rowStyles, glyphs map[core.Channel]string, w
 		)
 		hits = append(hits, repeatHit(inboxHit{kind: hitFocus, tab: focusTab}, 2)...)
 		if len(groups) == 0 {
-			lines = append(lines, emptySectionLine(styles, width))
+			lines = append(lines, m.emptySectionLine(styles, width))
 			hits = append(hits, inboxHit{kind: hitNone})
 			continue
 		}
@@ -135,7 +139,7 @@ func (m Model) focusedSectionLines(channel core.Channel, styles rowStyles, glyph
 	}
 	hits = repeatHit(inboxHit{kind: hitFocus, tab: focusTab}, 2)
 	if len(groups) == 0 {
-		return append(lines, emptySectionLine(styles, width)), append(hits, inboxHit{kind: hitNone})
+		return append(lines, m.emptySectionLine(styles, width)), append(hits, inboxHit{kind: hitNone})
 	}
 
 	rowUnits := buildRowUnits(groups, m.selected, width, glyphs, m.counts, styles, m.clock())

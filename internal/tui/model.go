@@ -93,7 +93,11 @@ type Model struct {
 	mailDrafts map[string]mailDraft
 	// unreadOnOpen is the item that opening the current chat or mail
 	// thread marks read, remembered for u once the mark succeeds.
-	unreadOnOpen    string
+	unreadOnOpen string
+	// filterQuery narrows the inbox; filtering is true while it is typed
+	// (issue #39, filter.go).
+	filterQuery     string
+	filtering       bool
 	glyphs          map[core.Channel]string
 	render          *lipgloss.Renderer
 	now             func() time.Time

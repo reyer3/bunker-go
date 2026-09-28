@@ -252,3 +252,8 @@ func foldContact(s string) string {
 	}
 	return b.String()
 }
+
+// FoldSearch normalizes text for matching the way contacts do: lower
+// case, Spanish accents stripped, whitespace collapsed to spaces. The TUI
+// inbox filter uses it so "jose" finds "José" there too.
+func FoldSearch(s string) string { return foldContact(s) }
