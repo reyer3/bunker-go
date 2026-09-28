@@ -113,6 +113,8 @@ Commands:
                                                              search, upserting
                                                              hits (read-only)
   render [--tmux] [--json]                                 tmux status segment
+  app [--dry-run]                                          open the TUI in its
+                                                             own terminal window
   link whatsapp <account>                                  QR-pair WhatsApp
   link matrix <account> [--recovery-key|--recovery-key-stdin]
                                                              Matrix SSO login,

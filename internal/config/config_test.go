@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/reyer3/bunker-go/internal/config"
@@ -160,5 +161,19 @@ func TestLoadReadsRenderGlyphOverrides(t *testing.T) {
 	}
 	if len(cfg.Accounts) != 1 {
 		t.Errorf("accounts = %d, want 1 (render section must not disturb accounts)", len(cfg.Accounts))
+	}
+}
+
+func TestLoadReadsAppCommand(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[app]\ncommand = [\"kitty\", \"--class\", \"dev.bunker.app\", \"bunker\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if strings.Join(cfg.App.Command, " ") != "kitty --class dev.bunker.app bunker" {
+		t.Errorf("App.Command = %q", cfg.App.Command)
 	}
 }

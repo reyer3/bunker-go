@@ -1020,6 +1020,32 @@ previewed and confirmed `Reply` as the text:
   `Backspace` on an empty draft removes the last one.
 - **Empty text:** a message may carry only attachments.
 
+## `bunker app [--dry-run]`
+
+Opens the TUI in a terminal window of its own, so images and videos draw
+even when you normally live in tmux (the TUI turns them off inside tmux).
+It uses the first terminal found of `ghostty` and `kitty`, both of which
+speak kitty graphics:
+
+```sh
+ghostty --title=bunker --class=dev.bunker.app -e /path/to/bunker
+kitty --title bunker --class dev.bunker.app /path/to/bunker
+```
+
+- **Override:** `[app] command` in the config replaces the whole command
+  line (see `docs/config.example.toml`).
+- **Environment:** `TMUX` and `TMUX_PANE` are dropped, so running it from
+  a tmux pane still opens a window with images.
+- **Errors:** no supported terminal, a configured command not on `PATH`,
+  or an unreachable daemon is an error and no window opens (a TUI without
+  the daemon would close at once).
+- **`--dry-run`:** prints the command line instead of opening the window.
+- **Desktop entry:** `make install` installs
+  `deploy/desktop/bunker.desktop` (and its icon) under
+  `$(PREFIX)/share`, running `bunker app`. Its `StartupWMClass` is
+  `dev.bunker.app`, the window's class, so window-manager rules can
+  place or focus the window. Each launch opens a new window.
+
 ## `bunker render [--tmux] [--json]`
 
 Renders the tmux status segment: one glyph and unread count per channel,

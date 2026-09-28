@@ -7,6 +7,13 @@
 # outside the repo (password_env); WhatsApp and Matrix keep their own
 # session/device state under $BUNKER_STATE_DIR after "bunker link ...".
 
+# --- bunker app: the TUI in its own window ---
+# By default "bunker app" runs the first of ghostty and kitty found on
+# PATH. command replaces that whole command line; its last element is
+# what the terminal runs, normally the bunker binary.
+# [app]
+# command = ["wezterm", "start", "--class", "dev.bunker.app", "--", "bunker"]
+
 # --- Mail: Gmail (.com), authenticated via GOA/OAuth2 ---
 [[account]]
 channel = "mail"
