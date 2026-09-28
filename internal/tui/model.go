@@ -135,6 +135,11 @@ type Model struct {
 	// matches the real send's receipt ID (chatOptimistic.id) — the
 	// stored FromMe item then renders in its place, deduplicated.
 	chatOptimistic *chatOptimisticMsg
+	// emojiSel is the highlighted entry of the emoji completion list
+	// (emoji.go), and emojiDismissed the draft Esc dismissed it on: the
+	// list stays hidden until the draft changes again.
+	emojiSel       int
+	emojiDismissed string
 	chatTypingAt   time.Time
 	chatTypingOn   bool
 	// chatScroll is how many lines the chat body's rendered window is

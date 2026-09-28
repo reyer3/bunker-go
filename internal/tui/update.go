@@ -683,6 +683,9 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if next, ok := m.updateEmojiCompletion(msg); ok {
+		return next, nil
+	}
 	switch msg.String() {
 	case "esc":
 		return m.leaveChat()
