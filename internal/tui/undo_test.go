@@ -66,7 +66,7 @@ func TestOpeningAChatCanBeUndone(t *testing.T) {
 	model, cmd := openChat(model)
 	updated, _ := model.Update(cmd().(chatThreadLoadedMsg))
 	updated, _ = updated.(Model).Update(tea.KeyMsg{Type: tea.KeyEsc})
-	updated, cmd = updated.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	_, cmd = updated.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
 	if cmd == nil {
 		t.Fatal("u after reading a chat should put it back to unread")
 	}
