@@ -311,6 +311,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.countsErr != nil {
 			return m, nextPoll(m.pollToken)
 		}
+		m.loadedAt = m.clock()
+		m.adapterHealth = msg.health
 		if len(msg.items) > inboxLimit {
 			msg.items = msg.items[:inboxLimit]
 		}

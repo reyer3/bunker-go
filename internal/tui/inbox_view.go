@@ -48,8 +48,8 @@ func (m Model) inboxLinesAndHits() (lines []string, hits []inboxHit) {
 		return lines, repeatHit(inboxHit{kind: hitNone}, len(lines))
 	}
 
-	if m.loadErr != nil {
-		lines = append(lines, truncatePlain("Error: "+humanError(m.loadErr), width))
+	if status, ok := m.statusLine(); ok {
+		lines = append(lines, truncatePlain(status, width))
 		hits = append(hits, inboxHit{kind: hitNone})
 	}
 	bodyHeight := m.height
