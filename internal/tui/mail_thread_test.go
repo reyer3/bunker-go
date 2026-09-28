@@ -87,8 +87,8 @@ func TestThreadViewShowsNewestExpandedAndOlderCollapsed(t *testing.T) {
 	model = updated.(Model)
 
 	view := model.View()
-	if !strings.Contains(view, "To:") {
-		t.Fatalf("thread view = %q, want the newest item's full headers (To:)", view)
+	if !strings.Contains(view, "Para:") {
+		t.Fatalf("thread view = %q, want the newest item's full headers (Para:)", view)
 	}
 	if !strings.Contains(view, "segundo mensaje") {
 		t.Fatalf("thread view = %q, want the newest item's body shown expanded", view)

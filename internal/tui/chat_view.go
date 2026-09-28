@@ -257,7 +257,7 @@ func (m Model) chatHeaderLines() []string {
 func (m Model) chatBodyLines() []string {
 	var lines []string
 	if m.chatLoadErr != nil {
-		lines = append(lines, "Error: "+safeLine(m.chatLoadErr.Error()))
+		lines = append(lines, "Error: "+humanError(m.chatLoadErr))
 	}
 	r := m.renderer()
 	// K10: the optimistic own bubble, if any, renders as one more item
@@ -344,7 +344,7 @@ func (m Model) chatTailLines() []string {
 		lines = append(lines, attach)
 	}
 	if m.mediaErr != nil {
-		lines = append(lines, "Error: "+safeLine(m.mediaErr.Error()))
+		lines = append(lines, "Error: "+humanError(m.mediaErr))
 	}
 	switch {
 	case m.chatPreviewPending:
@@ -352,9 +352,9 @@ func (m Model) chatTailLines() []string {
 	case m.chatConfirm:
 		lines = append(lines, fmt.Sprintf("¿Enviar a %s? ↵ enviar · Esc cancelar", safeLine(strings.Join(m.chatPlan.Recipients, ", "))))
 	case m.chatSending:
-		lines = append(lines, "Enviando...")
+		lines = append(lines, "Enviando…")
 	case m.chatSendErr != nil:
-		lines = append(lines, "Error: "+safeLine(m.chatSendErr.Error()))
+		lines = append(lines, "Error: "+humanError(m.chatSendErr))
 	}
 	lines = append(lines, "Esc volver · Enter enviar · Alt+Enter salto de línea")
 	return wrapLines(lines, m.width)

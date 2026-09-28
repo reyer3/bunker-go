@@ -53,7 +53,7 @@ func TestDetailViewFitsPaneHeightWithLongBody(t *testing.T) {
 	if !strings.Contains(lines[0], "un asunto largo") {
 		t.Fatalf("line 0 = %q, want the Subject header to stay the first, always-visible line", lines[0])
 	}
-	if !strings.Contains(view, "Esc to inbox") || !strings.Contains(view, "q to quit") {
+	if !strings.Contains(view, "Esc volver") || !strings.Contains(view, "q salir") {
 		t.Fatalf("view = %q, want the footer hint still visible", view)
 	}
 }

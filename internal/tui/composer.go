@@ -95,7 +95,7 @@ func attachmentChips(paths []string) string {
 	for _, path := range paths {
 		name, size, err := statAttachment(path)
 		if err != nil {
-			chips = append(chips, fmt.Sprintf("[%s: %s]", safeLine(path), safeLine(err.Error())))
+			chips = append(chips, fmt.Sprintf("[%s: %s]", safeLine(path), humanError(err)))
 			continue
 		}
 		chips = append(chips, fmt.Sprintf("[%s (%d bytes)]", safeLine(name), size))
