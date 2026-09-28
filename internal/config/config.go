@@ -26,6 +26,7 @@ type Config struct {
 	Accounts []Account
 	Render   Render
 	Tui      Tui
+	App      App
 }
 
 // Render holds optional status-line presentation settings.
@@ -44,6 +45,14 @@ type Tui struct {
 	Notify *bool
 }
 
+// App holds the settings of "bunker app", the TUI in its own window.
+type App struct {
+	// Command replaces the terminal command line that opens the window.
+	// Its last element is the program the terminal runs, normally the
+	// bunker binary itself; empty means the built-in terminal choice.
+	Command []string
+}
+
 type rawConfig struct {
 	Account []map[string]interface{} `toml:"account"`
 	Render  struct {
@@ -52,6 +61,9 @@ type rawConfig struct {
 	Tui struct {
 		Notify *bool `toml:"notify"`
 	} `toml:"tui"`
+	App struct {
+		Command []string `toml:"command"`
+	} `toml:"app"`
 }
 
 // Load parses the TOML file at path into a Config.
@@ -65,6 +77,7 @@ func Load(path string) (*Config, error) {
 		Accounts: make([]Account, 0, len(raw.Account)),
 		Render:   Render{Glyphs: raw.Render.Glyphs},
 		Tui:      Tui{Notify: raw.Tui.Notify},
+		App:      App{Command: raw.App.Command},
 	}
 	for _, entry := range raw.Account {
 		acc := Account{Options: make(map[string]interface{})}

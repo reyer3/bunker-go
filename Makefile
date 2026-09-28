@@ -26,12 +26,17 @@ fmt-check:
 	fi
 
 # install builds bunker into $(PREFIX)/bin, where deploy/systemd's unit
-# expects it. dev also restarts the daemon when it runs as that user
+# expects it, and installs the desktop entry that runs "bunker app". The
+# entry carries the absolute binary path: a launcher's PATH often lacks
+# ~/.local/bin. dev also restarts the daemon when it runs as that user
 # service, so "git pull && make dev" is the whole local test loop.
 PREFIX ?= $(HOME)/.local
 
 install:
 	CGO_ENABLED=0 go build -tags goolm -trimpath -o $(PREFIX)/bin/bunker ./cmd/bunker
+	install -d $(PREFIX)/share/applications $(PREFIX)/share/icons/hicolor/scalable/apps
+	sed 's|@BINDIR@|$(PREFIX)/bin|' deploy/desktop/bunker.desktop > $(PREFIX)/share/applications/bunker.desktop
+	install -m 644 deploy/desktop/bunker.svg $(PREFIX)/share/icons/hicolor/scalable/apps/bunker.svg
 
 dev: install
 	@if systemctl --user is-active --quiet bunker 2>/dev/null; then \

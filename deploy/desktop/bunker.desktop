@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=bunker
+GenericName=Mensajería
+Comment=Correo, WhatsApp y Matrix en una sola bandeja
+Exec=@BINDIR@/bunker app
+Icon=bunker
+Terminal=false
+Categories=Network;InstantMessaging;Email;
+Keywords=mail;whatsapp;matrix;chat;
+StartupWMClass=dev.bunker.app
