@@ -126,3 +126,14 @@ func TestEmojiCompletionIgnoresTimes(t *testing.T) {
 		t.Fatal("a time opened the emoji completion")
 	}
 }
+
+func TestHelpListsChatKeys(t *testing.T) {
+	model := NewModel(nil)
+	model.width = 80
+	help := model.helpView()
+	for _, key := range []string{"Ctrl+O", "Ctrl+V", "arrastrar", ":risa", "Ctrl+D"} {
+		if !strings.Contains(help, key) {
+			t.Errorf("help overlay does not mention %q", key)
+		}
+	}
+}

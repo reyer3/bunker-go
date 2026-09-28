@@ -64,6 +64,17 @@ func (m Model) helpView() string {
 		"?           esta ayuda",
 		"Esc         cerrar / volver",
 		"q           salir",
+		"",
+		"En un chat",
+		"↵           enviar (con vista previa)",
+		"Alt+↵       salto de línea",
+		"Ctrl+O      ver imagen / reproducir video",
+		"clic        abrir la imagen o video bajo el cursor",
+		"Ctrl+V      adjuntar imagen del portapapeles",
+		"arrastrar   soltar archivos para adjuntarlos",
+		"⌫ vacío     quitar el último adjunto",
+		":risa       emoji (Tab elige, ↵ inserta)",
+		"Ctrl+D      descargar el último adjunto",
 	}
 	if m.width > 0 {
 		for i, line := range lines {
