@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.0](https://github.com/reyer3/bunker-go/compare/v0.9.0...v0.10.0) (2026-09-29)
+
+
+### Features
+
+* idempotent sends and MCP organize tools ([#97](https://github.com/reyer3/bunker-go/issues/97)) ([faac90b](https://github.com/reyer3/bunker-go/commit/faac90beedb122b1ceb0520b4cbea05c6ab9a3cc))
+* query language, cursor pagination and MCP search tools ([#99](https://github.com/reyer3/bunker-go/issues/99)) ([2b8764b](https://github.com/reyer3/bunker-go/commit/2b8764bb7a7ed6b6cbe83382fa0a1ae611423595))
+
 ## [0.9.0](https://github.com/reyer3/bunker-go/compare/v0.8.0...v0.9.0) (2026-09-29)
 
 
