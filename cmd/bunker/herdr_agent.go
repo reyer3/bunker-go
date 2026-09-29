@@ -222,10 +222,11 @@ func herdrUnreadReporterFor(getenv func(string) string, run herdrRunner) func(in
 	return r.report
 }
 
-// herdrNotifyCommand is the argv of one notification. The body goes as
-// "--body=…" so a message starting with "-" cannot read as a flag.
+// herdrNotifyCommand is the argv of one notification. herdr's parser only
+// knows "--body" followed by a separate value (it rejects "--body=…") and
+// takes that next argument verbatim, so a body starting with "-" is safe.
 func herdrNotifyCommand(body string) []string {
-	return []string{"notification", "show", herdrNotifyTitle, "--body=" + body, "--sound", "request"}
+	return []string{"notification", "show", herdrNotifyTitle, "--body", body, "--sound", "request"}
 }
 
 // herdrMessageNotifier shows new-message notifications in herdr, when

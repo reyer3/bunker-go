@@ -1441,7 +1441,7 @@ running daemon (else the same "cannot reach bunker daemon" hint, exit 1).
   OSC 777 notifications) is shown with
 
   ```sh
-  herdr notification show bunker --body=<sender>: <text> --sound request
+  herdr notification show bunker --body "<sender>: <text>" --sound request
   ```
 
   at most one every 30s; messages arriving in between are coalesced into

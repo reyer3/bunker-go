@@ -268,7 +268,7 @@ func TestHerdrMessageNotifier(t *testing.T) {
 	if err := notify("-Alice: hola"); err != nil {
 		t.Fatal(err)
 	}
-	if want := "notification show bunker --body=-Alice: hola --sound request"; len(herdr.calls) != 1 || herdr.calls[0] != want {
+	if want := "notification show bunker --body -Alice: hola --sound request"; len(herdr.calls) != 1 || herdr.calls[0] != want {
 		t.Fatalf("calls = %q, want %q", herdr.calls, want)
 	}
 }
