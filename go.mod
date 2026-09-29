@@ -25,6 +25,7 @@ require (
 	go.mau.fi/whatsmeow v0.0.0-20260925162019-b3832c2bd1d1
 	golang.org/x/image v0.46.0
 	golang.org/x/term v0.46.0
+	golang.org/x/text v0.42.0
 	maunium.net/go/mautrix v0.31.0
 	modernc.org/sqlite v1.59.0
 )
@@ -84,7 +85,6 @@ require (
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
-	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 	modernc.org/libc v1.75.7 // indirect

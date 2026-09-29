@@ -1274,6 +1274,7 @@ which answers `daemon_up: false` with a hint to run `bunker daemon`.
 | `search_remote` | `bunker search mail`: an IMAP search on the mail server (`account`, `from`, `subject`, `since`, `before`, `folder` = `INBOX`, `limit` ≤ 100); returns `items` |
 | `backfill` | `bunker backfill mail`: fetch older mail into the store (`account`, `since`, `folder` = `INBOX`, `dry_run`); returns `dry_run`, `count`, `first_id`, `last_id` |
 | `read` | one item with its body (capped at 20,000 characters); **never marks it read** |
+| `attachment` | the text of one attachment (`id`, `index` from 0), downloaded like `bunker download` into a temp dir that is removed afterwards; see below; **never marks anything read** |
 | `thread` | a conversation's newest messages, oldest first |
 | `contacts` | the same matches as `bunker contacts` |
 | `calls` | live voice calls |
@@ -1288,6 +1289,28 @@ which answers `daemon_up: false` with a hint to run `bunker daemon`.
 
 Reads are annotated read-only; `send`, `reply` and the organize tools
 are annotated destructive.
+
+`attachment` lets an agent read an invoice, a contract or a spreadsheet.
+It returns `id`, `index`, `name`, `mime`, `size`, `format`, `has_text`,
+`text`, `truncated` and `note`:
+- `text/plain`, CSV, Markdown, JSON and XML come back as they are, decoded
+  to UTF-8 (the declared charset, else a byte order mark, else UTF-8,
+  else Windows-1252). HTML goes through the same HTML-to-text conversion
+  as mail bodies.
+- PDF needs poppler's `pdftotext` on `PATH`, run as an external process
+  with a 30-second timeout. Without it the tool fails with a hint to
+  install `poppler-utils`. A PDF with no text layer (a scan) answers
+  `has_text: false` with a note.
+- `.docx`, `.xlsx` and `.odt` are read from their XML (`word/document.xml`;
+  every sheet with its shared strings, one line per row, cells separated
+  by tabs; `content.xml`).
+- Images, audio and video are not downloaded: the answer is their name,
+  MIME type and size, `format: "media"`, `has_text: false` and a note
+  that there is no text.
+- Any other type (e.g. a legacy `.doc`) is an error, and so is an index
+  out of range.
+- The text is capped at 100 KB; a longer one is cut and says
+  `truncated: true`.
 
 `search_remote` and `backfill` sit in between, and are annotated
 neither read-only nor destructive (idempotent, open-world):
