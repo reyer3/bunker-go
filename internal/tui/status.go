@@ -70,6 +70,9 @@ func (m Model) statusLine() (string, bool) {
 	if len(down) > 0 {
 		parts = append(parts, "⚠ "+strings.Join(down, " · "))
 	}
+	if notice, ok := m.currentUpdateNotice(); ok {
+		parts = append(parts, notice)
+	}
 	if len(parts) == 0 {
 		return "", false
 	}

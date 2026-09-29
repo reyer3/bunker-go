@@ -33,10 +33,11 @@ type Backend interface {
 	// read, backing the K5/K6 read-on-open fix and `bunker read-thread`
 	// (conversation-view.md's read-thread fix, K9).
 	ReadThread(ctx context.Context, channel, account, thread string, receipt bool) (int, error)
-	// Health returns every adapter's current health snapshot (R4):
+	// HealthReport returns every adapter's current health snapshot (R4):
 	// channel, account, connection state, since when, its last error (if
-	// any) and how many times it has been restarted.
-	Health(ctx context.Context) ([]core.AdapterHealth, error)
+	// any) and how many times it has been restarted; plus the daemon's
+	// cached update status (issue #105).
+	HealthReport(ctx context.Context) (core.HealthReport, error)
 	// Backfill runs a server-side history search since a point in time,
 	// upserting whatever the store is missing (H2: mail-history,
 	// `bunker backfill mail <account> --since ...`).

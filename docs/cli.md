@@ -907,19 +907,42 @@ adapter supervisor tracks it (R1's restart-with-backoff policy):
   transition, if any (cleared once the adapter reconnects).
 - `restarts` — how many times this adapter's `Run` has been restarted.
 
+- `update_available`, `latest_version` — the daemon's cached release
+  check (see below); `latest_version` is only present when
+  `update_available` is true.
+
 ```json
 {"adapters": [
   {"channel":"mail","account":"cl","state":"connected","since":"2026-01-02T03:04:05Z","restarts":0},
   {"channel":"whatsapp","account":"personal","state":"backoff","since":"2026-01-02T03:05:00Z","lastError":"dial refused","restarts":3}
-]}
+], "update_available": true, "latest_version": "0.13.0"}
 ```
 
-Non-JSON output, one line per adapter:
+Non-JSON output, one line per adapter, then one line when there is an
+update:
 
 ```
 mail/cl: connected (restarts=0)
 whatsapp/personal: backoff (restarts=3) last_error="dial refused"
+bunker: new version v0.13.0 available, run 'bunker update'
 ```
+
+**New releases.** A release build of the daemon asks the GitHub API for
+the latest release (`GET /repos/reyer3/bunker-go/releases/latest`, the
+only request it makes for this, with nothing about the user) two
+minutes after it starts and then every 24 hours, and keeps the answer
+in `$BUNKER_STATE_DIR/update.json`, so a restarted daemon knows before
+its next check. A failed check is logged at debug level and keeps the
+previous answer; it never affects the daemon. A pre-release is never
+offered over a stable release. A `dev` or pseudo-version build (see
+`bunker version`) and `bunker daemon --fake` never check, and
+`[update] check = false` in config.toml turns the check off. The health
+RPC method carries `update_available` and `latest_version` next to
+`adapters`, so older clients simply ignore them. The TUI (inbox and
+`bunker sidebar`) shows `nueva versión vX disponible · bunker update` on
+its status line for a minute, once per session; inside herdr with
+`[herdr] notify = true` it is also a herdr notification. The MCP
+`health` tool reports the same two fields.
 
 ## `bunker download <id> [-n index] -o path [--force] [--json]`
 
@@ -1293,7 +1316,7 @@ which answers `daemon_up: false` with a hint to run `bunker daemon`.
 | `thread` | a conversation's newest messages, oldest first |
 | `contacts` | the same matches as `bunker contacts` |
 | `calls` | live voice calls |
-| `health` | whether the daemon is up and, per account, `channel`, `account`, `state`, `since`, `last_error`, `restarts` and `last_item` (the newest stored item's time) |
+| `health` | whether the daemon is up and, per account, `channel`, `account`, `state`, `since`, `last_error`, `restarts` and `last_item` (the newest stored item's time); plus `update_available` and `latest_version` from the daemon's release check |
 | `send` | a new message; `to` takes an address or a contact name, resolved like the CLI |
 | `reply` | a reply to an item |
 | `mark_read` | mark an item read (`id`); on WhatsApp and Matrix this sends the sender a read receipt |

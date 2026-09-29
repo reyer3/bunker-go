@@ -23,6 +23,17 @@
 # [herdr]
 # notify = true
 
+# --- update: new release check ---
+# The daemon asks the GitHub API for the latest release two minutes
+# after it starts and then once a day (GET
+# /repos/reyer3/bunker-go/releases/latest, nothing else is sent), keeps
+# the answer in $BUNKER_STATE_DIR/update.json, and reports it through
+# "bunker health", the TUI status line and the MCP health tool. A dev
+# build never checks. check = false turns it off entirely; "bunker
+# update" still works on demand.
+# [update]
+# check = true
+
 # --- Mail: Gmail (.com), authenticated via GOA/OAuth2 ---
 [[account]]
 channel = "mail"

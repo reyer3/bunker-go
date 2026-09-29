@@ -28,6 +28,7 @@ type inboxLoadedMsg struct {
 	listErr   error
 	countsErr error
 	health    []core.AdapterHealth
+	update    core.UpdateStatus
 }
 
 type pollTickMsg struct{ token uint64 }
@@ -162,6 +163,7 @@ func loadInbox(client Client, token uint64) tea.Cmd {
 			return inboxLoadedMsg{token: token, listErr: err}
 		}
 		counts, countsErr := client.Counts(ctx)
-		return inboxLoadedMsg{token: token, items: items, counts: counts, countsErr: countsErr, health: fetchHealth(ctx, client)}
+		report := fetchHealthReport(ctx, client)
+		return inboxLoadedMsg{token: token, items: items, counts: counts, countsErr: countsErr, health: report.Adapters, update: report.Update}
 	}
 }

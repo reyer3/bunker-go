@@ -51,6 +51,7 @@ type fakeBackend struct {
 
 	health         []core.AdapterHealth
 	healthErr      error
+	update         core.UpdateStatus
 	backfillCalls  []backfillCall
 	backfillResult core.BackfillResult
 	backfillErr    error
@@ -326,11 +327,11 @@ func (f *fakeBackend) ReadThread(ctx context.Context, channel, account, thread s
 	return f.readThreadCount, nil
 }
 
-func (f *fakeBackend) Health(ctx context.Context) ([]core.AdapterHealth, error) {
+func (f *fakeBackend) HealthReport(ctx context.Context) (core.HealthReport, error) {
 	if f.healthErr != nil {
-		return nil, f.healthErr
+		return core.HealthReport{}, f.healthErr
 	}
-	return f.health, nil
+	return core.HealthReport{Adapters: f.health, Update: f.update}, nil
 }
 
 func (f *fakeBackend) Backfill(ctx context.Context, channel core.Channel, account, folder string, since time.Time, dryRun bool) (core.BackfillResult, error) {

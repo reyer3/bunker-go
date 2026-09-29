@@ -373,6 +373,24 @@ func TestMCPHealth(t *testing.T) {
 	}
 }
 
+func TestMCPHealthReportsUpdate(t *testing.T) {
+	backend := mcpBackend()
+	s := mcpSession(t, backend, false)
+	_, out := callTool(t, s, "health", nil)
+	if out["update_available"] != false {
+		t.Fatalf("no update: %v", out)
+	}
+	if _, ok := out["latest_version"]; ok {
+		t.Fatalf("latest_version without an update: %v", out)
+	}
+
+	backend.update = core.UpdateStatus{Available: true, Latest: "0.13.0"}
+	_, out = callTool(t, s, "health", nil)
+	if out["update_available"] != true || out["latest_version"] != "0.13.0" {
+		t.Fatalf("update: %v", out)
+	}
+}
+
 func TestMCPHealthDaemonDown(t *testing.T) {
 	dial := func(context.Context) (Backend, io.Closer, error) {
 		return nil, nil, errors.New("cannot reach bunker daemon")

@@ -317,6 +317,13 @@ type Model struct {
 	messageNotifyFailed  bool
 	lastMessageNotifyAt  time.Time
 	pendingMessageNotify int
+
+	// updateNotice is the "nueva versión" line (issue #105, see
+	// update_notice.go), shown from updateNoticeAt for
+	// updateNoticeDuration; updateNoticed keeps it to once per session.
+	updateNotice   string
+	updateNoticeAt time.Time
+	updateNoticed  bool
 }
 
 // numTabs is "Todo" plus one tab per channelOrder entry.

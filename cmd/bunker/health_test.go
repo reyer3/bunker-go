@@ -60,6 +60,31 @@ func TestCmdHealthHumanOutput(t *testing.T) {
 	}
 }
 
+func TestCmdHealthReportsUpdate(t *testing.T) {
+	backend := newFakeBackend()
+	backend.update = core.UpdateStatus{Available: true, Latest: "0.13.0"}
+
+	var stdout, stderr bytes.Buffer
+	if code := runWithBackend(context.Background(), backend, []string{"health", "--json"}, strings.NewReader(""), &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, stderr=%s", code, stderr.String())
+	}
+	var got struct {
+		UpdateAvailable bool   `json:"update_available"`
+		LatestVersion   string `json:"latest_version"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil || !got.UpdateAvailable || got.LatestVersion != "0.13.0" {
+		t.Fatalf("json = %s (%v)", stdout.String(), err)
+	}
+
+	stdout.Reset()
+	if code := runWithBackend(context.Background(), backend, []string{"health"}, strings.NewReader(""), &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d", code)
+	}
+	if !strings.Contains(stdout.String(), "v0.13.0") || !strings.Contains(stdout.String(), "bunker update") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
 // TestCmdHealthPropagatesBackendError proves a backend error (e.g. the
 // daemon unreachable) surfaces as a failing exit code, matching every
 // other command's error convention.
