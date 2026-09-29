@@ -1405,6 +1405,50 @@ running daemon (else the same "cannot reach bunker daemon" hint, exit 1).
   passed on. A failure shows on the status line
   (`no se pudo abrir: …`). Outside herdr, Enter opens the conversation in
   place, as the full TUI does, and Esc goes back to the list.
+- **`a`, ask Claude:** inside herdr only (the key and its `a Claude` hint
+  are absent elsewhere). It runs `herdr agent list`, keeps the agents
+  whose `agent` kind is `claude`, and picks the first that is `idle` or
+  `done` (ready for input), else the first one. Then, with its pane id as
+  the target:
+
+  ```sh
+  herdr agent prompt <pane> "Usa bunker mcp: lee la conversación <id> (herramienta read o thread) y dime qué necesito saber; si hay que responder, propón una respuesta como plan sin enviarla."
+  herdr agent focus <pane>
+  ```
+
+  The item id is checked as for Enter, and a pane id that is not shaped
+  like a herdr id is never passed on; the whole ask has a 15s timeout.
+  The status line shows `preguntando a Claude…`, then `enviado a Claude`.
+  No Claude Code in herdr shows `no se pudo preguntar a Claude: no hay
+  ningún Claude Code en herdr · …`. An agent that is `blocked` (or a
+  prompt herdr refuses with `agent_blocked`) is focused without a prompt
+  and shows `Claude está esperando tu respuesta en su panel`.
+- **Unread count:** inside herdr, with a valid `HERDR_PANE_ID`, after each
+  poll the panel reports its unread total (the "Todo" count) on its own
+  pane, so herdr's Agent sidebar rows can show it as `$unread`:
+
+  ```sh
+  herdr pane report-metadata <HERDR_PANE_ID> --source bunker --token unread=<N> --ttl-ms 10000
+  ```
+
+  The TTL is two poll intervals, so the count disappears soon after the
+  panel stops. It is reported when it changes, else at most once per
+  half TTL. A failure shows once on the status line
+  (`no se pudo avisar a herdr de los no leídos: …`), and again only after
+  a report has succeeded in between.
+- **Notifications:** with `[herdr] notify = true` in `config.toml` (off by
+  default), inside herdr each new unread message (detected as for the
+  OSC 777 notifications) is shown with
+
+  ```sh
+  herdr notification show bunker --body=<sender>: <text> --sound request
+  ```
+
+  at most one every 30s; messages arriving in between are coalesced into
+  the next one as `N mensajes nuevos`. The text is sanitized and cut to
+  60 cells. It replaces the OSC 777 notification and, unlike it, does not
+  depend on the pane being unfocused. A failure shows once, like the
+  unread count's.
 
 ## `bunker open [<id>]`
 
@@ -1420,6 +1464,10 @@ command as fixed argv and passes the id with `--env`.
   typing as gone before exiting.
 - **No inbox:** it does not poll the inbox or send new-message
   notifications (the sidebar that opened it already does).
+- **Ask Claude:** inside herdr, `a` (in the mail thread and plain detail
+  views) or `Alt+A` (in a chat, where `a` is typed text) asks Claude
+  about this item, exactly as `a` in `bunker sidebar`; the result shows
+  above the key hints.
 - **Errors:** no id or more than one argument prints usage and exits 2;
   an id starting with `-` or holding a control character exits 2; no TTY
   prints `error: bunker open needs a terminal` and exits 2; an
