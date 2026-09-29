@@ -73,7 +73,10 @@ func (a *Adapter) organize(ctx context.Context, id string, op core.OrganizeOp) (
 
 	result := core.OrganizeMove{ID: id}
 	if op.MoveTo != "" {
-		target := folders.Resolve(op.MoveTo)
+		target, err := folders.ResolveExisting(op.MoveTo)
+		if err != nil {
+			return core.OrganizeMove{}, fmt.Errorf("mail: organize %q: %w", id, err)
+		}
 		moveData, err := client.Move(imap.UIDSetNum(uid), target).Wait()
 		if err != nil {
 			return core.OrganizeMove{}, fmt.Errorf("mail: organize %q: move to %q: %w", id, target, moveError(err))
