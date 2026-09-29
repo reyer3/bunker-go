@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.9.0](https://github.com/reyer3/bunker-go/compare/v0.8.0...v0.9.0) (2026-09-29)
+
+
+### Features
+
+* **mail:** archive on Gmail moves the message to All Mail ([#93](https://github.com/reyer3/bunker-go/issues/93)) ([825dfea](https://github.com/reyer3/bunker-go/commit/825dfeaea1d77a0d7f2abe277632942c5ee55de4))
+* **mail:** store mail bodies so search finds them ([#95](https://github.com/reyer3/bunker-go/issues/95)) ([71495c4](https://github.com/reyer3/bunker-go/commit/71495c481ae9d1482e3942cbf70f13662e06bdbc))
+* **mail:** sync every relevant folder and follow moves between them ([#96](https://github.com/reyer3/bunker-go/issues/96)) ([93fcf61](https://github.com/reyer3/bunker-go/commit/93fcf6140c099451e490c69de5c26b7165c36215))
+
 ## [0.8.0](https://github.com/reyer3/bunker-go/compare/v0.7.0...v0.8.0) (2026-09-29)
 
 
