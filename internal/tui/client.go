@@ -40,4 +40,7 @@ type Client interface {
 	Close() error
 }
 
-var _ Client = (*rpc.Client)(nil)
+var (
+	_ Client        = (*rpc.Client)(nil)
+	_ MessageClient = (*rpc.Client)(nil)
+)

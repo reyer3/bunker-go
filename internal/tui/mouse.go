@@ -127,6 +127,8 @@ func (m Model) openChat(item core.Item) (Model, tea.Cmd) {
 	m.chatTypingOn = false
 	m.chatPreviewPending = false
 	m.chatOptimistic = nil
+	m.chatAction = nil
+	m.chatEditID, m.chatEditDraft = "", ""
 	m.chatToken++
 	m.composer = newChatComposer(chatComposerWidth(m.width), m.renderer())
 	if draft, ok := m.drafts[chatDraftKey(m.chatChannel, m.chatAccount, m.chatThread)]; ok {
@@ -141,6 +143,10 @@ func (m Model) openChat(item core.Item) (Model, tea.Cmd) {
 // if this call never lands, e.g. on a hard quit).
 func (m Model) leaveChat() (Model, tea.Cmd) {
 	channel, account, thread := m.chatChannel, m.chatAccount, m.chatThread
+	// An edit in progress is not a draft: give the real draft back so
+	// that is what gets kept.
+	m = m.cancelChatEdit()
+	m.chatAction = nil
 	if next, kept := m.keepDraft(chatDraftKey(channel, account, thread), m.composer.Value()); kept {
 		m = next.withFlash("borrador guardado")
 	} else {

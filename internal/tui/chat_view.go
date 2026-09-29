@@ -354,7 +354,10 @@ func (m Model) chatTailLines() []string {
 	if m.mediaErr != nil {
 		lines = append(lines, "Error: "+humanError(m.mediaErr))
 	}
+	action, hasAction := m.chatActionLine()
 	switch {
+	case m.chatAction != nil:
+		lines = append(lines, action)
 	case m.chatPreviewPending:
 		lines = append(lines, "Preparando…")
 	case m.chatConfirm:
@@ -363,6 +366,9 @@ func (m Model) chatTailLines() []string {
 		lines = append(lines, "Enviando…")
 	case m.chatSendErr != nil:
 		lines = append(lines, "Error: "+humanError(m.chatSendErr))
+	case hasAction:
+		// Edit mode: the composer holds our message being edited.
+		lines = append(lines, action)
 	}
 	if flash, ok := m.currentFlash(); ok {
 		// The chat has no status line, and a "bunker open" pane has no

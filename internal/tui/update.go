@@ -41,6 +41,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.chatTempFiles = append(m.chatTempFiles, msg.path)
 		return m.addChatAttachments(msg.path), nil
+	case chatActionPlanMsg:
+		return m.handleChatActionPlan(msg)
+	case chatActionDoneMsg:
+		return m.handleChatActionDone(msg)
 	case queryDebounceMsg:
 		return m.handleQueryDebounce(msg)
 	case queryPageMsg:

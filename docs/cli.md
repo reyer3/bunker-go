@@ -1286,6 +1286,21 @@ chat shows as a thumbnail inside its bubble, instead of the
 - **Without graphics:** inside tmux or a plain terminal, `Ctrl+O` plays
   the conversation's newest video in `mpv`'s own window.
 
+## Editing, deleting and reacting in the TUI's chat view
+
+The chat view has no message selection (the composer always has focus
+and plain keys are draft text), so these keys act on the latest message:
+
+| Key | Action |
+|-----|--------|
+| `Alt+E` | put your last text message in the composer; `Ctrl+S` (or ↵) previews the edit, ↵ confirms, `Esc` cancels and gives your draft back |
+| `Alt+X` | delete your last message for everyone, after a confirm |
+| `Alt++` (or `Alt+=`) | react to the last message received: `1`-`6` pick 👍 ❤️ 😂 😮 😢 🙏, `0` removes your reaction, then ↵ confirms |
+
+Each builds the same dry-run plan as `bunker edit`/`delete`/`react`
+first, and the same channel rules apply (WhatsApp's 20-minute edit
+window, no media edits). The conversation reloads afterwards.
+
 ## Emoji completion in the TUI's chat composer
 
 Typing `:` followed by at least two letters at the end of a chat draft
