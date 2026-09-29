@@ -237,7 +237,7 @@ func (s *Service) persistFetchedBody(ctx context.Context, stored, fetched Item) 
 	if stored.Channel != ChannelMail || (fetched.Body == "" && len(fetched.Attachments) == 0) {
 		return nil
 	}
-	if fetched.Body == stored.Body && slices.Equal(fetched.Attachments, stored.Attachments) {
+	if fetched.Body == stored.Body && slices.EqualFunc(fetched.Attachments, stored.Attachments, Attachment.Equal) {
 		return nil
 	}
 	stored.Body = fetched.Body

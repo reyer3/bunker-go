@@ -491,8 +491,14 @@ func chatBubbleLines(r *lipgloss.Renderer, item core.Item, width int, showName b
 			if thumb != nil {
 				if t, ok := thumb(mediaKey(item.ID, i)); ok {
 					caption := ""
-					if isVideoAttachment(attachment) {
+					switch {
+					case isVideoAttachment(attachment):
 						caption = videoCaption(attachment)
+					case !isImageAttachment(attachment):
+						// A document previewed from its embedded
+						// thumbnail still needs its name: the picture
+						// alone does not say which file it is.
+						caption = fmt.Sprintf("📎 %s (%d bytes)", safeLine(attachment.Name), attachment.Size)
 					}
 					if tl := thumbBubbleLines(t, bodyStyle, bubbleWidth, width, item.FromMe, caption); tl != nil {
 						lines = append(lines, tl...)

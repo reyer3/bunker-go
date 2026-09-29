@@ -102,8 +102,28 @@ func isVideoAttachment(a core.Attachment) bool {
 	return strings.HasPrefix(strings.ToLower(a.MIME), "video/")
 }
 
+// isPreviewable reports an attachment the chat can draw inline: an image
+// or video, or any other file (a WhatsApp document) whose message carried
+// its own thumbnail.
 func isPreviewable(a core.Attachment) bool {
-	return isImageAttachment(a) || isVideoAttachment(a)
+	return isImageAttachment(a) || isVideoAttachment(a) || len(a.Thumbnail) > 0
+}
+
+// embeddedThumbnail returns the preview the message itself carried
+// (issue #18), when key's rendering should use it instead of downloading
+// the media: always for the inline thumbnail, and for the full-size view
+// only when there is no real image to show (a document), since the
+// embedded preview is too small to stand in for a photo opened on
+// purpose. An oversized one is ignored like a missing one: the store
+// never holds such a value from the adapters, so it is corrupt.
+func embeddedThumbnail(a core.Attachment, full bool) ([]byte, bool) {
+	if len(a.Thumbnail) == 0 || len(a.Thumbnail) > core.MaxThumbnailBytes {
+		return nil, false
+	}
+	if full && (isImageAttachment(a) || isVideoAttachment(a)) {
+		return nil, false
+	}
+	return a.Thumbnail, true
 }
 
 // chatImageKeys lists the open conversation's image and video
@@ -146,12 +166,25 @@ type mediaReadyMsg struct {
 	err  error
 }
 
-// fetchMediaCmd downloads item's attachment at index into the media
-// cache (once: a cached file is reused) through the daemon's own
-// Download, and fits it into maxCols×maxRows cells.
+// fetchMediaCmd fits item's attachment at index into maxCols×maxRows
+// cells. It prefers the thumbnail embedded in the message (no network, no
+// ffmpeg); only when there is none, or it does not decode, does it
+// download the media into the media cache (once: a cached file is
+// reused) through the daemon's own Download.
 func fetchMediaCmd(client Client, dir, key, itemID string, index int, a core.Attachment, maxCols, maxRows int) tea.Cmd {
 	video := isVideoAttachment(a)
+	embedded, hasEmbedded := embeddedThumbnail(a, strings.HasSuffix(key, "#full"))
 	return func() tea.Msg {
+		if hasEmbedded {
+			if png, cols, rows, err := kittygfx.Fit(embedded, maxCols, maxRows); err == nil {
+				return mediaReadyMsg{key: key, png: png, cols: cols, rows: rows}
+			}
+		}
+		if !isImageAttachment(a) && !video {
+			// A document is only previewable through its embedded
+			// thumbnail: downloading it would not produce an image.
+			return mediaReadyMsg{key: key, err: fmt.Errorf("tui: %s has no usable thumbnail", key)}
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), mediaFetchTimeout)
 		defer cancel()
 		limit := int64(mediaMaxBytes)

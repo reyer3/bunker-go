@@ -16,6 +16,9 @@ type mediaMeta struct {
 	ref     string // DirectPath, or the URL when DirectPath is unset.
 	name    string
 	caption string
+	// thumb is the preview embedded in the message itself (see
+	// thumbnail.go), unvalidated; nil when the sender attached none.
+	thumb []byte
 }
 
 // bodyAndMedia extracts the text body and, when present, one media
@@ -32,11 +35,11 @@ func bodyAndMedia(msg *waE2E.Message) (body string, media *mediaMeta, ctx *waE2E
 		return ext.GetText(), nil, ext.GetContextInfo()
 	}
 	if img := msg.GetImageMessage(); img != nil {
-		m := &mediaMeta{mime: img.GetMimetype(), size: img.GetFileLength(), ref: mediaRef(img.GetDirectPath(), img.GetURL()), name: "image", caption: img.GetCaption()}
+		m := &mediaMeta{mime: img.GetMimetype(), size: img.GetFileLength(), ref: mediaRef(img.GetDirectPath(), img.GetURL()), name: "image", caption: img.GetCaption(), thumb: img.GetJPEGThumbnail()}
 		return img.GetCaption(), m, img.GetContextInfo()
 	}
 	if vid := msg.GetVideoMessage(); vid != nil {
-		m := &mediaMeta{mime: vid.GetMimetype(), size: vid.GetFileLength(), ref: mediaRef(vid.GetDirectPath(), vid.GetURL()), name: "video", caption: vid.GetCaption()}
+		m := &mediaMeta{mime: vid.GetMimetype(), size: vid.GetFileLength(), ref: mediaRef(vid.GetDirectPath(), vid.GetURL()), name: "video", caption: vid.GetCaption(), thumb: vid.GetJPEGThumbnail()}
 		return vid.GetCaption(), m, vid.GetContextInfo()
 	}
 	if doc := msg.GetDocumentMessage(); doc != nil {
@@ -44,7 +47,7 @@ func bodyAndMedia(msg *waE2E.Message) (body string, media *mediaMeta, ctx *waE2E
 		if name == "" {
 			name = doc.GetTitle()
 		}
-		m := &mediaMeta{mime: doc.GetMimetype(), size: doc.GetFileLength(), ref: mediaRef(doc.GetDirectPath(), doc.GetURL()), name: name, caption: doc.GetCaption()}
+		m := &mediaMeta{mime: doc.GetMimetype(), size: doc.GetFileLength(), ref: mediaRef(doc.GetDirectPath(), doc.GetURL()), name: name, caption: doc.GetCaption(), thumb: doc.GetJPEGThumbnail()}
 		return doc.GetCaption(), m, doc.GetContextInfo()
 	}
 	if aud := msg.GetAudioMessage(); aud != nil {
@@ -52,7 +55,7 @@ func bodyAndMedia(msg *waE2E.Message) (body string, media *mediaMeta, ctx *waE2E
 		return "", m, aud.GetContextInfo()
 	}
 	if sticker := msg.GetStickerMessage(); sticker != nil {
-		m := &mediaMeta{mime: sticker.GetMimetype(), size: sticker.GetFileLength(), ref: mediaRef(sticker.GetDirectPath(), sticker.GetURL()), name: "sticker"}
+		m := &mediaMeta{mime: sticker.GetMimetype(), size: sticker.GetFileLength(), ref: mediaRef(sticker.GetDirectPath(), sticker.GetURL()), name: "sticker", thumb: sticker.GetPngThumbnail()}
 		return "", m, sticker.GetContextInfo()
 	}
 	return "", nil, nil
@@ -86,12 +89,19 @@ func toItem(account string, evt *events.Message) core.Item {
 	}
 
 	if media != nil {
-		name := media.name
+		// A bad thumbnail only costs the inline preview (the TUI falls
+		// back to downloading), never the message, so it is logged and
+		// dropped rather than failing the item.
+		thumb, err := validThumbnail(media.thumb)
+		if err != nil {
+			logf("%v; ignoring the thumbnail of %s", err, item.ID)
+		}
 		item.Attachments = append(item.Attachments, core.Attachment{
-			Name: name,
-			MIME: media.mime,
-			Size: int64(media.size),
-			Ref:  media.ref,
+			Name:      media.name,
+			MIME:      media.mime,
+			Size:      int64(media.size),
+			Ref:       media.ref,
+			Thumbnail: thumb,
 		})
 	}
 
