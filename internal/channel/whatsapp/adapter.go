@@ -36,6 +36,10 @@ type Adapter struct {
 	historyLimit    int
 	fanout          core.FanoutPolicy
 
+	// presenceRevokeTimeout bounds the trailing presence-unavailable call
+	// (0 = defaultPresenceRevokeTimeout); tests shorten it.
+	presenceRevokeTimeout time.Duration
+
 	// sleep and rand01 drive the human-emulation choreography (T13b):
 	// they default to the real time.Sleep and math/rand.Float64, so
 	// production sends really do pause; tests override them (see
