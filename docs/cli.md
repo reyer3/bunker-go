@@ -57,6 +57,53 @@ for `go install`) and the VCS revision and time.
 `release` is false for `dev`, pseudo-version and `+dirty` builds: they
 never look for updates and `bunker update` refuses to replace them.
 
+## `bunker update [--dry-run] [--yes] [--json]`
+
+Replaces this binary with the latest GitHub release; it needs no daemon.
+
+1. Asks the GitHub API for the latest release and stops, exit 0, when
+   this binary is already that version or newer (a pre-release is never
+   installed over a stable release).
+2. Picks the `bunker_<version>_<os>_<arch>.tar.gz` asset for this
+   `GOOS`/`GOARCH` and downloads it and `checksums.txt` (at most 150 MiB
+   and 64 KiB; 5 minutes per download, 10 for the whole command).
+3. Verifies the archive's SHA-256 against its `checksums.txt` entry. A
+   mismatch, or no entry for the asset, is an error and nothing changes.
+4. Extracts `bunker` from the archive into a temp file in the directory
+   of the running binary (`os.Executable()`, symlinks resolved, so a
+   link is followed to the real file), mode 0755, renames the current
+   binary to `bunker.old` (for a manual rollback) and the new one into
+   its place. Both renames stay in one directory, so each is atomic.
+5. Restarts the daemon when `systemctl --user is-active bunker` says the
+   user service is running (what `make dev` does); otherwise it says to
+   restart `bunker daemon`. A failing restart is an error (exit 1), with
+   the new binary already in place.
+
+It asks `Proceed? [y/N]` on a terminal unless `--yes`; with stdin not a
+terminal and no `--yes` it refuses rather than guess. It refuses a `dev`
+or pseudo-version build (update those the way they were built: `git pull
+&& make dev`) and a binary whose directory it cannot write to, and says
+why.
+
+`--dry-run` prints the plan (version from → to, the asset URL, the
+target path and where the old binary goes) and never touches the
+network: it reads the release the daemon cached at
+`$BUNKER_STATE_DIR/update.json`, and fails when there is none yet.
+
+```
+update bunker 0.12.0 → 0.13.0
+  download  https://github.com/reyer3/bunker-go/releases/download/v0.13.0/bunker_0.13.0_linux_amd64.tar.gz
+  verify    sha256 against https://github.com/reyer3/bunker-go/releases/download/v0.13.0/checksums.txt
+  replace   /home/me/.local/bin/bunker (keeping the current one as /home/me/.local/bin/bunker.old)
+  restart   bunker.service if it is active
+```
+
+With `--json`, `--dry-run` prints `{"dry_run":true,"plan":{...}}` and an
+update prints `{"updated":true,"plan":{...},"service_restarted":true}`,
+where `plan` has `from`, `to`, `asset`, `asset_url`, `checksums_url`,
+`target` and `backup`; an up-to-date binary prints
+`{"up_to_date":true,"version":"0.13.0","latest_version":"0.13.0"}`.
+
 ## `bunker` (no arguments): interactive side panel
 
 Running `bunker` with no arguments on a TTY opens a Bubble Tea side panel
