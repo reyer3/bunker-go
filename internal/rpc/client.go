@@ -117,6 +117,17 @@ func (c *Client) List(ctx context.Context, filter core.Filter) ([]core.Item, err
 	return res.Items, nil
 }
 
+// ListPage returns one newest-first page of the items matching filter
+// and the query-language string query, resuming after filter.Cursor (see
+// core.Service.ListPage).
+func (c *Client) ListPage(ctx context.Context, filter core.Filter, query string) (core.Page, error) {
+	var res core.Page
+	if err := c.call(ctx, MethodListPage, listPageParams{Filter: filter, Query: query}, &res); err != nil {
+		return core.Page{}, err
+	}
+	return res, nil
+}
+
 // Get returns the stored item for id.
 func (c *Client) Get(ctx context.Context, id string) (core.Item, error) {
 	var res itemResult

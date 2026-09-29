@@ -38,6 +38,7 @@ const (
 // Method names understood by the server.
 const (
 	MethodList              = "list"
+	MethodListPage          = "list_page"
 	MethodGet               = "get"
 	MethodFetch             = "fetch"
 	MethodRead              = "read"
@@ -68,6 +69,15 @@ type listParams struct {
 }
 type listResult struct {
 	Items []core.Item `json:"items"`
+}
+
+// listPageParams is MethodListPage's params: Filter's plain fields and
+// Cursor, plus Query, the raw query-language string. The daemon parses
+// Query (see core.Service.ListPage) so every client shares one grammar
+// and one clock for relative dates. The result is a core.Page.
+type listPageParams struct {
+	Filter core.Filter `json:"filter"`
+	Query  string      `json:"query,omitempty"`
 }
 
 type idParams struct {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	"github.com/reyer3/bunker-go/internal/core"
@@ -52,6 +53,8 @@ type fakeBackend struct {
 	backfillCalls  []backfillCall
 	backfillResult core.BackfillResult
 	backfillErr    error
+
+	listPageCalls []listPageCall
 
 	searchCalls []searchCall
 	searchItems []core.Item
@@ -130,6 +133,11 @@ type backfillCall struct {
 	Folder  string
 	Since   time.Time
 	DryRun  bool
+}
+
+type listPageCall struct {
+	Filter core.Filter
+	Query  string
 }
 
 type searchCall struct {
@@ -336,6 +344,49 @@ func (f *fakeBackend) Search(ctx context.Context, channel core.Channel, account 
 		return nil, f.searchErr
 	}
 	return f.searchItems, nil
+}
+
+// ListPage records the call and pages through items newest first (id
+// descending on ties, like the store), honoring Channel, Account, Unread,
+// Cursor and Limit. It does not interpret query: the query language is
+// the store's job, tested there and over RPC; CLI and MCP tests only need
+// to see what reached the backend.
+func (f *fakeBackend) ListPage(ctx context.Context, filter core.Filter, query string) (core.Page, error) {
+	f.listPageCalls = append(f.listPageCalls, listPageCall{Filter: filter, Query: query})
+	if f.listErr != nil {
+		return core.Page{}, f.listErr
+	}
+	var items []core.Item
+	for _, it := range f.items {
+		if filter.Channel != "" && it.Channel != filter.Channel ||
+			filter.Account != "" && it.Account != filter.Account ||
+			filter.Unread != nil && it.Unread != *filter.Unread {
+			continue
+		}
+		items = append(items, it)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if !items[i].Timestamp.Equal(items[j].Timestamp) {
+			return items[i].Timestamp.After(items[j].Timestamp)
+		}
+		return items[i].ID > items[j].ID
+	})
+	if filter.Cursor != "" {
+		ts, id, err := core.DecodeCursor(filter.Cursor)
+		if err != nil {
+			return core.Page{}, err
+		}
+		for len(items) > 0 && (items[0].Timestamp.After(ts) || items[0].Timestamp.Equal(ts) && items[0].ID >= id) {
+			items = items[1:]
+		}
+	}
+	page := core.Page{Items: items}
+	if filter.Limit > 0 && len(items) > filter.Limit {
+		page.Items = items[:filter.Limit]
+		last := page.Items[filter.Limit-1]
+		page.NextCursor = core.EncodeCursor(last.Timestamp, last.ID)
+	}
+	return page, nil
 }
 
 var _ Backend = (*fakeBackend)(nil)

@@ -58,8 +58,16 @@ Run without a command in a terminal to open the interactive UI.
 
 Commands:
   daemon [--fake]                                          run the daemon
-  list [--channel c] [--account a] [--unread] [--label l]  list items
-       [-q text] [--limit n] [--json]
+  list [--channel c] [--account a] [--unread] [--label l]  list items, newest
+       [-q text] [--query q] [--cursor c] [--limit n]        first; --query takes
+       [--json]                                              the query language,
+                                                             JSON has next_cursor
+  find <query> [--cursor c] [--limit 50] [--json]          list --query shortcut
+                                                             over the local store:
+                                                             from: to: subject:
+                                                             is: has: in: channel:
+                                                             account: label:
+                                                             before: after: "..." -x
   read <id> [--no-receipt] [--json]                        fetch full body
        (marks it read on WhatsApp/Matrix unless --no-receipt; mail is
        always PEEK-only, unaffected)
@@ -155,6 +163,8 @@ func runWithBackend(ctx context.Context, backend Backend, args []string, stdin i
 	switch args[0] {
 	case "list":
 		return cmdList(ctx, backend, args[1:], stdout, stderr)
+	case "find":
+		return cmdFind(ctx, backend, args[1:], stdout, stderr)
 	case "read":
 		return cmdRead(ctx, backend, args[1:], stdout, stderr)
 	case "reply":
@@ -278,39 +288,101 @@ func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
 	return positionals, nil
 }
 
-func cmdList(ctx context.Context, backend Backend, args []string, stdout, stderr io.Writer) int {
-	fs := newFlagSet("list", stderr)
-	channel := fs.String("channel", "", "filter by channel (mail, whatsapp, matrix)")
-	account := fs.String("account", "", "filter by account")
-	unread := fs.Bool("unread", false, "only unread items")
-	label := fs.String("label", "", "filter by label")
-	query := fs.String("q", "", "full-text query over subject, sender, recipients, body, attachment and thread names")
-	limit := fs.Int("limit", 0, "max items (0 = no limit)")
-	jsonOut := fs.Bool("json", false, "emit JSON")
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
+// defaultFindLimit is `bunker find`'s page size: find is for a person at
+// a terminal, where one screenful plus a cursor beats an unbounded dump.
+// `list` keeps its historical "0 = no limit" default.
+const defaultFindLimit = 50
 
-	filter := core.Filter{Channel: core.Channel(*channel), Account: *account, Label: *label, Query: *query, Limit: *limit}
-	if *unread {
+// listFlags are the flags `list` and `find` share.
+type listFlags struct {
+	channel, account, label, text, query, cursor *string
+	unread, jsonOut                              *bool
+	limit                                        *int
+}
+
+func newListFlags(fs *flag.FlagSet, defaultLimit int) listFlags {
+	return listFlags{
+		channel: fs.String("channel", "", "filter by channel (mail, whatsapp, matrix)"),
+		account: fs.String("account", "", "filter by account"),
+		unread:  fs.Bool("unread", false, "only unread items"),
+		label:   fs.String("label", "", "filter by label"),
+		text:    fs.String("q", "", "literal full-text search over subject, sender, recipients, body, attachment and thread names (no operators)"),
+		query:   fs.String("query", "", "query language: from: to: subject: is: has: in: channel: account: label: before: after:, quotes and -negation (see docs/cli.md)"),
+		cursor:  fs.String("cursor", "", "resume after a previous page's next_cursor"),
+		limit:   fs.Int("limit", defaultLimit, "max items per page (0 = no limit)"),
+		jsonOut: fs.Bool("json", false, "emit JSON"),
+	}
+}
+
+func (f listFlags) filter() core.Filter {
+	filter := core.Filter{
+		Channel: core.Channel(*f.channel), Account: *f.account, Label: *f.label,
+		Query: *f.text, Limit: *f.limit, Cursor: *f.cursor,
+	}
+	if *f.unread {
 		t := true
 		filter.Unread = &t
 	}
+	return filter
+}
 
-	items, err := backend.List(ctx, filter)
-	if err != nil {
-		return fail(*jsonOut, stdout, stderr, err)
+func cmdList(ctx context.Context, backend Backend, args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("list", stderr)
+	flags := newListFlags(fs, 0)
+	if err := fs.Parse(args); err != nil {
+		return 2
 	}
-	if *jsonOut {
-		writeJSON(stdout, map[string]any{"items": items})
+	return printPage(ctx, backend, flags, *flags.query, stdout, stderr)
+}
+
+// cmdFind implements `bunker find <query...>`: `list --query` with the
+// query as positionals (joined by spaces, so `bunker find from:ana
+// factura` needs no quoting) and a page-sized default limit. It is not
+// `bunker search`, which asks the mail server rather than the store.
+func cmdFind(ctx context.Context, backend Backend, args []string, stdout, stderr io.Writer) int {
+	fs := newFlagSet("find", stderr)
+	flags := newListFlags(fs, defaultFindLimit)
+	positionals, err := parseInterspersed(fs, args)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	query := strings.Join(positionals, " ")
+	if *flags.query != "" {
+		query = strings.TrimSpace(*flags.query + " " + query)
+	}
+	if query == "" {
+		fmt.Fprintln(stderr, `usage: bunker find <query> [--cursor C] [--limit 50] [--json]  (e.g. bunker find from:ana is:unread "orden de compra")`)
+		return 2
+	}
+	return printPage(ctx, backend, flags, query, stdout, stderr)
+}
+
+// printPage runs one ListPage and prints it: {"items", "next_cursor"} as
+// JSON, or one line per item with the cursor (when there is a next page)
+// on stderr, so stdout stays exactly one item per line for scripts.
+func printPage(ctx context.Context, backend Backend, flags listFlags, query string, stdout, stderr io.Writer) int {
+	page, err := backend.ListPage(ctx, flags.filter(), query)
+	if err != nil {
+		return fail(*flags.jsonOut, stdout, stderr, err)
+	}
+	if *flags.jsonOut {
+		items := page.Items
+		if items == nil {
+			items = []core.Item{}
+		}
+		writeJSON(stdout, map[string]any{"items": items, "next_cursor": page.NextCursor})
 		return 0
 	}
-	for _, it := range items {
+	for _, it := range page.Items {
 		mark := " "
 		if it.Unread {
 			mark = "*"
 		}
 		fmt.Fprintf(stdout, "%s %s\t%s\n", mark, it.ID, it.Subject)
+	}
+	if page.NextCursor != "" {
+		fmt.Fprintf(stderr, "next_cursor: %s\n", page.NextCursor)
 	}
 	return 0
 }

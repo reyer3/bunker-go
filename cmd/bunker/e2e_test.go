@@ -116,6 +116,33 @@ func TestEndToEndCLIAgainstFakeDaemon(t *testing.T) {
 		t.Fatalf("list --json = %s, want it to contain %q", out, mailID)
 	}
 
+	// find and list --query go through the daemon's query parser: one
+	// channel's item, then two pages of one item that together hold all
+	// three, and an unknown operator as a loud error.
+	var page struct {
+		Items []struct {
+			ID string `json:"ID"`
+		} `json:"items"`
+		NextCursor string `json:"next_cursor"`
+	}
+	code, out = runCLI(t, []string{"find", "channel:mail", "--json"})
+	if err := json.Unmarshal([]byte(out), &page); code != 0 || err != nil || len(page.Items) != 1 || page.Items[0].ID != mailID || page.NextCursor != "" {
+		t.Fatalf("find channel:mail --json = %d %q (%v)", code, out, err)
+	}
+	code, out = runCLI(t, []string{"list", "--query", "-channel:mail", "--limit", "1", "--json"})
+	if err := json.Unmarshal([]byte(out), &page); code != 0 || err != nil || len(page.Items) != 1 || page.NextCursor == "" {
+		t.Fatalf("list --query page 1 = %d %q (%v)", code, out, err)
+	}
+	first := page.Items[0].ID
+	code, out = runCLI(t, []string{"list", "--query", "-channel:mail", "--limit", "1", "--cursor", page.NextCursor, "--json"})
+	page.NextCursor = ""
+	if err := json.Unmarshal([]byte(out), &page); code != 0 || err != nil || len(page.Items) != 1 || page.Items[0].ID == first || page.Items[0].ID == mailID || page.NextCursor != "" {
+		t.Fatalf("list --query page 2 = %d %q (%v)", code, out, err)
+	}
+	if code, out = runCLI(t, []string{"find", "foo:bar", "--json"}); code == 0 || !strings.Contains(out, `foo:`) {
+		t.Fatalf("find foo:bar = %d %q, want an error naming the operator", code, out)
+	}
+
 	// read <id> --json
 	code, out = runCLI(t, []string{"read", mailID, "--json"})
 	if code != 0 {

@@ -23,6 +23,8 @@ type Store struct {
 	db *sql.DB
 }
 
+var _ core.PageLister = (*Store)(nil)
+
 const schema = `
 CREATE TABLE IF NOT EXISTS items (
 	id           TEXT PRIMARY KEY,
@@ -639,8 +641,53 @@ func (s *Store) Get(ctx context.Context, id string) (core.Item, error) {
 	return item, nil
 }
 
-// List returns items matching filter, most recent timestamp first.
+// List returns items matching filter, most recent timestamp first (ties
+// broken by id, so the order is total and ListPage can resume it).
 func (s *Store) List(ctx context.Context, filter core.Filter) ([]core.Item, error) {
+	return s.list(ctx, filter, nil, filter.Limit)
+}
+
+// ListPage implements core.PageLister: List, resumed after
+// filter.Cursor, plus the cursor of the page that follows. It asks for
+// one row more than filter.Limit to learn whether a next page exists
+// without a second COUNT query, so the last page never carries a cursor
+// that would lead to an empty one.
+func (s *Store) ListPage(ctx context.Context, filter core.Filter) (core.Page, error) {
+	var after *listPosition
+	if filter.Cursor != "" {
+		ts, id, err := core.DecodeCursor(filter.Cursor)
+		if err != nil {
+			return core.Page{}, fmt.Errorf("store: list page: %w", err)
+		}
+		after = &listPosition{timestamp: ts.UnixNano(), id: id}
+	}
+	limit := filter.Limit
+	if limit > 0 {
+		limit++
+	}
+	items, err := s.list(ctx, filter, after, limit)
+	if err != nil {
+		return core.Page{}, err
+	}
+	page := core.Page{Items: items}
+	if filter.Limit > 0 && len(items) > filter.Limit {
+		page.Items = items[:filter.Limit]
+		last := page.Items[len(page.Items)-1]
+		page.NextCursor = core.EncodeCursor(last.Timestamp, last.ID)
+	}
+	if page.Items == nil {
+		page.Items = []core.Item{}
+	}
+	return page, nil
+}
+
+// listPosition is a decoded page cursor: the last item already returned.
+type listPosition struct {
+	timestamp int64
+	id        string
+}
+
+func (s *Store) list(ctx context.Context, filter core.Filter, after *listPosition, limit int) ([]core.Item, error) {
 	query := `
 		SELECT DISTINCT i.id, i.channel, i.account, i.thread, i.thread_name, i.from_id, i.from_name,
 			i.to_json, i.subject, i.body, i.attachments_json, i.unread, i.from_me, i.timestamp, i.meta_json,
@@ -673,33 +720,34 @@ func (s *Store) List(ctx context.Context, filter core.Filter) ([]core.Item, erro
 		args = append(args, boolToInt(*filter.Unread))
 	}
 	if filter.Query != "" {
-		if match := ftsMatchExpr(filter.Query); match != "" {
-			// Filter by id through the index rather than ordering by
-			// rank: List's contract (and every caller) is newest first.
-			conds = append(conds, `i.id IN (
-				SELECT m.item_id FROM items_fts f
-				JOIN items_fts_map m ON m.fts_rowid = f.rowid
-				WHERE items_fts MATCH ?)`)
-			args = append(args, match)
-		} else {
-			// A query with no word characters (e.g. "%" or "->") gives
-			// the tokenizer nothing to match, so fall back to a literal
-			// substring search. SQLite's LIKE has no default escape
-			// character, so without ESCAPE a query such as "%" or "_"
-			// would act as a wildcard pattern instead of matching
-			// literally.
-			conds = append(conds, `(i.subject LIKE ? ESCAPE '\' OR i.body LIKE ? ESCAPE '\')`)
-			like := "%" + escapeLike(filter.Query) + "%"
-			args = append(args, like, like)
+		cond, condArgs := textCond(ftsAll, filter.Query, false)
+		conds = append(conds, cond)
+		args = append(args, condArgs...)
+	}
+	if filter.Match != nil {
+		for _, term := range filter.Match.Terms {
+			cond, condArgs, err := termCond(term)
+			if err != nil {
+				return nil, fmt.Errorf("store: list: %w", err)
+			}
+			if term.Negate {
+				cond = "NOT (" + cond + ")"
+			}
+			conds = append(conds, cond)
+			args = append(args, condArgs...)
 		}
+	}
+	if after != nil {
+		conds = append(conds, "(i.timestamp < ? OR (i.timestamp = ? AND i.id < ?))")
+		args = append(args, after.timestamp, after.timestamp, after.id)
 	}
 	if len(conds) > 0 {
 		query += " WHERE " + strings.Join(conds, " AND ")
 	}
-	query += " ORDER BY i.timestamp DESC"
-	if filter.Limit > 0 {
+	query += " ORDER BY i.timestamp DESC, i.id DESC"
+	if limit > 0 {
 		query += " LIMIT ?"
-		args = append(args, filter.Limit)
+		args = append(args, limit)
 	}
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -733,6 +781,124 @@ func (s *Store) List(ctx context.Context, filter core.Filter) ([]core.Item, erro
 	return items, nil
 }
 
+// ftsScope is one text field's slice of the index: the FTS5 column
+// filter that scopes a match to it, and the stored columns the literal
+// LIKE fallback reads when the text has no token the index could match.
+// Both are fixed strings from this file, never user input.
+type ftsScope struct {
+	columns string // "" for every indexed column
+	like    []string
+}
+
+var (
+	ftsAll     = ftsScope{like: []string{"i.subject", "i.body"}}
+	ftsFrom    = ftsScope{columns: "{from_name from_id}", like: []string{"i.from_name", "i.from_id"}}
+	ftsTo      = ftsScope{columns: "{recipients}", like: []string{"i.to_json"}}
+	ftsSubject = ftsScope{columns: "{subject}", like: []string{"i.subject"}}
+)
+
+// ftsMatchSQL selects the ids whose index row matches one bound MATCH
+// expression. Filtering by id rather than ordering by rank keeps List's
+// contract (and every caller's): newest first.
+const ftsMatchSQL = `i.id IN (
+	SELECT m.item_id FROM items_fts f
+	JOIN items_fts_map m ON m.fts_rowid = f.rowid
+	WHERE items_fts MATCH ?)`
+
+// textCond is the condition for text within scope: a full-text match
+// when the text has a token to match, else a literal substring match.
+// phrase matches text as one exact phrase instead of word by word.
+func textCond(scope ftsScope, text string, phrase bool) (string, []any) {
+	var match string
+	if phrase {
+		match = ftsPhraseExpr(text)
+	} else {
+		match = ftsMatchExpr(text)
+	}
+	if match != "" {
+		if scope.columns != "" {
+			match = scope.columns + " : (" + match + ")"
+		}
+		return ftsMatchSQL, []any{match}
+	}
+	// A query with no word characters (e.g. "%" or "->") gives the
+	// tokenizer nothing to match, so fall back to a literal substring
+	// search. SQLite's LIKE has no default escape character, so without
+	// ESCAPE a query such as "%" or "_" would act as a wildcard pattern
+	// instead of matching literally.
+	like := "%" + escapeLike(text) + "%"
+	parts := make([]string, len(scope.like))
+	args := make([]any, len(scope.like))
+	for i, col := range scope.like {
+		parts[i] = col + ` LIKE ? ESCAPE '\'`
+		args[i] = like
+	}
+	return "(" + strings.Join(parts, " OR ") + ")", args
+}
+
+// termCond is the SQL condition (without its negation) for one term of a
+// parsed query. Every value is a bound parameter; only fixed column names
+// and fixed FTS5 column filters are written into the statement.
+func termCond(term core.QueryTerm) (string, []any, error) {
+	switch term.Field {
+	case core.QueryText:
+		cond, args := textCond(ftsAll, term.Value, term.Phrase)
+		return cond, args, nil
+	case core.QueryFrom:
+		cond, args := textCond(ftsFrom, term.Value, term.Phrase)
+		return cond, args, nil
+	case core.QueryTo:
+		cond, args := textCond(ftsTo, term.Value, term.Phrase)
+		return cond, args, nil
+	case core.QuerySubject:
+		cond, args := textCond(ftsSubject, term.Value, term.Phrase)
+		return cond, args, nil
+	case core.QueryIs:
+		return "i.unread = ?", []any{boolToInt(term.Value == "unread")}, nil
+	case core.QueryHas:
+		// json_valid guards a hand-edited or corrupt value; "null" (a nil
+		// slice marshaled) is not an array, so json_array_length is 0.
+		return `coalesce(json_array_length(CASE WHEN json_valid(i.attachments_json) THEN i.attachments_json ELSE '[]' END), 0) > 0`, nil, nil
+	case core.QueryIn:
+		// coalesce makes an item with no folder (every chat) compare as
+		// "", so -in:inbox keeps it instead of NOT(NULL) dropping it.
+		// NOCASE lets in:inbox find the canonical "INBOX".
+		return `coalesce(json_extract(CASE WHEN json_valid(i.meta_json) THEN i.meta_json ELSE '{}' END, '$.folder'), '') = ? COLLATE NOCASE`,
+			[]any{term.Value}, nil
+	case core.QueryChannel:
+		return "i.channel = ?", []any{term.Value}, nil
+	case core.QueryAccount:
+		return "i.account = ?", []any{term.Value}, nil
+	case core.QueryLabel:
+		return "EXISTS (SELECT 1 FROM labels lq WHERE lq.item_id = i.id AND lq.label = ? COLLATE NOCASE)", []any{term.Value}, nil
+	case core.QueryBefore:
+		return "i.timestamp < ?", []any{term.Time.UnixNano()}, nil
+	case core.QueryAfter:
+		return "i.timestamp >= ?", []any{term.Time.UnixNano()}, nil
+	default:
+		// A term the parser never produces (e.g. a hand-built Filter over
+		// RPC) is an error, never an ignored condition that would widen
+		// the result.
+		return "", nil, fmt.Errorf("unknown query field %q: %w", term.Field, core.ErrInvalidQuery)
+	}
+}
+
+// ftsPhraseExpr is ftsMatchExpr for a quoted phrase: the whole text as
+// one FTS5 string (quotes doubled), matched as consecutive tokens with no
+// prefix, or "" when it has no token to match.
+func ftsPhraseExpr(q string) string {
+	if !hasWordChar(q) {
+		return ""
+	}
+	return `"` + strings.ReplaceAll(q, `"`, `""`) + `"`
+}
+
+// hasWordChar reports whether s has a letter or digit, i.e. a token the
+// unicode61 tokenizer would index.
+func hasWordChar(s string) bool {
+	return strings.ContainsFunc(s, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsNumber(r) })
+}
+
 // ftsMatchExpr turns free user text into an FTS5 MATCH expression, or
 // "" when the text has no token the index could match. Every
 // whitespace-separated word becomes an FTS5 string literal (double quotes
@@ -748,7 +914,7 @@ func ftsMatchExpr(q string) string {
 		// A word with no letter or digit (e.g. "-" or "%") tokenizes to
 		// nothing; FTS5 treats an empty phrase as matching no rows, which
 		// would make the whole AND fail, so it is dropped instead.
-		if !strings.ContainsFunc(w, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsNumber(r) }) {
+		if !hasWordChar(w) {
 			continue
 		}
 		terms = append(terms, `"`+strings.ReplaceAll(w, `"`, `""`)+`"`)
