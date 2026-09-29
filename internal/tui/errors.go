@@ -51,7 +51,7 @@ func isDaemonDown(err error) bool {
 
 // errorPrefixes are the package prefixes this codebase wraps errors
 // with ("pkg: …", see CLAUDE.md).
-var errorPrefixes = []string{"rpc", "core", "tui", "store", "whatsapp", "matrix", "mail", "config", "fake"}
+var errorPrefixes = []string{"rpc", "core", "tui", "store", "whatsapp", "matrix", "mail", "config", "fake", "herdr"}
 
 // stripErrorPrefixes drops every known "pkg: " prefix, wherever the
 // wrapping put it: "core: send: whatsapp: x" becomes "send: x".

@@ -27,7 +27,7 @@ func TestRunWithDependenciesNoArgsStartsTUIOnTerminalAndClosesClient(t *testing.
 	deps := runDependencies{
 		isTerminal: func(*os.File) bool { return true },
 		dial:       func(context.Context, string) (tui.Client, error) { return client, nil },
-		startTUI: func(got tui.Client, _ io.Reader, _ io.Writer) error {
+		startTUI: func(got tui.Client, _ io.Reader, _ io.Writer, _ tuiLaunch) error {
 			started = true
 			if got == client {
 				t.Fatal("TUI bypassed the query reconnect wrapper")
@@ -57,7 +57,7 @@ func TestRunWithDependenciesNoArgsWithoutTerminalKeepsUsageExit(t *testing.T) {
 			dialed = true
 			return nil, errors.New("unexpected dial")
 		},
-		startTUI: func(tui.Client, io.Reader, io.Writer) error {
+		startTUI: func(tui.Client, io.Reader, io.Writer, tuiLaunch) error {
 			started = true
 			return nil
 		},
@@ -81,7 +81,7 @@ func TestRunWithDependenciesTUIErrorReturnsFailureAndClosesClient(t *testing.T) 
 	deps := runDependencies{
 		isTerminal: func(*os.File) bool { return true },
 		dial:       func(context.Context, string) (tui.Client, error) { return client, nil },
-		startTUI:   func(tui.Client, io.Reader, io.Writer) error { return errors.New("terminal failed") },
+		startTUI:   func(tui.Client, io.Reader, io.Writer, tuiLaunch) error { return errors.New("terminal failed") },
 	}
 
 	code := runWithDependencies(nil, os.Stdin, io.Discard, io.Discard, deps)
@@ -100,7 +100,7 @@ func TestRunWithDependenciesLeavesSubcommandsOnCLIPath(t *testing.T) {
 		dial: func(context.Context, string) (tui.Client, error) {
 			return nil, errors.New("subcommand should not use TUI dial")
 		},
-		startTUI: func(tui.Client, io.Reader, io.Writer) error {
+		startTUI: func(tui.Client, io.Reader, io.Writer, tuiLaunch) error {
 			started = true
 			return nil
 		},

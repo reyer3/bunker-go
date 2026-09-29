@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"time"
 
 	"github.com/reyer3/bunker-go/internal/config"
@@ -51,14 +52,57 @@ func run(args []string, stdin *os.File, stdout, stderr *os.File) int {
 	return runWithDependencies(args, stdin, stdout, stderr, runDependencies{
 		isTerminal: func(file *os.File) bool { return term.IsTerminal(int(file.Fd())) },
 		dial:       func(ctx context.Context, path string) (tui.Client, error) { return rpc.DialContext(ctx, path) },
-		startTUI:   tui.Run,
+		startTUI:   startTUI,
+		getenv:     os.Getenv,
+		herdrRun:   execHerdrRunner(os.Getenv, exec.LookPath),
 	})
 }
 
 type runDependencies struct {
 	isTerminal func(*os.File) bool
 	dial       func(context.Context, string) (tui.Client, error)
-	startTUI   func(tui.Client, io.Reader, io.Writer) error
+	startTUI   func(tui.Client, io.Reader, io.Writer, tuiLaunch) error
+	// getenv and herdrRun serve "bunker open" (BUNKER_OPEN_ID) and
+	// "bunker sidebar" (HERDR_ENV, and herdr to open a conversation in).
+	// A nil getenv reads as an empty environment, so tests stay hermetic.
+	getenv   func(string) string
+	herdrRun herdrRunner
+}
+
+func (d runDependencies) env(key string) string {
+	if d.getenv == nil {
+		return ""
+	}
+	return d.getenv(key)
+}
+
+// tuiLaunch is how the TUI starts: the full inbox (zero value), the
+// compact sidebar, or one conversation. It is a plain struct rather than
+// tui options so dispatch tests can see what was asked for.
+type tuiLaunch struct {
+	sidebar bool
+	openID  string
+	// opener opens a conversation outside this TUI (a herdr pane); nil
+	// opens it in place.
+	opener func(id string) error
+}
+
+func (l tuiLaunch) options() []tui.Option {
+	var opts []tui.Option
+	if l.sidebar {
+		opts = append(opts, tui.WithSidebar())
+	}
+	if l.opener != nil {
+		opts = append(opts, tui.WithExternalOpener(l.opener))
+	}
+	if l.openID != "" {
+		opts = append(opts, tui.WithOpenItem(l.openID))
+	}
+	return opts
+}
+
+func startTUI(client tui.Client, input io.Reader, output io.Writer, launch tuiLaunch) error {
+	return tui.Run(client, input, output, launch.options()...)
 }
 
 func runWithDependencies(args []string, stdin *os.File, stdout, stderr io.Writer, deps runDependencies) int {
@@ -67,24 +111,37 @@ func runWithDependencies(args []string, stdin *os.File, stdout, stderr io.Writer
 			fmt.Fprint(stderr, topLevelUsage)
 			return 2
 		}
-		socket := rpc.DefaultSocketPath()
-		ctx, cancel := context.WithTimeout(context.Background(), shortCommandTimeout)
-		client, err := deps.dial(ctx, socket)
-		cancel()
-		if err != nil {
-			fmt.Fprintf(stderr, "error: cannot reach bunker daemon at %s: %v\n", socket, err)
-			fmt.Fprintln(stderr, "hint: start it with 'bunker daemon' (or 'bunker daemon --fake' to try it without real accounts)")
-			return 1
-		}
-		queries := tui.NewQueryClient(client, func(ctx context.Context) (tui.Client, error) { return deps.dial(ctx, socket) })
-		defer queries.Close()
-		if err := deps.startTUI(queries, stdin, stdout); err != nil {
-			fmt.Fprintln(stderr, "error: terminal UI:", err)
-			return 1
-		}
-		return 0
+		return runTUI(stdin, stdout, stderr, deps, tuiLaunch{})
+	}
+	switch args[0] {
+	case "open":
+		return cmdOpen(args[1:], stdin, stdout, stderr, deps)
+	case "sidebar":
+		return cmdSidebar(args[1:], stdin, stdout, stderr, deps)
 	}
 	return runCommandLine(args, stdin, stdout, stderr)
+}
+
+// runTUI dials the daemon and runs the TUI on the terminal; every way of
+// starting it ("bunker", "bunker sidebar", "bunker open") shares it, so
+// they fail the same way when the daemon is down.
+func runTUI(stdin *os.File, stdout, stderr io.Writer, deps runDependencies, launch tuiLaunch) int {
+	socket := rpc.DefaultSocketPath()
+	ctx, cancel := context.WithTimeout(context.Background(), shortCommandTimeout)
+	client, err := deps.dial(ctx, socket)
+	cancel()
+	if err != nil {
+		fmt.Fprintf(stderr, "error: cannot reach bunker daemon at %s: %v\n", socket, err)
+		fmt.Fprintln(stderr, "hint: start it with 'bunker daemon' (or 'bunker daemon --fake' to try it without real accounts)")
+		return 1
+	}
+	queries := tui.NewQueryClient(client, func(ctx context.Context) (tui.Client, error) { return deps.dial(ctx, socket) })
+	defer queries.Close()
+	if err := deps.startTUI(queries, stdin, stdout, launch); err != nil {
+		fmt.Fprintln(stderr, "error: terminal UI:", err)
+		return 1
+	}
+	return 0
 }
 
 func runCommandLine(args []string, stdin *os.File, stdout, stderr io.Writer) int {

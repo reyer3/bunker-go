@@ -262,13 +262,34 @@ type Model struct {
 	downloadResult       core.DownloadResult
 	downloadToken        uint64
 	downloadDefaultDirFn func() string
+
+	// Launch modes (issue #81, launch.go). sidebar is the compact layout
+	// for a narrow herdr pane; externalOpen, when set, opens a
+	// conversation somewhere else (a new herdr pane) instead of in place.
+	// openID is the one conversation "bunker open" starts on: the pane
+	// exists only for it, so leaving it quits. openErr is why it could
+	// not be opened.
+	sidebar      bool
+	externalOpen func(id string) error
+	openID       string
+	openErr      error
 }
 
 // numTabs is "Todo" plus one tab per channelOrder entry.
 const numTabs = 1 + 3
 
-func NewModel(client Client) Model {
-	return Model{client: client, polling: client != nil, pollToken: 1}
+func NewModel(client Client, opts ...Option) Model {
+	m := Model{client: client, polling: client != nil, pollToken: 1}
+	for _, opt := range opts {
+		opt(&m)
+	}
+	if m.openID != "" {
+		// A single-conversation pane never shows the inbox, so it does
+		// not poll it (nor notify about it: the panel that opened it
+		// already does).
+		m.polling = false
+	}
+	return m
 }
 
 // withGlyphs returns a copy of m using the given resolved channel glyphs
@@ -311,6 +332,9 @@ func (m Model) Init() tea.Cmd {
 	if m.client == nil {
 		return nil
 	}
+	if m.openID != "" {
+		return readOpenItem(m.client, m.openID)
+	}
 	return loadInbox(m.client, m.pollToken)
 }
 
@@ -320,14 +344,14 @@ func (m Model) Init() tea.Cmd {
 // including NO_COLOR, matches the real terminal Bubble Tea writes to) and
 // loads [render.glyphs] config overrides the same way `bunker render`
 // does; a missing/unreadable config keeps the package default glyphs.
-func Run(client Client, input io.Reader, output io.Writer) error {
+func Run(client Client, input io.Reader, output io.Writer, opts ...Option) error {
 	glyphs := style.Glyphs
 	var notify *bool
 	if cfg, err := config.LoadDefault(); err == nil {
 		glyphs = style.ResolveGlyphs(cfg.Render.Glyphs)
 		notify = cfg.Tui.Notify
 	}
-	model := NewModel(client).withGlyphs(glyphs)
+	model := NewModel(client, opts...).withGlyphs(glyphs)
 	model.render = lipgloss.NewRenderer(output)
 	output = lockOutput(output)
 	model.notifyEnabled = resolveNotifyEnabled(notify, os.Getenv)

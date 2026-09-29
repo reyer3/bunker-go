@@ -62,6 +62,17 @@ var inboxHints = []keyHint{
 	{"?", "ayuda", true},
 }
 
+// sidebarHints are the compact panel's keys (issue #81): few, since the
+// line is about 30 cells wide.
+var sidebarHints = []keyHint{
+	{"q", "salir", true},
+	{"↵", "abrir", false},
+	{"/", "filtrar", false},
+	{"Tab", "canal", false},
+	{"g", "refrescar", false},
+	{"?", "ayuda", true},
+}
+
 var chatHints = []keyHint{
 	{"↵", "enviar", false},
 	{"Alt+↵", "nueva línea", false},
@@ -132,6 +143,17 @@ var helpSections = []helpSection{
 		{"Tab/⇧Tab", "siguiente/anterior sección"},
 		{"q", "salir"},
 	}},
+	{"sidebar", "Panel lateral", [][2]string{
+		{"j/k, ↑/↓", "mover selección"},
+		{"↵", "abrir (en herdr, en un panel a la derecha)"},
+		{"Tab/⇧Tab", "siguiente/anterior canal"},
+		{"1/2/3", "Mail/WhatsApp/Matrix"},
+		{"0", "Todo"},
+		{"/", "filtrar (Esc quita el filtro)"},
+		{"g", "refrescar"},
+		{"? o F1", "esta ayuda"},
+		{"q", "salir"},
+	}},
 	{"chat", "En un chat", [][2]string{
 		{"↵ o Ctrl+S", "enviar (con vista previa)"},
 		{"Alt+↵", "salto de línea"},
@@ -184,6 +206,8 @@ func (m Model) helpContext() string {
 		return "thread"
 	case m.picker != nil:
 		return "picker"
+	case m.sidebar && !m.detail:
+		return "sidebar"
 	}
 	return "inbox"
 }

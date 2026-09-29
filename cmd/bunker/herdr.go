@@ -18,7 +18,7 @@ import (
 
 // "bunker herdr toggle" (issue #80) docks bunker as a left side panel in
 // herdr, a terminal workspace manager for coding agents. bunker ships a
-// herdr plugin (deploy/herdr) whose "sidebar" pane runs bunker; this
+// herdr plugin (deploy/herdr) whose "sidebar" pane runs "bunker sidebar"; this
 // command is that plugin's "toggle" action. It drives herdr only through
 // its CLI, which prints the raw JSON response on stdout (exit 0) or a JSON
 // object with an "error" key on stderr (exit 1).
@@ -32,6 +32,7 @@ const (
 	// deploy/herdr/herdr-plugin.toml.
 	herdrPluginID          = "bunker"
 	herdrSidebarEntrypoint = "sidebar"
+	herdrOpenEntrypoint    = "open"
 	// herdrPaneLabel is how toggle finds its panel again: herdr has no
 	// "which plugin owns this pane" query, so the pane is renamed to it.
 	herdrPaneLabel = "bunker"
@@ -227,6 +228,33 @@ func validHerdrPaneID(id string) error {
 		}
 	}
 	return nil
+}
+
+// herdrOpenItemCommand opens one conversation in a new plugin pane to
+// the right of the focused one (the sidebar that asked for it) and
+// focuses it. The id reaches "bunker open" as BUNKER_OPEN_ID because
+// herdr runs a manifest pane's command as fixed argv.
+func herdrOpenItemCommand(id string) []string {
+	return []string{"plugin", "pane", "open", "--plugin", herdrPluginID, "--entrypoint", herdrOpenEntrypoint,
+		"--placement", "split", "--direction", "right", "--env", openIDEnv + "=" + id, "--focus"}
+}
+
+// herdrItemOpener is what Enter does in "bunker sidebar": inside herdr
+// (HERDR_ENV=1) it opens the conversation in a herdr pane; anywhere else
+// it returns nil and the sidebar opens it in place.
+func herdrItemOpener(getenv func(string) string, run herdrRunner) func(id string) error {
+	if run == nil || getenv("HERDR_ENV") != "1" {
+		return nil
+	}
+	return func(id string) error {
+		if err := validItemID(id); err != nil {
+			return fmt.Errorf("herdr: open: %w", err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), herdrTimeout)
+		defer cancel()
+		_, err := run(ctx, herdrOpenItemCommand(id)...)
+		return err
+	}
 }
 
 // herdrToggle is what toggle decided and ran (or, in a dry run, would

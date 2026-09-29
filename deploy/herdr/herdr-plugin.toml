@@ -6,14 +6,22 @@ min_herdr_version = "0.8.0"
 description = "Mail, WhatsApp and Matrix in a side panel"
 platforms = ["linux", "macos"]
 
-# The panel "bunker herdr toggle" docks on the left. For now it runs the
-# full TUI; a compact "bunker sidebar" view made for a narrow column comes
-# in #81.
+# The panel "bunker herdr toggle" docks on the left: the compact TUI made
+# for a narrow column.
 [[panes]]
 id = "sidebar"
 title = "bunker"
 placement = "split"
-command = ["bunker"]
+command = ["bunker", "sidebar"]
+
+# One conversation, opened by Enter in the sidebar in a pane to its right.
+# herdr runs this command as fixed argv, so "bunker open" reads the item
+# id from BUNKER_OPEN_ID, which the sidebar passes with "--env".
+[[panes]]
+id = "open"
+title = "bunker"
+placement = "split"
+command = ["bunker", "open"]
 
 # Opens the panel beside the focused pane, focuses it when it is open, and
 # closes it when it is already focused. Bind it to a key, see README.md.

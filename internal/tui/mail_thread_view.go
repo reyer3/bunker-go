@@ -13,8 +13,8 @@ import (
 // blank line, then the keymap — wide enough to wrap at a narrow width, so
 // it is wrapLines-wrapped like every other fixed block here), always
 // visible — never part of the scrollable window.
-func threadTailLines(width int) []string {
-	return wrapLines([]string{"", hintLine(width, threadHints...)}, width)
+func (m Model) threadTailLines() []string {
+	return wrapLines([]string{"", hintLine(m.width, m.leaveHints(threadHints)...)}, m.width)
 }
 
 // threadHeadLines renders the K8 Subject title plus any loading/error
@@ -53,7 +53,7 @@ func (m Model) threadScrollBudget() int {
 	if m.height <= 0 {
 		return chatWindowSentinel
 	}
-	budget := m.height - len(m.threadHeadLines()) - len(threadTailLines(m.width))
+	budget := m.height - len(m.threadHeadLines()) - len(m.threadTailLines())
 	if budget < 1 {
 		budget = 1
 	}
@@ -70,7 +70,7 @@ func (m Model) threadScrollBudget() int {
 // resetThreadScrollToSelected) the selected message's own starting line.
 func (m Model) threadViewLines() []string {
 	head := m.threadHeadLines()
-	tail := threadTailLines(m.width)
+	tail := m.threadTailLines()
 	body, _ := m.threadBodyLinesWithStarts()
 
 	budget := chatWindowSentinel

@@ -364,7 +364,7 @@ func (m Model) chatTailLines() []string {
 	case m.chatSendErr != nil:
 		lines = append(lines, "Error: "+humanError(m.chatSendErr))
 	}
-	lines = append(lines, hintLine(m.width, chatHints...))
+	lines = append(lines, hintLine(m.width, m.leaveHints(chatHints)...))
 	return wrapLines(lines, m.width)
 }
 

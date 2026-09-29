@@ -12,8 +12,8 @@ import (
 // part of the scrollable window. wrapLines-wrapped like every other
 // fixed block in the chat/thread views, so a narrow terminal wrapping it
 // onto two physical rows is already accounted for in the height budget.
-func detailTailLines(width int) []string {
-	return wrapLines([]string{"", hintLine(width, detailHints...)}, width)
+func (m Model) detailTailLines() []string {
+	return wrapLines([]string{"", hintLine(m.width, m.leaveHints(detailHints)...)}, m.width)
 }
 
 // detailHeadLines renders the always-visible Subject/From/Channel block
@@ -59,7 +59,7 @@ func (m Model) detailScrollBudget() int {
 	if m.height <= 0 {
 		return chatWindowSentinel
 	}
-	budget := m.height - len(m.detailHeadLines(m.readItem)) - len(detailTailLines(m.width))
+	budget := m.height - len(m.detailHeadLines(m.readItem)) - len(m.detailTailLines())
 	if budget < 1 {
 		budget = 1
 	}
@@ -75,15 +75,15 @@ func (m Model) detailScrollBudget() int {
 // screen — the same fix the chat/thread views already have.
 func (m Model) detailViewLines() []string {
 	if m.reading {
-		return append([]string{"Cargando…"}, detailTailLines(m.width)...)
+		return append([]string{"Cargando…"}, m.detailTailLines()...)
 	}
 	if m.readErr != nil {
-		return append([]string{fmt.Sprintf("No se pudo abrir: %s", humanError(m.readErr))}, detailTailLines(m.width)...)
+		return append([]string{fmt.Sprintf("No se pudo abrir: %s", humanError(m.readErr))}, m.detailTailLines()...)
 	}
 
 	item := m.readItem
 	head := m.detailHeadLines(item)
-	tail := detailTailLines(m.width)
+	tail := m.detailTailLines()
 	body := m.detailBodyLines(item)
 
 	budget := chatWindowSentinel
