@@ -389,9 +389,9 @@ type Retrier interface {
 	RetryUndecryptable(ctx context.Context, store Store) error
 }
 
-// Filter narrows a List query. Thread additionally narrows a Thread query
-// (Channel+Account+Thread together identify one conversation); List never
-// reads it.
+// Filter narrows a List query; every non-zero field applies. Thread also
+// narrows a Thread query, where Channel+Account+Thread together identify
+// one conversation.
 type Filter struct {
 	Channel Channel
 	Account string
