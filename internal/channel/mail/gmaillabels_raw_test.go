@@ -179,7 +179,7 @@ func TestStoreGmailLabelsOverRawConnection(t *testing.T) {
 	adapter := newAdapter(cfg, nil, fixedTokenSource("ya29.fake"), nil)
 	adapter.gmailTLSConfig = &tls.Config{InsecureSkipVerify: true}
 
-	err = adapter.storeGmailLabels(context.Background(), 42, labelOp{add: []string{"Important", "Follow up"}})
+	err = adapter.storeGmailLabels(context.Background(), "INBOX", 42, labelOp{add: []string{"Important", "Follow up"}})
 	if err != nil {
 		t.Fatalf("storeGmailLabels() error = %v", err)
 	}
@@ -214,7 +214,7 @@ func TestAdapterFetchGmailLabelsRaw(t *testing.T) {
 	adapter := newAdapter(cfg, nil, fixedTokenSource("ya29.fake"), nil)
 	adapter.gmailTLSConfig = &tls.Config{InsecureSkipVerify: true}
 
-	got, err := adapter.fetchGmailLabelsRaw(context.Background(), []imap.UID{100, 101})
+	got, err := adapter.fetchGmailLabelsRaw(context.Background(), "INBOX", []imap.UID{100, 101})
 	if err != nil {
 		t.Fatalf("fetchGmailLabelsRaw() error = %v", err)
 	}

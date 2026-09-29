@@ -868,7 +868,10 @@ func (s *Service) reconcileOrganize(ctx context.Context, item Item, op OrganizeO
 		return err
 	}
 	if updated.ID != item.ID {
-		if err := s.store.Delete(ctx, item.ID); err != nil {
+		// ErrNotFound means the adapter's own sync already saw the move
+		// and rekeyed the item itself (mail follows moves between synced
+		// folders, #53): the old id is gone either way.
+		if err := s.store.Delete(ctx, item.ID); err != nil && !errors.Is(err, ErrNotFound) {
 			return err
 		}
 	}

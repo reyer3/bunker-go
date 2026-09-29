@@ -1073,6 +1073,43 @@ func TestServiceOrganizeMoveRekeysStoreViaFolderMover(t *testing.T) {
 	}
 }
 
+// syncRekeyingMover is a spyMover whose move is also seen by the
+// adapter's own sync before OrganizeMove returns: mail follows moves
+// between synced folders (#53), so the old id may already be gone.
+type syncRekeyingMover struct {
+	*spyMover
+	store core.Store
+}
+
+func (m *syncRekeyingMover) OrganizeMove(ctx context.Context, id string, op core.OrganizeOp) (core.OrganizeMove, error) {
+	move, err := m.spyMover.OrganizeMove(ctx, id, op)
+	if err == nil {
+		m.store.Delete(ctx, id)
+	}
+	return move, err
+}
+
+// TestServiceOrganizeMoveToleratesSyncRekeyingFirst: the move itself
+// succeeded, so a store that no longer has the old id must not turn it
+// into an error.
+func TestServiceOrganizeMoveToleratesSyncRekeyingFirst(t *testing.T) {
+	oldID, newID := "mail:cl:100.4", "mail:cl:INBOX.Archive/200.9"
+	store := newMemStore(core.Item{ID: oldID, Channel: core.ChannelMail, Account: "cl", Meta: map[string]string{"folder": "INBOX"}})
+	reg := core.NewRegistry()
+	reg.Register(&syncRekeyingMover{
+		spyMover: &spyMover{channel: core.ChannelMail, account: "cl", move: core.OrganizeMove{ID: newID, Folder: "INBOX.Archive"}},
+		store:    store,
+	})
+	svc := core.NewService(store, reg)
+
+	if _, err := svc.Organize(context.Background(), oldID, core.OrganizeOp{MoveTo: "Archive"}, false); err != nil {
+		t.Fatalf("Organize returned error: %v", err)
+	}
+	if _, err := store.Get(context.Background(), newID); err != nil {
+		t.Errorf("store.Get(new id) after move: %v", err)
+	}
+}
+
 func TestServiceOrganizeDryRunNeverTouchesStoreOnMove(t *testing.T) {
 	oldID := "mail:cl:100.4"
 	item := core.Item{ID: oldID, Channel: core.ChannelMail, Account: "cl"}

@@ -44,6 +44,9 @@ type Adapter struct {
 	now              func() time.Time
 	backoff          func(attempt int) time.Duration
 	initialSyncLimit uint32
+	// folderPollInterval is how often Run polls the synced folders other
+	// than INBOX (#52); defaultFolderPollInterval, shortened by tests.
+	folderPollInterval time.Duration
 
 	// logger receives Run's lifecycle logging (R2): a runOnce failure,
 	// previously discarded, is logged at error level with channel/
@@ -112,6 +115,8 @@ func newAdapter(cfg AccountConfig, passwordSource PasswordSource, tokenSource To
 		backoff:          defaultBackoff,
 		initialSyncLimit: defaultInitialSyncLimit,
 		logger:           slog.Default(),
+
+		folderPollInterval: defaultFolderPollInterval,
 	}
 	if cfg.InitialSyncLimit > 0 {
 		a.initialSyncLimit = uint32(cfg.InitialSyncLimit)

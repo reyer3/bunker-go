@@ -53,6 +53,16 @@ initial_sync_limit = 200
 # text. Defaults to 64 when unset; 0 disables it (headers only, and a
 # body becomes searchable once the message is read).
 index_body_max_kb = 64
+# Which folders sync. INBOX (watched live) and Sent are always synced;
+# the other folders are polled every couple of minutes. By default that
+# is every folder except Trash, Junk/Spam and Drafts (and anything under
+# them); on Gmail it is just All Mail, which already holds every label.
+# sync_folders replaces that default with an explicit list, and
+# exclude_folders leaves folders (with their subfolders) out of either.
+# Names resolve like `bunker organize --move`: "Archive", a name under
+# folder_prefix such as "Clients.Acme", or the server's full name.
+# sync_folders = ["Archive", "Clients.Acme"]
+exclude_folders = ["Newsletters"]
 
 # --- WhatsApp: personal account, linked device ---
 [[account]]

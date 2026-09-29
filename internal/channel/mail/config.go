@@ -88,6 +88,17 @@ type AccountConfig struct {
 	// InitialSyncLimit, the zero value here means off, so hand-built test
 	// configs keep the header-only sync they were written against.
 	IndexBodyMaxKB int
+
+	// SyncFolders, configured as sync_folders, lists the folders Run
+	// keeps in sync besides INBOX and Sent (which are always synced),
+	// replacing the default choice (see planSyncFolders). Each entry is
+	// resolved like a move target: a friendly name ("Archive"), a name
+	// under the prefix ("Clients.Acme") or the server's full name.
+	SyncFolders []string
+	// ExcludeFolders, configured as exclude_folders, lists folders (and,
+	// with them, every folder under each) never synced, on top of the
+	// built-in Trash/Junk/Drafts exclusions.
+	ExcludeFolders []string
 }
 
 // ParseAccountConfig decodes acc.Options into an AccountConfig, applying
@@ -170,7 +181,50 @@ func ParseAccountConfig(acc config.Account) (AccountConfig, error) {
 		cfg.IndexBodyMaxKB = kb
 	}
 
+	for key, dst := range map[string]*[]string{
+		"sync_folders":    &cfg.SyncFolders,
+		"exclude_folders": &cfg.ExcludeFolders,
+	} {
+		list, err := stringListOption(acc.Options, key)
+		if err != nil {
+			return AccountConfig{}, fmt.Errorf("mail: account %q: %s: %v: %w", acc.Name, key, err, ErrInvalidConfig)
+		}
+		*dst = list
+	}
+
 	return cfg, nil
+}
+
+// stringListOption reads an optional list-of-strings option, which TOML
+// decodes as []interface{}. A present option that is not a list of
+// non-empty strings is an error rather than ignored, so a typo like
+// sync_folders = "Archive" is caught at startup instead of silently
+// syncing the default set.
+func stringListOption(options map[string]interface{}, key string) ([]string, error) {
+	raw, ok := options[key]
+	if !ok {
+		return nil, nil
+	}
+	var items []interface{}
+	switch v := raw.(type) {
+	case []interface{}:
+		items = v
+	case []string:
+		for _, s := range v {
+			items = append(items, s)
+		}
+	default:
+		return nil, fmt.Errorf("want a list of folder names, got %T", raw)
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		s, ok := item.(string)
+		if !ok || s == "" {
+			return nil, fmt.Errorf("want non-empty folder names, got %v", item)
+		}
+		out = append(out, s)
+	}
+	return out, nil
 }
 
 // intOption reads an integer option that TOML may have decoded as

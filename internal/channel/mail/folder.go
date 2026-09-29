@@ -55,6 +55,12 @@ type FolderMap struct {
 	// every name.
 	mailboxes map[string]struct{}
 	listed    bool
+
+	// order is every listed mailbox in LIST order, and attrs each one's
+	// attributes, so choosing which folders to sync (#52) can walk the
+	// hierarchy and skip Trash/Junk/Drafts by attribute.
+	order []string
+	attrs map[string][]string
 }
 
 // NewFolderMap builds a FolderMap for a server's hierarchy separator and
@@ -65,6 +71,7 @@ func NewFolderMap(separator byte, prefix string) *FolderMap {
 		prefix:     prefix,
 		specialUse: make(map[string]string),
 		mailboxes:  make(map[string]struct{}),
+		attrs:      make(map[string][]string),
 	}
 }
 
@@ -72,6 +79,17 @@ func NewFolderMap(separator byte, prefix string) *FolderMap {
 // (SpecialUseSent, ...) resolves to, as discovered from a LIST response.
 func (m *FolderMap) SetSpecialUse(attr, mailbox string) {
 	m.specialUse[attr] = mailbox
+	m.attrs[mailbox] = append(m.attrs[mailbox], attr)
+}
+
+// hasAttr reports whether LIST gave mailbox the attribute attr.
+func (m *FolderMap) hasAttr(mailbox, attr string) bool {
+	for _, a := range m.attrs[mailbox] {
+		if strings.EqualFold(a, attr) {
+			return true
+		}
+	}
+	return false
 }
 
 // SetMailboxes records the full set of mailboxes the server reported via
@@ -79,6 +97,7 @@ func (m *FolderMap) SetSpecialUse(attr, mailbox string) {
 // ResolveExisting can refuse one that does not.
 func (m *FolderMap) SetMailboxes(names []string) {
 	m.mailboxes = make(map[string]struct{}, len(names))
+	m.order = append([]string(nil), names...)
 	for _, name := range names {
 		m.mailboxes[name] = struct{}{}
 	}

@@ -42,7 +42,7 @@ func (a *Adapter) DownloadAttachment(ctx context.Context, item core.Item, index 
 	if err != nil {
 		return nil, fmt.Errorf("mail: download %s: %w", item.ID, err)
 	}
-	mailbox := folders.Resolve(folder)
+	mailbox := mailboxFor(folders, folder)
 
 	mbox, err := client.Select(mailbox, &imap.SelectOptions{ReadOnly: true}).Wait()
 	if err != nil {

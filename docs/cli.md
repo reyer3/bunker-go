@@ -589,13 +589,35 @@ mailbox is left as is. A server with no archive folder and no `\All`
 fails the move instead of creating one.
 
 For mail accounts, the daemon also keeps the store in sync with changes
-made outside bunker-go: while idling, an externally expunged message
-(moved or deleted in Roundcube/Gmail) is dropped from the store, and an
-externally toggled `\Seen` flag updates Unread; at startup, every
-stored INBOX item is compared against the server (`UID SEARCH`, keyed
-by UIDVALIDITY) and a UID no longer present is dropped, so a stale row
-left over from before the daemon last ran does not linger in `list` or
+made outside bunker-go: while idling, an externally toggled `\Seen` flag
+updates Unread, and a message expunged from a synced folder (moved or
+deleted in Roundcube/Gmail, noticed live in INBOX and on the next poll
+elsewhere, or at startup for anything that happened while the daemon
+was down) is looked up by Message-ID in every synced folder. Found
+there, the item moves with it: it is rekeyed to the new folder's id and
+keeps its stored body and read state. Only a message gone from every
+synced folder (deleted, or moved to Trash/Junk or an excluded folder) is
+dropped from the store, so a stale row does not linger in `list` or
 `counts`.
+
+### Mail folders and item ids
+
+The daemon syncs INBOX (watched live with IDLE), Sent, and by default
+every other folder except Trash, Junk/Spam and Drafts; on Gmail, All
+Mail instead of the label folders, storing a message that is also in
+INBOX or Sent only once, as that copy. Folders other than INBOX are
+polled every 2 minutes. `sync_folders` and `exclude_folders` in the
+account config change the set (see `docs/config.example.toml`).
+
+The item id names the mailbox, so `read`, `organize` and `download`
+act on the right one: `mail:<account>:<uidvalidity>.<uid>` for INBOX,
+`mail:<account>:sent.<uidvalidity>.<uid>` for Sent, and
+`mail:<account>:<mailbox>/<uidvalidity>.<uid>` for any other folder,
+with the mailbox name URL-path-escaped (e.g.
+`mail:cl:INBOX.Archive/1700000000.12`,
+`mail:example:%5BGmail%5D%2FAll%20Mail/5.33`). `Meta.folder` is
+`INBOX`, `Sent`, or the server's mailbox name, which is how the item
+shows which folder it is in.
 
 Item.Labels for mail is read back from the server, not just from
 Organize, in every one of these paths (initial sync, IDLE, startup

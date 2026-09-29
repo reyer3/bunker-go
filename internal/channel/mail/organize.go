@@ -49,7 +49,7 @@ func (a *Adapter) organize(ctx context.Context, id string, op core.OrganizeOp) (
 	if err != nil {
 		return core.OrganizeMove{}, fmt.Errorf("mail: organize %q: %w", id, err)
 	}
-	mailbox := folders.Resolve(folder)
+	mailbox := mailboxFor(folders, folder)
 
 	mbox, err := client.Select(mailbox, nil).Wait()
 	if err != nil {
@@ -66,7 +66,7 @@ func (a *Adapter) organize(ctx context.Context, id string, op core.OrganizeOp) (
 	}
 
 	if len(op.AddLabels) > 0 || len(op.RemoveLabels) > 0 {
-		if err := a.storeLabels(ctx, client, mbox, uid, op); err != nil {
+		if err := a.storeLabels(ctx, client, mailbox, mbox, uid, op); err != nil {
 			return core.OrganizeMove{}, fmt.Errorf("mail: organize %q: labels: %w", id, err)
 		}
 	}
@@ -88,9 +88,13 @@ func (a *Adapter) organize(ctx context.Context, id string, op core.OrganizeOp) (
 		if err != nil {
 			return core.OrganizeMove{}, fmt.Errorf("mail: organize %q: move to %q: %w", id, target, moveError(err))
 		}
-		result.Folder = target
+		// #52: the new id and folder use the same canonical folder a sync
+		// of the destination produces, so the store is rekeyed to exactly
+		// the item that folder's sync (now that it is synced too) upserts,
+		// never to an INBOX-style id that names the wrong mailbox.
+		result.Folder = canonicalFolder(folders, target)
 		if destUID, ok := singleDestUID(moveData); ok {
-			result.ID = fmt.Sprintf("mail:%s:%d.%d", account, moveData.UIDValidity, destUID)
+			result.ID = itemID(account, result.Folder, moveData.UIDValidity, destUID)
 		}
 		// moveData.UIDValidity/DestUIDs require UIDPLUS or IMAP4rev2; a
 		// server without either leaves result.ID as the (now-stale) old
@@ -143,9 +147,9 @@ func storeSeen(client *imapclient.Client, uid imap.UID, seen bool) error {
 // Neither capability is universal, so an account without one reports
 // core.ErrUnsupported with an explanation instead of silently doing
 // nothing.
-func (a *Adapter) storeLabels(ctx context.Context, client *imapclient.Client, mbox *imap.SelectData, uid imap.UID, op core.OrganizeOp) error {
+func (a *Adapter) storeLabels(ctx context.Context, client *imapclient.Client, mailbox string, mbox *imap.SelectData, uid imap.UID, op core.OrganizeOp) error {
 	if a.cfg.Gmail {
-		return a.storeGmailLabels(ctx, uid, labelOp{add: op.AddLabels, remove: op.RemoveLabels})
+		return a.storeGmailLabels(ctx, mailbox, uid, labelOp{add: op.AddLabels, remove: op.RemoveLabels})
 	}
 
 	if !hasWildcardFlag(mbox.PermanentFlags) {
