@@ -389,6 +389,17 @@ func (s *Store) Close() error {
 // Upsert inserts or replaces item and its labels. It is idempotent: an
 // Upsert with the same ID replaces the row instead of duplicating it, and
 // its labels are replaced with exactly the ones the item carries.
+//
+// One exception to "replaces" (#91): for mail, an empty body or empty
+// attachment list never overwrites a stored non-empty one. Mail reaches
+// the store in copies of different depth (a header-only or truncated
+// sync, a flags/keywords refresh, a full read), and without this a later
+// shallow copy would blank the body a read had stored and drop it from
+// the full-text index. Chat channels keep plain replace semantics: they
+// deliver each message whole (edits and revokes go through EditItem and
+// RevokeItem), so they never need the merge, and scoping it to mail
+// leaves their Upsert behavior exactly as it was. The FTS update trigger
+// indexes the merged value, since it reads new.body/new.attachments_json.
 func (s *Store) Upsert(ctx context.Context, item core.Item) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -421,8 +432,12 @@ func (s *Store) Upsert(ctx context.Context, item core.Item) error {
 		ON CONFLICT(id) DO UPDATE SET
 			channel=excluded.channel, account=excluded.account, thread=excluded.thread,
 			thread_name=excluded.thread_name, from_id=excluded.from_id, from_name=excluded.from_name,
-			to_json=excluded.to_json, subject=excluded.subject, body=excluded.body,
-			attachments_json=excluded.attachments_json, unread=excluded.unread,
+			to_json=excluded.to_json, subject=excluded.subject,
+			body=CASE WHEN excluded.channel = ? AND excluded.body = ''
+				THEN items.body ELSE excluded.body END,
+			attachments_json=CASE WHEN excluded.channel = ? AND excluded.attachments_json IN ('[]', 'null')
+				THEN items.attachments_json ELSE excluded.attachments_json END,
+			unread=excluded.unread,
 			from_me=excluded.from_me, timestamp=excluded.timestamp, meta_json=excluded.meta_json,
 			edited=excluded.edited, deleted=excluded.deleted
 	`,
@@ -430,6 +445,7 @@ func (s *Store) Upsert(ctx context.Context, item core.Item) error {
 		item.From.ID, item.From.Name, string(toJSON), item.Subject, item.Body,
 		string(attJSON), boolToInt(item.Unread), boolToInt(item.FromMe), item.Timestamp.UnixNano(), string(metaJSON),
 		boolToInt(item.Edited), boolToInt(item.Deleted),
+		string(core.ChannelMail), string(core.ChannelMail),
 	)
 	if err != nil {
 		return fmt.Errorf("store: upsert item: %w", err)
