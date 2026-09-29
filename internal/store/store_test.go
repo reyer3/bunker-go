@@ -75,7 +75,7 @@ func TestUpsertAndGetRoundTrips(t *testing.T) {
 	if len(got.To) != 1 || got.To[0] != want.To[0] {
 		t.Fatalf("To = %+v, want %+v", got.To, want.To)
 	}
-	if len(got.Attachments) != 1 || got.Attachments[0] != want.Attachments[0] {
+	if len(got.Attachments) != 1 || !got.Attachments[0].Equal(want.Attachments[0]) {
 		t.Fatalf("Attachments = %+v, want %+v", got.Attachments, want.Attachments)
 	}
 	if len(got.Labels) != 2 {
@@ -92,6 +92,37 @@ func TestUpsertAndGetRoundTrips(t *testing.T) {
 	}
 	if got.FromMe {
 		t.Fatalf("FromMe = true, want false")
+	}
+}
+
+// TestUpsertAndGetRoundTripsThumbnail checks an attachment's embedded
+// thumbnail (issue #18) survives the attachments_json column, so the TUI
+// can preview a stored message without downloading its media.
+func TestUpsertAndGetRoundTripsThumbnail(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	want := sampleItem()
+	want.Attachments = []core.Attachment{
+		{Name: "image", MIME: "image/jpeg", Size: 2048, Ref: "/v/abc", Thumbnail: []byte{0xff, 0xd8, 0xff, 0x00, 0x01}},
+		{Name: "f.pdf", MIME: "application/pdf", Size: 10, Ref: "ref1"},
+	}
+	if err := s.Upsert(ctx, want); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	got, err := s.Get(ctx, want.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(got.Attachments) != 2 {
+		t.Fatalf("Attachments = %+v, want 2", got.Attachments)
+	}
+	for i := range want.Attachments {
+		if !got.Attachments[i].Equal(want.Attachments[i]) {
+			t.Errorf("Attachments[%d] = %+v, want %+v", i, got.Attachments[i], want.Attachments[i])
+		}
+	}
+	if got.Attachments[1].Thumbnail != nil {
+		t.Errorf("Attachments[1].Thumbnail = %v, want nil when none was stored", got.Attachments[1].Thumbnail)
 	}
 }
 

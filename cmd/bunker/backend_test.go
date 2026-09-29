@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"sort"
 	"time"
 
@@ -37,6 +38,10 @@ type fakeBackend struct {
 	downloadCalls []downloadCall
 	avatarCalls   []avatarCall
 	threadCalls   []threadCall
+
+	// downloadData, when set, is the bytes Download writes to destPath
+	// per attachment index, as the daemon does.
+	downloadData map[int][]byte
 
 	receipt        core.Receipt
 	sendPlan       core.Plan // overrides Send's default Plan when Action != ""
@@ -296,6 +301,12 @@ func (f *fakeBackend) Download(ctx context.Context, id string, index int, destPa
 	f.downloadCalls = append(f.downloadCalls, downloadCall{ID: id, Index: index, DestPath: destPath, Opts: opts})
 	if f.downloadErr != nil {
 		return core.DownloadResult{}, f.downloadErr
+	}
+	if data, ok := f.downloadData[index]; ok {
+		if err := os.WriteFile(destPath, data, 0o600); err != nil {
+			return core.DownloadResult{}, err
+		}
+		return core.DownloadResult{Path: destPath, Bytes: int64(len(data))}, nil
 	}
 	if f.downloadResult.Path != "" {
 		return f.downloadResult, nil
