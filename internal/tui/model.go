@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"io"
 	"os"
 	"time"
@@ -273,6 +274,20 @@ type Model struct {
 	externalOpen func(id string) error
 	openID       string
 	openErr      error
+
+	// herdr integration (issue #82, herdr.go): agentAsk asks a coding
+	// agent about a conversation ("a"), asking while it runs;
+	// unreadReport publishes the unread total after each poll and
+	// messageNotify replaces OSC 777 notifications. The *Failed flags
+	// keep a persistent failure from flashing on every poll.
+	agentAsk             func(ctx context.Context, itemID string) error
+	asking               bool
+	unreadReport         func(n int) error
+	unreadReportFailed   bool
+	messageNotify        func(body string) error
+	messageNotifyFailed  bool
+	lastMessageNotifyAt  time.Time
+	pendingMessageNotify int
 }
 
 // numTabs is "Todo" plus one tab per channelOrder entry.

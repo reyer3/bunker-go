@@ -177,3 +177,27 @@ func TestLoadReadsAppCommand(t *testing.T) {
 		t.Errorf("App.Command = %q", cfg.App.Command)
 	}
 }
+
+func TestLoadReadsHerdrNotifyOffByDefault(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		body string
+		want bool
+	}{
+		{"", false},
+		{"[herdr]\nnotify = true\n", true},
+		{"[herdr]\nnotify = false\n", false},
+	} {
+		path := filepath.Join(dir, "config.toml")
+		if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := config.Load(path)
+		if err != nil {
+			t.Fatalf("Load(%q): %v", tc.body, err)
+		}
+		if cfg.Herdr.Notify != tc.want {
+			t.Errorf("Load(%q): Herdr.Notify = %v, want %v", tc.body, cfg.Herdr.Notify, tc.want)
+		}
+	}
+}

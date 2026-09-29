@@ -144,11 +144,12 @@ func herdrErrorMessage(out []byte) (string, bool) {
 
 // herdrVerb names a herdr command for error messages ("pane close"),
 // without the ids and flags that follow it: herdr's subcommands are
-// lowercase words, and its ids ("w1:p1") and flags are not.
+// lowercase words, some hyphenated ("report-metadata"), and its ids
+// ("w1:p1") and flags are not.
 func herdrVerb(args []string) string {
 	var verb []string
 	for _, a := range args {
-		if a == "" || strings.Trim(a, "abcdefghijklmnopqrstuvwxyz") != "" {
+		if a == "" || strings.HasPrefix(a, "-") || strings.Trim(a, "abcdefghijklmnopqrstuvwxyz-") != "" {
 			break
 		}
 		verb = append(verb, a)
