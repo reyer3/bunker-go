@@ -21,9 +21,16 @@ type inboxKey struct {
 // groupUnread orders the loaded, unread snapshot newest first. A missing
 // thread has its own item-ID key, distinct even from a real thread with that ID.
 func groupUnread(items []core.Item) []inboxGroup {
+	return groupItems(items, true)
+}
+
+// groupItems groups items by conversation, newest first; unreadOnly
+// keeps only unread ones (the inbox), while query results (query.go)
+// group every match, read or not.
+func groupItems(items []core.Item, unreadOnly bool) []inboxGroup {
 	ordered := make([]core.Item, 0, len(items))
 	for _, item := range items {
-		if item.Unread {
+		if item.Unread || !unreadOnly {
 			ordered = append(ordered, item)
 		}
 	}

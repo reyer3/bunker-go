@@ -97,8 +97,34 @@ type Model struct {
 	unreadOnOpen string
 	// filterQuery narrows the inbox; filtering is true while it is typed
 	// (issue #39, filter.go).
-	filterQuery     string
-	filtering       bool
+	filterQuery string
+	filtering   bool
+	// filterErr is the typed filter's parse error, shown on the filter
+	// line without touching the text; filterIsQuery is true when it
+	// holds an operator (issue #62, query.go).
+	filterErr     error
+	filterIsQuery bool
+	// Daemon query results (issue #62, query.go): while queryActive, the
+	// sections show queryGroups (every loaded page of queryText's
+	// matches, grouped by conversation) instead of the inbox groups.
+	// queryCursor resumes the next page ("" when there is none),
+	// queryToken discards a stale page and queryDebounceToken a stale
+	// debounce tick. queryNoPaging remembers that the daemon cannot page
+	// queries, so the filter stays in memory for the session.
+	queryActive        bool
+	queryText          string
+	queryItems         []core.Item
+	queryGroups        []inboxGroup
+	queryCursor        string
+	queryLoading       bool
+	queryErr           error
+	queryToken         uint64
+	queryDebounceToken uint64
+	queryNoPaging      bool
+	// folderLayouts is each mail account's folder prefix and separator
+	// (folder.go), keyed by account name.
+	folderLayouts map[string]folderLayout
+
 	glyphs          map[core.Channel]string
 	render          *lipgloss.Renderer
 	now             func() time.Time
@@ -211,6 +237,9 @@ type Model struct {
 	// conversation, which shares the same Subject once mail threading
 	// normalizes "Re: "/"Fwd: " prefixes).
 	threadSubject string
+	// threadFolder is the opening item's short mail folder name
+	// (folder.go), shown dimmed after the subject; "" for INBOX/Sent.
+	threadFolder string
 	// threadBodies/threadBodyLoading/threadBodyErr back K8's body-fetch
 	// cache: mail sync stores headers only (conversation-view.md's
 	// reported bug — a synced Item.Body is empty until fetched), so an
@@ -362,11 +391,14 @@ func (m Model) Init() tea.Cmd {
 func Run(client Client, input io.Reader, output io.Writer, opts ...Option) error {
 	glyphs := style.Glyphs
 	var notify *bool
+	var folderLayouts map[string]folderLayout
 	if cfg, err := config.LoadDefault(); err == nil {
 		glyphs = style.ResolveGlyphs(cfg.Render.Glyphs)
 		notify = cfg.Tui.Notify
+		folderLayouts = folderLayoutsFromConfig(*cfg)
 	}
 	model := NewModel(client, opts...).withGlyphs(glyphs)
+	model.folderLayouts = folderLayouts
 	model.render = lipgloss.NewRenderer(output)
 	output = lockOutput(output)
 	model.notifyEnabled = resolveNotifyEnabled(notify, os.Getenv)

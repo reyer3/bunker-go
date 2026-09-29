@@ -48,7 +48,7 @@ func TestBuildRowWidthMathHandlesRealWorldText(t *testing.T) {
 
 		for _, width := range []int{20, 24, 36, 40, 60, 100} {
 			for _, selected := range []bool{false, true} {
-				line1, line2 := buildRow(group, selected, width, glyphs, counts, styles, now)
+				line1, line2 := buildRow(group, selected, width, glyphs, counts, styles, now, "")
 				if w := runewidth.StringWidth(stripANSI(line1)); w > width {
 					t.Errorf("profile=%v width=%d selected=%v: line1 %q is %d cells wide", profile, width, selected, line1, w)
 				}
@@ -98,7 +98,7 @@ func TestInboxDegradesGracefullyForNoColorAndNarrowWidth(t *testing.T) {
 	}
 	// The one-line fallback drops the dim "Sender: body" preview: the
 	// row line and its own would-be preview line collapse into one.
-	line1, line2 := buildRow(inboxGroup{items: client.items}, false, narrowWidth-1, style.Glyphs, client.counts, newRowStyles(renderer), time.Now())
+	line1, line2 := buildRow(inboxGroup{items: client.items}, false, narrowWidth-1, style.Glyphs, client.counts, newRowStyles(renderer), time.Now(), "")
 	if line2 != "" {
 		t.Errorf("narrow width still produced a second preview line: %q / %q", line1, line2)
 	}

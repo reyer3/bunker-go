@@ -80,6 +80,7 @@ func (m Model) openThread(item core.Item) (Model, tea.Cmd) {
 		m.threadKey = item.ID
 	}
 	m.threadSubject = item.Subject
+	m.threadFolder = m.folderTag(item)
 	m.threadItems = nil
 	m.threadExpanded = nil
 	m.threadSelected = 0
@@ -211,7 +212,7 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if m.selected < len(m.visibleRows())-1 {
 			m.selected++
 		}
-		return m, nil
+		return m.maybeLoadMore()
 	case tea.MouseButtonLeft:
 		if msg.Action != tea.MouseActionPress {
 			return m, nil

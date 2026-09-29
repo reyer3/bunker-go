@@ -188,7 +188,22 @@ wheel, the footer keymap hint always keeps `q` visible even at a narrow
 `/` filters the inbox: typing narrows it to conversations whose name,
 sender, subject or text contains the query, ignoring case and accents.
 `Enter` keeps the filter and returns to the list, and `Esc` clears it. A
-section the filter empties says `sin coincidencias`. An opened chat says
+section the filter empties says `sin coincidencias`. Text with a query
+operator (`from:`, `is:unread`, `in:Archive`, `before:7d`, ... the
+grammar of `bunker list --query`) searches the whole store instead: the
+daemon answers it through `list_page` on `Enter` or after a short pause
+in typing, its results replace the inbox (Mail rows are listed directly,
+not under sender headers) until `Esc`, and moving past the last result
+loads the next page. The status line shows the active query and how many
+conversations it found; a typo such as `foo:` shows `consulta inválida:
+operador desconocido "foo:"` on the filter line and keeps the text. A
+daemon without `list_page` keeps the in-memory filter and says so.
+
+A mail row from a folder other than INBOX shows the folder dimmed beside
+its time, and the mail thread header shows it after the subject, in a
+short form: the account's `folder_prefix`/`folder_sep` are stripped
+(`INBOX.Clientes.Acme` reads `Clientes/Acme`) and Gmail's special folders
+are named in Spanish (`[Gmail]/All Mail` reads `Todos`). An opened chat says
 `cargando mensajes…` while it loads and `sin mensajes todavía` when there
 is no history yet.
 

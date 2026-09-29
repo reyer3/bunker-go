@@ -44,6 +44,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.chatTempFiles = append(m.chatTempFiles, msg.path)
 		return m.addChatAttachments(msg.path), nil
+	case queryDebounceMsg:
+		return m.handleQueryDebounce(msg)
+	case queryPageMsg:
+		return m.handleQueryPage(msg)
 	case unreadDoneMsg:
 		return m.handleUnreadDone(msg)
 	case openItemLoadedMsg:
@@ -462,7 +466,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.selected < len(m.visibleRows())-1 {
 					m.selected++
 				}
-				break
+				return m.maybeLoadMore()
 			}
 			m.detailScroll = clampScroll(m.detailScroll+1, len(m.detailBodyLines(m.readItem)), m.detailScrollBudget())
 		case "k", "up":
