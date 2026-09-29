@@ -29,10 +29,14 @@ var friendlyToSpecialUse = map[string]string{
 	"Archives": SpecialUseArchive,
 }
 
-// archiveSpellings lists the names servers commonly give an archive
-// mailbox that does not advertise \Archive. Dovecot/webmail installs use
-// either, so asking for one must still find the other.
-var archiveSpellings = []string{"Archive", "Archives"}
+// unadvertisedSpellings lists, per special-use role, the names servers
+// commonly give that mailbox when they do not advertise its attribute.
+// Dovecot/webmail installs use either spelling ("Archive"/"Archives",
+// "Junk"/"Spam"), so asking for one must still find the other.
+var unadvertisedSpellings = map[string][]string{
+	SpecialUseArchive: {"Archive", "Archives"},
+	SpecialUseJunk:    {"Junk", "Spam"},
+}
 
 // FolderMap resolves a friendly folder name ("Archives", "Sent") to the
 // mailbox path a server actually understands, honoring that server's
@@ -94,11 +98,11 @@ func (m *FolderMap) Resolve(friendly string) string {
 			return mailbox
 		}
 	}
-	// Many Dovecot/webmail servers keep an archive folder without
-	// advertising \Archive, under either spelling; a listed one beats a
-	// prefix-joined guess that may not exist.
-	if hasAttr && attr == SpecialUseArchive && m.listed {
-		if mailbox, ok := m.findArchive(friendly); ok {
+	// Many Dovecot/webmail servers keep an archive or junk folder
+	// without advertising its attribute, under either spelling; a listed
+	// one beats a prefix-joined guess that may not exist.
+	if spellings, ok := unadvertisedSpellings[attr]; ok && hasAttr && m.listed {
+		if mailbox, ok := m.findListed(friendly, spellings); ok {
 			return mailbox
 		}
 	}
@@ -117,12 +121,13 @@ func (m *FolderMap) ResolveExisting(friendly string) (string, error) {
 	return "", fmt.Errorf("mail: folder %q (%s) does not exist on the server and bunker-go never creates one", friendly, mailbox)
 }
 
-// findArchive looks for an existing archive mailbox, trying the requested
-// spelling first and each spelling with the configured prefix before
-// without it (the prefixed form is where a Dovecot-style server keeps it).
-func (m *FolderMap) findArchive(friendly string) (string, bool) {
+// findListed looks for an existing mailbox under any of a role's
+// spellings, trying the requested one first and each spelling with the
+// configured prefix before without it (the prefixed form is where a
+// Dovecot-style server keeps it).
+func (m *FolderMap) findListed(friendly string, alternatives []string) (string, bool) {
 	spellings := []string{friendly}
-	for _, s := range archiveSpellings {
+	for _, s := range alternatives {
 		if s != friendly {
 			spellings = append(spellings, s)
 		}
