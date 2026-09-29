@@ -513,13 +513,20 @@ func (s *Store) List(ctx context.Context, filter core.Filter) ([]core.Item, erro
 		conds = append(conds, "i.account = ?")
 		args = append(args, filter.Account)
 	}
+	if filter.Thread != "" {
+		conds = append(conds, "i.thread = ?")
+		args = append(args, filter.Thread)
+	}
 	if filter.Unread != nil {
 		conds = append(conds, "i.unread = ?")
 		args = append(args, boolToInt(*filter.Unread))
 	}
 	if filter.Query != "" {
-		conds = append(conds, "(i.subject LIKE ? OR i.body LIKE ?)")
-		like := "%" + filter.Query + "%"
+		// SQLite's LIKE has no default escape character, so without
+		// ESCAPE a user query such as "50%" or "a_b" would act as a
+		// wildcard pattern instead of matching literally.
+		conds = append(conds, `(i.subject LIKE ? ESCAPE '\' OR i.body LIKE ? ESCAPE '\')`)
+		like := "%" + escapeLike(filter.Query) + "%"
 		args = append(args, like, like)
 	}
 	if len(conds) > 0 {
@@ -560,6 +567,15 @@ func (s *Store) List(ctx context.Context, filter core.Filter) ([]core.Item, erro
 		}
 	}
 	return items, nil
+}
+
+// likeEscaper escapes LIKE's wildcards (and the escape character itself)
+// for use with ESCAPE '\'.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+// escapeLike makes s match literally inside a LIKE ... ESCAPE '\' pattern.
+func escapeLike(s string) string {
+	return likeEscaper.Replace(s)
 }
 
 // defaultThreadLimit mirrors core.Service's own default: Thread is safe
