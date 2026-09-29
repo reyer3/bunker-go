@@ -364,7 +364,12 @@ func (m Model) chatTailLines() []string {
 	case m.chatSendErr != nil:
 		lines = append(lines, "Error: "+humanError(m.chatSendErr))
 	}
-	lines = append(lines, hintLine(m.width, m.leaveHints(chatHints)...))
+	if flash, ok := m.currentFlash(); ok {
+		// The chat has no status line, and a "bunker open" pane has no
+		// inbox to show a notice (such as the "a" ask's) on.
+		lines = append(lines, flash)
+	}
+	lines = append(lines, hintLine(m.width, m.withAskHint(m.leaveHints(chatHints), "Alt+A")...))
 	return wrapLines(lines, m.width)
 }
 

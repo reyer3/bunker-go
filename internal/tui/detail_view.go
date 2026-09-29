@@ -13,7 +13,18 @@ import (
 // fixed block in the chat/thread views, so a narrow terminal wrapping it
 // onto two physical rows is already accounted for in the height budget.
 func (m Model) detailTailLines() []string {
-	return wrapLines([]string{"", hintLine(m.width, m.leaveHints(detailHints)...)}, m.width)
+	return wrapLines([]string{m.tailNotice(), hintLine(m.width, m.withAskHint(m.leaveHints(detailHints), "a")...)}, m.width)
+}
+
+// tailNotice is the line above a detail view's key hints: blank, or the
+// current flash, since these views have no status line and a "bunker
+// open" pane has no inbox to show a notice on. It takes the blank line's
+// place so the height budget does not change.
+func (m Model) tailNotice() string {
+	if flash, ok := m.currentFlash(); ok {
+		return flash
+	}
+	return ""
 }
 
 // detailHeadLines renders the always-visible Subject/From/Channel block

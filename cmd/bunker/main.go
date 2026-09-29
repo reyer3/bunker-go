@@ -55,6 +55,7 @@ func run(args []string, stdin *os.File, stdout, stderr *os.File) int {
 		startTUI:   startTUI,
 		getenv:     os.Getenv,
 		herdrRun:   execHerdrRunner(os.Getenv, exec.LookPath),
+		loadConfig: config.LoadDefault,
 	})
 }
 
@@ -67,6 +68,19 @@ type runDependencies struct {
 	// A nil getenv reads as an empty environment, so tests stay hermetic.
 	getenv   func(string) string
 	herdrRun herdrRunner
+	// loadConfig reads config.toml for the [herdr] options; nil reads as
+	// no config, so tests stay hermetic.
+	loadConfig func() (*config.Config, error)
+}
+
+// herdrNotifyEnabled reports [herdr] notify. A missing or unreadable
+// config means the default, off: the option is opt-in.
+func (d runDependencies) herdrNotifyEnabled() bool {
+	if d.loadConfig == nil {
+		return false
+	}
+	cfg, err := d.loadConfig()
+	return err == nil && cfg != nil && cfg.Herdr.Notify
 }
 
 func (d runDependencies) env(key string) string {
@@ -85,6 +99,11 @@ type tuiLaunch struct {
 	// opener opens a conversation outside this TUI (a herdr pane); nil
 	// opens it in place.
 	opener func(id string) error
+	// asker, unread and notify are the herdr side-panel hooks (issue
+	// #82); each is nil outside herdr.
+	asker  func(ctx context.Context, itemID string) error
+	unread func(n int) error
+	notify func(body string) error
 }
 
 func (l tuiLaunch) options() []tui.Option {
@@ -97,6 +116,15 @@ func (l tuiLaunch) options() []tui.Option {
 	}
 	if l.openID != "" {
 		opts = append(opts, tui.WithOpenItem(l.openID))
+	}
+	if l.asker != nil {
+		opts = append(opts, tui.WithAgentAsker(l.asker))
+	}
+	if l.unread != nil {
+		opts = append(opts, tui.WithUnreadReporter(l.unread))
+	}
+	if l.notify != nil {
+		opts = append(opts, tui.WithMessageNotifier(l.notify))
 	}
 	return opts
 }
