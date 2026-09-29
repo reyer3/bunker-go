@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -182,5 +183,75 @@ func TestHandleHistorySyncLogsUpsertErrorWithChannelAccountAttrs(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "channel=whatsapp") || !strings.Contains(out, "account=personal") {
 		t.Fatalf("log output = %q, want channel=whatsapp and account=personal attributes", out)
+	}
+}
+
+// TestEditRevokeReactionLogSinkErrors proves #73: when the store rejects
+// an edit, revoke or reaction write, the handler logs it at error level
+// with its op name instead of discarding it.
+func TestEditRevokeReactionLogSinkErrors(t *testing.T) {
+	chat := mustJID(t, "1234@s.whatsapp.net")
+	cases := []struct {
+		name string
+		fail func(*spySink)
+		msg  *waE2E.Message
+		op   string
+	}{
+		{
+			name: "edit",
+			fail: func(s *spySink) { s.editErr = errBoom },
+			msg: &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{
+				Key:           &waCommon.MessageKey{ID: strPtr("M1")},
+				Type:          waE2E.ProtocolMessage_MESSAGE_EDIT.Enum(),
+				EditedMessage: &waE2E.Message{Conversation: strPtr("hola editado")},
+			}},
+			op: "op=edit_item",
+		},
+		{
+			name: "revoke",
+			fail: func(s *spySink) { s.revokeErr = errBoom },
+			msg: &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{
+				Key:  &waCommon.MessageKey{ID: strPtr("M1")},
+				Type: waE2E.ProtocolMessage_REVOKE.Enum(),
+			}},
+			op: "op=revoke_item",
+		},
+		{
+			name: "reaction",
+			fail: func(s *spySink) { s.reactionErr = errBoom },
+			msg: &waE2E.Message{ReactionMessage: &waE2E.ReactionMessage{
+				Key:  &waCommon.MessageKey{ID: strPtr("M1")},
+				Text: strPtr("+1"),
+			}},
+			op: "op=set_reaction",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			buf := captureSlogDefault(t)
+			cli := newFakeWAClient()
+			cli.linked = true
+			sink := newSpySink()
+			tc.fail(sink)
+			a := newTestAdapter("personal", cli)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			go a.Run(ctx, sink)
+			waitFor(t, func() bool { return cli.IsConnected() })
+
+			cli.emit(&events.Message{
+				Info:    types.MessageInfo{MessageSource: types.MessageSource{Chat: chat, Sender: chat}, ID: "M2", Timestamp: time.Now()},
+				Message: tc.msg,
+			})
+
+			waitForLogContains(t, buf, tc.op)
+			out := buf.String()
+			for _, want := range []string{"level=ERROR", "channel=whatsapp", "account=personal", "error=boom"} {
+				if !strings.Contains(out, want) {
+					t.Fatalf("log output = %q, want it to contain %q", out, want)
+				}
+			}
+		})
 	}
 }

@@ -123,6 +123,35 @@ func TestSendHumanEmulationRunsOnErrorPathToo(t *testing.T) {
 	}
 }
 
+// TestSendBoundsAStalledPresenceRevoke proves #74: when the trailing
+// presence-unavailable call never returns (a stalled connection), Send
+// still returns once presenceRevokeTimeout elapses, and the failure is
+// logged. The caller's ctx has no deadline, so only the bound can end it.
+func TestSendBoundsAStalledPresenceRevoke(t *testing.T) {
+	buf := captureSlogDefault(t)
+	cli := newFakeWAClient()
+	cli.presenceUnavailableHang = true
+	a := newTestAdapter("personal", cli, time.Millisecond)
+	a.presenceRevokeTimeout = 20 * time.Millisecond
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := a.Send(context.Background(), core.Outgoing{To: []string{"1234@s.whatsapp.net"}, Body: "hola"})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Send() error = %v, want nil: the message was delivered", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Send() did not return: the presence revoke is unbounded")
+	}
+	waitForLogContains(t, buf, "presence unavailable failed")
+	waitForLogContains(t, buf, "op=send")
+}
+
 // TestSendMediaPerformsHumanEmulationOnceForTheWholeBatch covers T13(b):
 // a caption is typed once, then every image is sent — not one
 // composing/paused cycle per image.
