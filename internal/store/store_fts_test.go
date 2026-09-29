@@ -324,3 +324,80 @@ func TestMigrationV3BackfillsFTSIndexFromExistingRows(t *testing.T) {
 	assertQuery(t, s, "jose", "mail:cl:1")
 	assertQuery(t, s, "editado", "whatsapp:personal:1")
 }
+
+// TestUpsertMailKeepsBodyOverHeaderOnlyCopy (#91): mail sync upserts
+// header-only copies, so one landing after a read (which stored the full
+// body and attachments) must not blank them or drop the body from the
+// index, while the header fields it carries still replace the old ones.
+func TestUpsertMailKeepsBodyOverHeaderOnlyCopy(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	full := ftsItem("mail:cl:INBOX.1.7")
+	full.Subject = "asunto viejo"
+	full.Body = "el informe trimestral va adjunto"
+	full.Attachments = []core.Attachment{{Name: "planilla.xlsx", MIME: "application/vnd.ms-excel", Size: 10, Ref: "part-1"}}
+	upsertAll(t, s, full)
+
+	headers := ftsItem(full.ID)
+	headers.Subject = "asunto nuevo"
+	headers.Unread = true
+	upsertAll(t, s, headers)
+
+	got, err := s.Get(ctx, full.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Body != full.Body {
+		t.Errorf("Body = %q, want the stored %q kept", got.Body, full.Body)
+	}
+	if len(got.Attachments) != 1 || got.Attachments[0].Name != "planilla.xlsx" {
+		t.Errorf("Attachments = %+v, want the stored attachment kept", got.Attachments)
+	}
+	if got.Subject != "asunto nuevo" || !got.Unread {
+		t.Errorf("Subject/Unread = %q/%v, want the header-only copy's values", got.Subject, got.Unread)
+	}
+	assertQuery(t, s, "trimestral", full.ID)
+	assertQuery(t, s, "planilla", full.ID)
+	assertQuery(t, s, "nuevo", full.ID)
+	assertQuery(t, s, "viejo")
+
+	// An explicitly empty attachment list is empty too, not a replacement.
+	headers.Attachments = []core.Attachment{}
+	upsertAll(t, s, headers)
+	assertQuery(t, s, "planilla", full.ID)
+
+	// A non-empty body still replaces the stored one.
+	headers.Body = "texto corregido"
+	upsertAll(t, s, headers)
+	assertQuery(t, s, "corregido", full.ID)
+	assertQuery(t, s, "trimestral")
+}
+
+// TestUpsertChatStillReplacesBody: the #91 merge is scoped to mail, so a
+// chat Upsert with an empty body keeps replacing the stored one.
+func TestUpsertChatStillReplacesBody(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	it := ftsItem("whatsapp:personal:2")
+	it.Channel = core.ChannelWhatsApp
+	it.Account = "personal"
+	it.Body = "hola mundo"
+	it.Attachments = []core.Attachment{{Name: "foto.jpg"}}
+	upsertAll(t, s, it)
+
+	it.Body = ""
+	it.Attachments = nil
+	upsertAll(t, s, it)
+
+	got, err := s.Get(ctx, it.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Body != "" || len(got.Attachments) != 0 {
+		t.Errorf("Body/Attachments = %q/%+v, want both replaced by the empty copy", got.Body, got.Attachments)
+	}
+	assertQuery(t, s, "mundo")
+	assertQuery(t, s, "foto")
+}

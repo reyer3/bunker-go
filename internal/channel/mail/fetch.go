@@ -102,6 +102,15 @@ func (a *Adapter) Fetch(ctx context.Context, id string) (core.Item, error) {
 // plain-text body (text/plain preferred, text/html rendered via
 // HTMLToText as a fallback) plus metadata for every attachment part.
 func parseBody(raw []byte) (body string, attachments []core.Attachment, err error) {
+	return walkBody(raw, false)
+}
+
+// walkBody is parseBody's implementation. truncated says raw was cut
+// short on purpose (sync's bounded body fetch, bodytext.go): the MIME
+// structure then ends abruptly, so a read error stops the walk and keeps
+// the text gathered so far instead of failing, and the attachments are
+// meaningless (their sizes are cut too) and must not be used.
+func walkBody(raw []byte, truncated bool) (body string, attachments []core.Attachment, err error) {
 	reader, err := gomail.CreateReader(bytes.NewReader(raw))
 	if err != nil && !gomessage.IsUnknownCharset(err) {
 		return "", nil, fmt.Errorf("read message: %w", err)
@@ -110,13 +119,17 @@ func parseBody(raw []byte) (body string, attachments []core.Attachment, err erro
 
 	var plainText, htmlText string
 	haveText := false
+	stop := false
 
-	for {
+	for !stop {
 		part, err := reader.NextPart()
 		if err == io.EOF {
 			break
 		}
 		if err != nil && !gomessage.IsUnknownCharset(err) {
+			if truncated {
+				break
+			}
 			return "", nil, fmt.Errorf("read part: %w", err)
 		}
 
@@ -124,7 +137,7 @@ func parseBody(raw []byte) (body string, attachments []core.Attachment, err erro
 		case *gomail.InlineHeader:
 			contentType, _, _ := h.ContentType()
 			data, readErr := io.ReadAll(part.Body)
-			if readErr != nil {
+			if readErr != nil && !truncated {
 				return "", nil, fmt.Errorf("read inline part: %w", readErr)
 			}
 			switch {
@@ -134,11 +147,18 @@ func parseBody(raw []byte) (body string, attachments []core.Attachment, err erro
 			case strings.EqualFold(contentType, "text/html") && htmlText == "":
 				htmlText = string(data)
 			}
+			if readErr != nil {
+				stop = true // truncated: nothing readable follows the cut
+			}
 		case *gomail.AttachmentHeader:
 			contentType, _, _ := h.ContentType()
 			filename, _ := h.Filename()
 			data, readErr := io.ReadAll(part.Body)
 			if readErr != nil {
+				if truncated {
+					stop = true
+					break
+				}
 				return "", nil, fmt.Errorf("read attachment part: %w", readErr)
 			}
 			attachments = append(attachments, core.Attachment{
