@@ -230,6 +230,10 @@ type (
 		Error    string             `json:"error,omitempty" jsonschema:"why the daemon could not be reached"`
 		Hint     string             `json:"hint,omitempty" jsonschema:"what the user can do about it"`
 		Adapters []mcpAdapterHealth `json:"adapters" jsonschema:"one entry per configured account"`
+		// UpdateAvailable and LatestVersion are the daemon's cached
+		// release check (issue #105).
+		UpdateAvailable bool   `json:"update_available" jsonschema:"whether a newer bunker release exists; the user updates with bunker update"`
+		LatestVersion   string `json:"latest_version,omitempty" jsonschema:"the newer release's version, when update_available"`
 	}
 	mcpAdapterHealth struct {
 		Channel   string `json:"channel"`
@@ -502,11 +506,17 @@ func mcpHealth(ctx context.Context, dial mcpDialer) (*mcp.CallToolResult, mcpHea
 	if closer != nil {
 		defer closer.Close()
 	}
-	adapters, err := backend.Health(ctx)
+	report, err := backend.HealthReport(ctx)
 	if err != nil {
 		return nil, mcpHealthOut{}, err
 	}
-	out := mcpHealthOut{DaemonUp: true, Adapters: make([]mcpAdapterHealth, 0, len(adapters))}
+	adapters := report.Adapters
+	out := mcpHealthOut{
+		DaemonUp:        true,
+		Adapters:        make([]mcpAdapterHealth, 0, len(adapters)),
+		UpdateAvailable: report.Update.Available,
+		LatestVersion:   report.Update.Latest,
+	}
 	for _, a := range adapters {
 		h := mcpAdapterHealth{
 			Channel: string(a.Channel), Account: a.Account, State: string(a.State),

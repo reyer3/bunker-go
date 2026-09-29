@@ -201,3 +201,27 @@ func TestLoadReadsHerdrNotifyOffByDefault(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadReadsUpdateCheckOnByDefault(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		body string
+		want bool
+	}{
+		{"", true},
+		{"[update]\ncheck = true\n", true},
+		{"[update]\ncheck = false\n", false},
+	} {
+		path := filepath.Join(dir, "config.toml")
+		if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := config.Load(path)
+		if err != nil {
+			t.Fatalf("Load(%q): %v", tc.body, err)
+		}
+		if cfg.Update.Check != tc.want {
+			t.Errorf("Load(%q): Update.Check = %v, want %v", tc.body, cfg.Update.Check, tc.want)
+		}
+	}
+}

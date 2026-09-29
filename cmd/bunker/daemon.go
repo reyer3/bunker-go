@@ -8,16 +8,19 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/reyer3/bunker-go/internal/config"
 	"github.com/reyer3/bunker-go/internal/core"
 	"github.com/reyer3/bunker-go/internal/rpc"
 	"github.com/reyer3/bunker-go/internal/store"
+	"github.com/reyer3/bunker-go/internal/update"
 )
 
 func cmdDaemonMain(args []string, stdout, stderr io.Writer) int {
@@ -55,7 +58,7 @@ func runDaemon(ctx context.Context, stateDir, avatarCacheDir, socketPath string,
 	}
 	defer st.Close()
 
-	reg, err := loadRegistry(fakeMode, stdout)
+	reg, cfg, err := loadRegistry(fakeMode, stdout)
 	if err != nil {
 		return err
 	}
@@ -64,9 +67,16 @@ func runDaemon(ctx context.Context, stateDir, avatarCacheDir, socketPath string,
 	svc.SetAvatarCacheDir(avatarCacheDir)
 	health := core.NewHealthTracker()
 	svc.SetHealthTracker(health)
+	checker := newUpdateChecker(currentBuild(), cfg, fakeMode, stateDir, stderr)
+	svc.SetUpdateSource(checker)
 	srv := rpc.NewServer(svc)
 
 	wg := startAdapters(ctx, reg, st, stdout, stderr, health)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		checker.Run(ctx)
+	}()
 
 	fmt.Fprintf(stdout, "bunker: daemon listening on %s\n", socketPath)
 	serveErr := srv.Serve(ctx, socketPath)
@@ -125,19 +135,50 @@ func startAdaptersWithSupervisor(ctx context.Context, reg *core.Registry, st cor
 // loadRegistry builds the demo registry in --fake mode, or the configured
 // one otherwise. A missing config file is not an error: the daemon starts
 // with no accounts so "bunker daemon" alone still serves list/counts
-// against an empty store while Alice sets up ~/.config/bunker-go.
-func loadRegistry(fakeMode bool, stdout io.Writer) (*core.Registry, error) {
+// against an empty store while Alice sets up ~/.config/bunker-go. The
+// config it read is returned too (nil in --fake mode or without a file)
+// for the daemon's other settings.
+func loadRegistry(fakeMode bool, stdout io.Writer) (*core.Registry, *config.Config, error) {
 	if fakeMode {
-		return demoRegistry(), nil
+		return demoRegistry(), nil, nil
 	}
 
 	cfg, err := config.LoadDefault()
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			fmt.Fprintf(stdout, "bunker: no config file at %s, starting with no accounts\n", config.ConfigPath())
-			return core.NewRegistry(), nil
+			return core.NewRegistry(), nil, nil
 		}
-		return nil, fmt.Errorf("daemon: load config: %w", err)
+		return nil, nil, fmt.Errorf("daemon: load config: %w", err)
 	}
-	return buildRegistry(cfg)
+	reg, err := buildRegistry(cfg)
+	return reg, cfg, err
+}
+
+// updateCheckEnabled decides whether the daemon looks for new releases:
+// only a release build, never the --fake demo (which must stay offline),
+// and not when config says "[update] check = false". No config file
+// means the default, on.
+func updateCheckEnabled(build buildInfo, cfg *config.Config, fakeMode bool) bool {
+	if !build.Release || fakeMode {
+		return false
+	}
+	return cfg == nil || cfg.Update.Check
+}
+
+// updateAPITimeout bounds one request to the GitHub releases API, from
+// the daemon's check or from "bunker update".
+const updateAPITimeout = 30 * time.Second
+
+// newUpdateChecker is the daemon's release check, disabled per
+// updateCheckEnabled. Its log goes to stderr at debug level for
+// failures, so an offline machine is never noisy.
+func newUpdateChecker(build buildInfo, cfg *config.Config, fakeMode bool, stateDir string, stderr io.Writer) *update.Checker {
+	return &update.Checker{
+		Current:   build.Version,
+		Enabled:   updateCheckEnabled(build, cfg, fakeMode),
+		Client:    &http.Client{Timeout: updateAPITimeout},
+		CachePath: filepath.Join(stateDir, update.CacheFile),
+		Logger:    slog.New(slog.NewTextHandler(stderr, nil)),
+	}
 }

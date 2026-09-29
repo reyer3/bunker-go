@@ -232,6 +232,19 @@ func (c *queryClient) Health(ctx context.Context) ([]core.AdapterHealth, error) 
 	})
 }
 
+// HealthReport is an idempotent query; it errors with
+// core.ErrUnsupported when the connection underneath lacks it, and
+// fetchHealthReport then falls back to Health.
+func (c *queryClient) HealthReport(ctx context.Context) (core.HealthReport, error) {
+	return query(c, ctx, func(client Client) (core.HealthReport, error) {
+		hr, ok := client.(HealthReporter)
+		if !ok {
+			return core.HealthReport{}, fmt.Errorf("tui: health report: %w", core.ErrUnsupported)
+		}
+		return hr.HealthReport(ctx)
+	})
+}
+
 // ListPage is an idempotent query (the / filter's daemon search, issue
 // #62); it errors with core.ErrUnsupported when the connection
 // underneath cannot page, so the filter falls back to memory.

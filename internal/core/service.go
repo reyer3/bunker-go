@@ -64,6 +64,8 @@ type Service struct {
 	// only for tests that never call it simply reports no adapters
 	// rather than erroring.
 	health *HealthTracker
+	// updates backs HealthReport's update status; nil reports none.
+	updates UpdateSource
 
 	// queryClock anchors the query language's relative dates (after:7d)
 	// in ListPage; tests inject a fixed instant.
@@ -90,6 +92,22 @@ func (s *Service) Health(ctx context.Context) ([]AdapterHealth, error) {
 		return nil, nil
 	}
 	return s.health.Snapshot(), nil
+}
+
+// SetUpdateSource wires the daemon's release check into HealthReport.
+func (s *Service) SetUpdateSource(u UpdateSource) { s.updates = u }
+
+// HealthReport is Health plus whether a newer bunker release exists.
+func (s *Service) HealthReport(ctx context.Context) (HealthReport, error) {
+	adapters, err := s.Health(ctx)
+	if err != nil {
+		return HealthReport{}, err
+	}
+	report := HealthReport{Adapters: adapters}
+	if s.updates != nil {
+		report.Update = s.updates.Status()
+	}
+	return report, nil
 }
 
 // NewService wires a Service to its Store and Registry.
