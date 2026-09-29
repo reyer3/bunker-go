@@ -77,6 +77,13 @@ func (a *Adapter) organize(ctx context.Context, id string, op core.OrganizeOp) (
 		if err != nil {
 			return core.OrganizeMove{}, fmt.Errorf("mail: organize %q: %w", id, err)
 		}
+		if target == mailbox {
+			// The message is already there. A MOVE onto its own mailbox
+			// would at best renumber it and, for an item that lives in
+			// Gmail's \All being archived into \All, risks a duplicate, so
+			// it is a no-op that keeps the id and the stored folder.
+			return result, nil
+		}
 		moveData, err := client.Move(imap.UIDSetNum(uid), target).Wait()
 		if err != nil {
 			return core.OrganizeMove{}, fmt.Errorf("mail: organize %q: move to %q: %w", id, target, moveError(err))

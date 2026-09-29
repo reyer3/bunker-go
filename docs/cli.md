@@ -578,6 +578,13 @@ the address a fresh sync of the destination folder would itself use, so
 it stops showing up (and counting) under the folder it was moved out
 of.
 
+For mail, `--move Archive` (or `Archives`) goes to the server's
+`\Archive` folder or a listed Archive/Archives folder; on Gmail, which
+has neither, it moves the message to `[Gmail]/All Mail` (`\All`), which
+archives it by dropping the INBOX label, and a message already in that
+mailbox is left as is. A server with no archive folder and no `\All`
+fails the move instead of creating one.
+
 For mail accounts, the daemon also keeps the store in sync with changes
 made outside bunker-go: while idling, an externally expunged message
 (moved or deleted in Roundcube/Gmail) is dropped from the store, and an

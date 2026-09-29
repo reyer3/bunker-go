@@ -151,6 +151,82 @@ func TestFolderMapResolveUnadvertisedJunk(t *testing.T) {
 	}
 }
 
+// TestFolderMapResolveArchiveFallsBackToAll pins the archive resolution
+// order: \Archive, then a listed Archive/Archives folder (prefixed before
+// unprefixed), and only then \All, which is Gmail's archive.
+func TestFolderMapResolveArchiveFallsBackToAll(t *testing.T) {
+	tests := []struct {
+		name       string
+		sep        byte
+		prefix     string
+		specialUse map[string]string
+		mailboxes  []string
+		want       string
+	}{
+		{
+			name:       "gmail-like: only \\All resolves the archive",
+			sep:        '/',
+			specialUse: map[string]string{SpecialUseAll: "[Gmail]/All Mail"},
+			mailboxes:  []string{"INBOX", "[Gmail]/All Mail", "[Gmail]/Trash"},
+			want:       "[Gmail]/All Mail",
+		},
+		{
+			name: "\\Archive beats \\All",
+			sep:  '/',
+			specialUse: map[string]string{
+				SpecialUseArchive: "Stash",
+				SpecialUseAll:     "[Gmail]/All Mail",
+			},
+			mailboxes: []string{"INBOX", "Stash", "[Gmail]/All Mail"},
+			want:      "Stash",
+		},
+		{
+			name:       "listed prefixed archive beats \\All",
+			sep:        '.',
+			prefix:     "INBOX",
+			specialUse: map[string]string{SpecialUseAll: "INBOX.All"},
+			mailboxes:  []string{"INBOX", "INBOX.All", "INBOX.Archive", "Archive"},
+			want:       "INBOX.Archive",
+		},
+		{
+			name:       "listed unprefixed archive beats \\All",
+			sep:        '.',
+			prefix:     "INBOX",
+			specialUse: map[string]string{SpecialUseAll: "INBOX.All"},
+			mailboxes:  []string{"INBOX", "INBOX.All", "Archives"},
+			want:       "Archives",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewFolderMap(tt.sep, tt.prefix)
+			for attr, mailbox := range tt.specialUse {
+				m.SetSpecialUse(attr, mailbox)
+			}
+			m.SetMailboxes(tt.mailboxes)
+			for _, friendly := range []string{"Archive", "Archives"} {
+				got, err := m.ResolveExisting(friendly)
+				if err != nil || got != tt.want {
+					t.Errorf("ResolveExisting(%q) = %q, %v; want %q", friendly, got, err, tt.want)
+				}
+			}
+		})
+	}
+}
+
+// TestFolderMapAllOnlyServesArchive: \All is Gmail's archive, not a
+// catch-all; other roles and plain names never resolve to it.
+func TestFolderMapAllOnlyServesArchive(t *testing.T) {
+	m := NewFolderMap('/', "")
+	m.SetSpecialUse(SpecialUseAll, "[Gmail]/All Mail")
+	m.SetMailboxes([]string{"INBOX", "[Gmail]/All Mail"})
+	for _, friendly := range []string{"Spam", "Junk", "Trash", "Clients"} {
+		if got, err := m.ResolveExisting(friendly); err == nil {
+			t.Errorf("ResolveExisting(%q) = %q, want a does-not-exist error", friendly, got)
+		}
+	}
+}
+
 func TestFolderMapResolveExistingMissingArchive(t *testing.T) {
 	m := NewFolderMap('.', "INBOX")
 	m.SetMailboxes([]string{"INBOX", "INBOX.Sent", "INBOX.Trash"})
