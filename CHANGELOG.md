@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.12.0](https://github.com/reyer3/bunker-go/compare/v0.11.0...v0.12.0) (2026-09-29)
+
+
+### Features
+
+* bunker version, release checks and bunker update ([#112](https://github.com/reyer3/bunker-go/issues/112)) ([ac12440](https://github.com/reyer3/bunker-go/commit/ac124409df52383266975e8830032c9c51ff6b03))
+* edit, delete and react to messages on WhatsApp and Matrix ([#113](https://github.com/reyer3/bunker-go/issues/113)) ([db65158](https://github.com/reyer3/bunker-go/commit/db6515811185dbb50d663c32c7b28f2053ff6ca1))
+* **matrix:** handle inbound edits, reactions and redactions ([#108](https://github.com/reyer3/bunker-go/issues/108)) ([c02ded2](https://github.com/reyer3/bunker-go/commit/c02ded2cec35e796b94a8382102d07257ad792f8))
+* **mcp:** read attachment text ([#111](https://github.com/reyer3/bunker-go/issues/111)) ([2542176](https://github.com/reyer3/bunker-go/commit/2542176393e2cbc3340cf81cda0a31ff96e4de7e))
+* **whatsapp:** preview media from the message's own thumbnail ([#110](https://github.com/reyer3/bunker-go/issues/110)) ([0452a5a](https://github.com/reyer3/bunker-go/commit/0452a5ad535a51aa00e0911d5af9e8ffbe1d14ca))
+
 ## [0.11.0](https://github.com/reyer3/bunker-go/compare/v0.10.0...v0.11.0) (2026-09-29)
 
 
