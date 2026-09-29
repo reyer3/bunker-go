@@ -3,6 +3,7 @@ package mail
 import (
 	"context"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,6 +143,50 @@ func TestAdapterOrganizeMoveToMissingFolderFailsClearly(t *testing.T) {
 		t.Fatal("Organize() error = nil, want a clear failure for a missing folder")
 	}
 	// bunker-go must never auto-create the destination.
+	verifyMailboxHasMessages(t, addr, "INBOX", 1)
+}
+
+// TestAdapterOrganizeMoveToArchiveFindsOtherSpelling covers issue #54 at
+// the adapter level: asking for "Archives" on a prefixed server whose
+// only archive is INBOX/Archive (no \Archive attribute; imapmemserver
+// cannot advertise one) moves there instead of guessing a missing name.
+func TestAdapterOrganizeMoveToArchiveFindsOtherSpelling(t *testing.T) {
+	addr, mem, _ := newMemIMAPServer(t)
+	if err := mem.Create("INBOX/Archive", nil); err != nil {
+		t.Fatalf("create INBOX/Archive: %v", err)
+	}
+	appendMessage(t, addr, "INBOX", rawMessage("<a@x>", "", "S", "a@x", "r@x", "b"))
+
+	cfg := AccountConfig{Name: "cl", IMAPHost: "unused", FolderPrefix: "INBOX"}
+	id := syncOneAndGetID(t, addr, cfg)
+
+	adapter := newAdapter(cfg, nil, nil, testDialInsecure(addr))
+	move, err := adapter.OrganizeMove(context.Background(), id, core.OrganizeOp{MoveTo: "Archives"})
+	if err != nil {
+		t.Fatalf("OrganizeMove() error = %v", err)
+	}
+	if move.Folder != "INBOX/Archive" {
+		t.Errorf("OrganizeMove().Folder = %q, want %q", move.Folder, "INBOX/Archive")
+	}
+	verifyMailboxHasMessages(t, addr, "INBOX/Archive", 1)
+	verifyMailboxHasMessages(t, addr, "INBOX", 0)
+}
+
+func TestAdapterOrganizeMoveToMissingArchiveFails(t *testing.T) {
+	addr, _, _ := newMemIMAPServer(t)
+	appendMessage(t, addr, "INBOX", rawMessage("<a@x>", "", "S", "a@x", "r@x", "b"))
+
+	cfg := AccountConfig{Name: "cl", IMAPHost: "unused", FolderPrefix: "INBOX"}
+	id := syncOneAndGetID(t, addr, cfg)
+
+	adapter := newAdapter(cfg, nil, nil, testDialInsecure(addr))
+	err := adapter.Organize(context.Background(), id, core.OrganizeOp{MoveTo: "Archive"})
+	if err == nil {
+		t.Fatal("Organize() error = nil, want a clear failure for a missing archive")
+	}
+	if !strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("Organize() error = %v, want it to say the folder does not exist", err)
+	}
 	verifyMailboxHasMessages(t, addr, "INBOX", 1)
 }
 
