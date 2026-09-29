@@ -109,17 +109,23 @@ type countsResult struct {
 	Counts map[core.Channel]map[string]int `json:"counts"`
 }
 
+// replyParams and sendParams carry an optional IdempotencyKey (issue
+// #67): the daemon sends at most once per key and answers a repeat with
+// the first call's receipt (see core.WithIdempotencyKey). Client reads it
+// from the call's context and Server puts it back into one.
 type replyParams struct {
-	ID          string   `json:"id"`
-	Body        string   `json:"body"`
-	Cc          []string `json:"cc"`
-	Attachments []string `json:"attachments"`
-	DryRun      bool     `json:"dryRun"`
+	ID             string   `json:"id"`
+	Body           string   `json:"body"`
+	Cc             []string `json:"cc"`
+	Attachments    []string `json:"attachments"`
+	DryRun         bool     `json:"dryRun"`
+	IdempotencyKey string   `json:"idempotency_key,omitempty"`
 }
 
 type sendParams struct {
-	Outgoing core.Outgoing `json:"outgoing"`
-	DryRun   bool          `json:"dryRun"`
+	Outgoing       core.Outgoing `json:"outgoing"`
+	DryRun         bool          `json:"dryRun"`
+	IdempotencyKey string        `json:"idempotency_key,omitempty"`
 }
 
 type planReceiptResult struct {

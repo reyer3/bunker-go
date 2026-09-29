@@ -156,20 +156,23 @@ func (c *Client) Counts(ctx context.Context) (map[core.Channel]map[string]int, e
 }
 
 // Reply answers item id with body, optionally carrying Cc recipients and
-// attaching local files.
+// attaching local files. An idempotency key in ctx (core.WithIdempotencyKey)
+// goes on the wire so the daemon sends at most once per key.
 func (c *Client) Reply(ctx context.Context, id, body string, cc, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
 	var res planReceiptResult
-	err := c.call(ctx, MethodReply, replyParams{ID: id, Body: body, Cc: cc, Attachments: attachments, DryRun: dryRun}, &res)
+	params := replyParams{ID: id, Body: body, Cc: cc, Attachments: attachments, DryRun: dryRun, IdempotencyKey: core.IdempotencyKey(ctx)}
+	err := c.call(ctx, MethodReply, params, &res)
 	if err != nil {
 		return core.Plan{}, core.Receipt{}, err
 	}
 	return res.Plan, res.Receipt, nil
 }
 
-// Send delivers a fresh outgoing message.
+// Send delivers a fresh outgoing message. An idempotency key in ctx
+// (core.WithIdempotencyKey) goes on the wire, as for Reply.
 func (c *Client) Send(ctx context.Context, out core.Outgoing, dryRun bool) (core.Plan, core.Receipt, error) {
 	var res planReceiptResult
-	err := c.call(ctx, MethodSend, sendParams{Outgoing: out, DryRun: dryRun}, &res)
+	err := c.call(ctx, MethodSend, sendParams{Outgoing: out, DryRun: dryRun, IdempotencyKey: core.IdempotencyKey(ctx)}, &res)
 	if err != nil {
 		return core.Plan{}, core.Receipt{}, err
 	}

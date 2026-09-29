@@ -64,6 +64,10 @@ type Service struct {
 	// only for tests that never call it simply reports no adapters
 	// rather than erroring.
 	health *HealthTracker
+
+	// idempotency remembers recent sends by idempotency key (issue #67,
+	// see idempotency.go) so a retried Send or Reply is not sent twice.
+	idempotency *idempotencyCache
 }
 
 // SetHealthTracker wires the daemon adapter supervisor's shared
@@ -93,6 +97,7 @@ func NewService(store Store, registry *Registry) *Service {
 		avatarCacheCapBytes: avatarCacheCapBytes,
 		presenceLeases:      make(map[string]*presenceLease),
 		presenceAfterFunc:   defaultPresenceAfterFunc,
+		idempotency:         newIdempotencyCache(),
 	}
 }
 
@@ -535,7 +540,23 @@ func toLowerASCII(s string) string {
 // non-empty, the adapter must implement the stronger MediaSender
 // capability, exactly like Send: a plain Sender is never used to send
 // text-only and silently drop the attachments.
+//
+// A real reply whose ctx carries an idempotency key (WithIdempotencyKey)
+// is sent at most once per key; see idempotencyCache.do.
 func (s *Service) Reply(ctx context.Context, id string, body string, cc []string, attachments []string, dryRun bool) (Plan, Receipt, error) {
+	key := IdempotencyKey(ctx)
+	if dryRun || key == "" {
+		return s.reply(ctx, id, body, cc, attachments, dryRun)
+	}
+	parts := append([]string{"reply", id, body, "cc"}, cc...)
+	parts = append(parts, "attachments")
+	parts = append(parts, attachments...)
+	return s.idempotency.do(ctx, key, requestFingerprint(parts...), func() (Plan, Receipt, error) {
+		return s.reply(ctx, id, body, cc, attachments, false)
+	})
+}
+
+func (s *Service) reply(ctx context.Context, id string, body string, cc []string, attachments []string, dryRun bool) (Plan, Receipt, error) {
 	item, err := s.store.Get(ctx, id)
 	if err != nil {
 		return Plan{}, Receipt{}, err
@@ -613,7 +634,29 @@ func (s *Service) Reply(ctx context.Context, id string, body string, cc []string
 // inspected and validated against the adapter's AttachmentPolicy before
 // SendMedia is called, on dry-run too, so a bad file is caught without
 // ever uploading anything.
+//
+// A real send whose ctx carries an idempotency key (WithIdempotencyKey)
+// is sent at most once per key; see idempotencyCache.do. A broadcast is
+// remembered as a whole even when some recipients failed (sendFanout
+// reports those per recipient, not as an error): a retry must not resend
+// to the ones that already got it, so it replays the same results.
 func (s *Service) Send(ctx context.Context, out Outgoing, dryRun bool) (Plan, Receipt, error) {
+	key := IdempotencyKey(ctx)
+	if dryRun || key == "" {
+		return s.send(ctx, out, dryRun)
+	}
+	parts := []string{"send", string(out.Channel), out.Account, out.Thread, out.ReplyTo, out.Subject, out.Body, "to"}
+	parts = append(parts, out.To...)
+	parts = append(parts, "cc")
+	parts = append(parts, out.Cc...)
+	parts = append(parts, "attachments")
+	parts = append(parts, out.Attachments...)
+	return s.idempotency.do(ctx, key, requestFingerprint(parts...), func() (Plan, Receipt, error) {
+		return s.send(ctx, out, false)
+	})
+}
+
+func (s *Service) send(ctx context.Context, out Outgoing, dryRun bool) (Plan, Receipt, error) {
 	plan := Plan{
 		Action:     "send",
 		Channel:    out.Channel,
