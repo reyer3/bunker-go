@@ -29,7 +29,10 @@ Use counts and list to see what is new, read or thread to open it (reading never
 and contacts to find someone's address by name. health says whether the daemon and each account are connected. send and reply return a plan (dry run) unless
 confirm is true; confirming only works when the user started the server with --allow-send.
 A confirmed send that timed out is safe to retry with the same arguments: it is never sent twice
-(the receipt then says replayed). Never send a message the user did not ask for.`
+(the receipt then says replayed). mark_read, mark_unread, archive, move and label follow the same rule:
+they return a plan (what changes, and whether the sender is notified: marking a WhatsApp or Matrix
+message read sends a read receipt) unless confirm is true and the server runs with --allow-send.
+Never send a message or change anything the user did not ask for.`
 
 // mcpBodyLimit caps a message body in tool results: an agent needs the
 // text, not megabytes of quoted mail history.
@@ -55,7 +58,7 @@ func dialDaemonBackend(ctx context.Context) (Backend, io.Closer, error) {
 func cmdMCP(args []string, stderr io.Writer) int {
 	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	allowSend := fs.Bool("allow-send", false, "let tools send for real when a call sets confirm (default: plans only)")
+	allowSend := fs.Bool("allow-send", false, "let tools send and organize for real when a call sets confirm (default: plans only)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -301,6 +304,8 @@ func newMCPServer(dial mcpDialer, allowSend bool) *mcp.Server {
 				return b.Reply(ctx, in.ID, in.Text, nil, nil, dryRun)
 			})
 		})
+
+	addMCPOrganizeTools(server, dial, allowSend)
 
 	return server
 }

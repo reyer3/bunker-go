@@ -1191,9 +1191,14 @@ which answers `daemon_up: false` with a hint to run `bunker daemon`.
 | `health` | whether the daemon is up and, per account, `channel`, `account`, `state`, `since`, `last_error`, `restarts` and `last_item` (the newest stored item's time) |
 | `send` | a new message; `to` takes an address or a contact name, resolved like the CLI |
 | `reply` | a reply to an item |
+| `mark_read` | mark an item read (`id`); on WhatsApp and Matrix this sends the sender a read receipt |
+| `mark_unread` | put an item back in the unread inbox (`id`); on WhatsApp and Matrix only bunker changes |
+| `archive` | move a mail to the archive (`id`), like `bunker organize --move Archive`; mail only |
+| `move` | move a mail to another folder (`id`, `folder`); mail only |
+| `label` | add or remove labels on a mail (`id`, `add`, `remove`); mail only |
 
-Reads are annotated read-only; `send` and `reply` are annotated
-destructive.
+Reads are annotated read-only; `send`, `reply` and the organize tools
+are annotated destructive.
 
 **Sending is opt-in twice:**
 - `send` and `reply` always build the dry-run plan first. By default they
@@ -1212,11 +1217,28 @@ destructive.
   within 24 hours is answered the same way; change the text to send it
   anew.
 
+**The organize tools follow the same rules.** `mark_read`,
+`mark_unread`, `archive`, `move` and `label` go through the same
+`Organize` and `MarkUnread` paths as `bunker organize` and
+`bunker unread`. They are outbound on some channels (a WhatsApp or
+Matrix read receipt), so by default they return only a plan:
+
+```json
+{"done": false, "plan": {"action": "mark_read", "id": "...", "channel": "whatsapp", "account": "personal",
+  "change": "mark read and send a read receipt", "notifies_sender": true}}
+```
+
+`notifies_sender` says whether the other side is told; `local_only`
+says only bunker's store changes (marking a chat message unread). They
+apply the change, and answer `done: true`, only with `--allow-send` and
+`confirm: true`. Folders and labels on WhatsApp or Matrix fail at plan
+time, and every channel or daemon error is a tool error.
+
 Claude Code:
 
 ```sh
 claude mcp add bunker -- bunker mcp                # plans only
-claude mcp add bunker -- bunker mcp --allow-send   # can send after confirm
+claude mcp add bunker -- bunker mcp --allow-send   # can send and organize after confirm
 ```
 
 Zed (`settings.json`; check Zed's docs if the key has changed):
