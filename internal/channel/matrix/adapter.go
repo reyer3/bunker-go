@@ -47,6 +47,18 @@ type Adapter struct {
 	// replaces the room's entry.
 	typers map[id.RoomID][]string
 
+	// editTargets maps an edit event's item id to the original item it
+	// replaced, so an edit of that edit (or its redaction) is traced back
+	// to the original. In memory only: after a restart resolveEditTarget
+	// re-fetches the edited event instead.
+	editTargets map[string]string
+	// reactions maps a live reaction event's item id to what it
+	// annotates, and liveReactions lists each user's live reactions per
+	// item, newest last (see relations.go). Both are rebuilt from the
+	// persisted records only lazily, on a redaction.
+	reactions     map[string]reactionRecord
+	liveReactions map[reactionSlot][]string
+
 	// sleep drives the typing-notification wait Send performs before
 	// delivering (T13d). It defaults to the real time.Sleep; tests
 	// override it via SetSleeper so a send test never sleeps for real
@@ -121,6 +133,9 @@ func newAdapter(account string, client *mautrix.Client, cryptoHelper mautrix.Cry
 		memberNames:    make(map[id.RoomID]map[id.UserID]string),
 		unread:         make(map[id.RoomID]int),
 		typers:         make(map[id.RoomID][]string),
+		editTargets:    make(map[string]string),
+		reactions:      make(map[string]reactionRecord),
+		liveReactions:  make(map[reactionSlot][]string),
 		sleep:          time.Sleep,
 	}
 }
@@ -236,6 +251,8 @@ func (a *Adapter) Account() string { return a.account }
 // through sink so a daemon restart resumes instead of re-syncing from
 // scratch, maps m.room.message and (decrypted or undecryptable)
 // m.room.encrypted events into Items, and upserts them through sink.
+// Edits, reactions and redactions are applied to the items they relate
+// to instead (see relations.go).
 func (a *Adapter) Run(ctx context.Context, sink core.Sink) error {
 	a.mu.Lock()
 	a.sink = sink
@@ -259,6 +276,8 @@ func (a *Adapter) Run(ctx context.Context, sink core.Sink) error {
 	syncer.OnEventType(event.StateEncryption, a.handleEncryptionState)
 	syncer.OnEventType(event.EventMessage, a.messageHandler(sink))
 	syncer.OnEventType(event.EventEncrypted, a.encryptedHandler(sink))
+	syncer.OnEventType(event.EventReaction, a.relationHandler(sink))
+	syncer.OnEventType(event.EventRedaction, a.relationHandler(sink))
 	syncer.OnEventType(event.EphemeralEventTyping, a.handleTyping)
 	syncer.OnEventType(event.EphemeralEventReceipt, a.receiptHandler(sink))
 	syncer.OnEventType(event.AccountDataFullyRead, a.fullyReadHandler(sink))
@@ -363,6 +382,9 @@ func (a *Adapter) handleEncryptionState(ctx context.Context, evt *event.Event) {
 
 func (a *Adapter) messageHandler(sink core.Sink) mautrix.EventHandler {
 	return func(ctx context.Context, evt *event.Event) {
+		if a.applyRelation(ctx, sink, evt) {
+			return
+		}
 		item := a.toItem(evt)
 		a.remember(item)
 		a.persistMediaDescriptor(ctx, sink, item, evt.Content.AsMessage())
@@ -382,6 +404,11 @@ func (a *Adapter) encryptedHandler(sink core.Sink) mautrix.EventHandler {
 		var decryptedContent *event.MessageEventContent
 		if a.crypto != nil {
 			if decrypted, err := a.crypto.Decrypt(ctx, evt); err == nil {
+				// A decrypted edit or reaction is not a message of
+				// its own; only the outer encrypted wrapper hid that.
+				if a.applyRelation(ctx, sink, decrypted) {
+					return
+				}
 				item = a.toItem(decrypted)
 				decryptedContent = decrypted.Content.AsMessage()
 			}
@@ -704,6 +731,19 @@ func (a *Adapter) retryOne(ctx context.Context, store core.Store, itemIDStr stri
 	decrypted, err := a.crypto.Decrypt(ctx, evt)
 	if err != nil {
 		return nil // still no session: try again on the next retry, not an error
+	}
+
+	// The placeholder stood for an edit or reaction that could not be
+	// read at the time: apply it now and drop the placeholder, which was
+	// never a message of its own.
+	if a.applyRelation(ctx, store, decrypted) {
+		a.mu.Lock()
+		delete(a.items, itemIDStr)
+		a.mu.Unlock()
+		if err := store.Delete(ctx, itemIDStr); err != nil {
+			return fmt.Errorf("delete placeholder of decrypted relation: %w", err)
+		}
+		return nil
 	}
 
 	item := a.toItem(decrypted)
