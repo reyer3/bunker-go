@@ -418,6 +418,7 @@ func cmdReply(ctx context.Context, backend Backend, args []string, stdin io.Read
 	fs.Var(&attach, "attach", "local file to attach (repeatable)")
 	fs.Var(&cc, "cc", "additional recipient, comma-separated values allowed (repeatable)")
 	dryRun := fs.Bool("dry-run", false, "plan the reply without sending it")
+	idemKey := fs.String("idempotency-key", "", "send at most once per key: a repeat returns the first receipt")
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	positionals, err := parseInterspersed(fs, args)
 	if err != nil {
@@ -425,7 +426,7 @@ func cmdReply(ctx context.Context, backend Backend, args []string, stdin io.Read
 		return 2
 	}
 	if len(positionals) < 2 {
-		fmt.Fprintln(stderr, "usage: bunker reply <id> <text|-> [--cc addr]... [--attach path]... [--dry-run] [--json]")
+		fmt.Fprintln(stderr, "usage: bunker reply <id> <text|-> [--cc addr]... [--attach path]... [--idempotency-key k] [--dry-run] [--json]")
 		return 2
 	}
 	if err := validateAttachmentPaths(attach); err != nil {
@@ -435,7 +436,7 @@ func cmdReply(ctx context.Context, backend Backend, args []string, stdin io.Read
 	if err != nil {
 		return fail(*jsonOut, stdout, stderr, err)
 	}
-	plan, receipt, err := backend.Reply(ctx, positionals[0], body, collectCc(cc), attach, *dryRun)
+	plan, receipt, err := backend.Reply(core.WithIdempotencyKey(ctx, *idemKey), positionals[0], body, collectCc(cc), attach, *dryRun)
 	if err != nil {
 		return fail(*jsonOut, stdout, stderr, err)
 	}
@@ -475,6 +476,7 @@ func cmdSend(ctx context.Context, backend Backend, args []string, stdin io.Reade
 	fs.Var(&media, "media", "alias of --attach, kept for compatibility (repeatable)")
 	fs.Var(&cc, "cc", "additional recipient, comma-separated values allowed (repeatable)")
 	dryRun := fs.Bool("dry-run", false, "plan the send without delivering it")
+	idemKey := fs.String("idempotency-key", "", "send at most once per key: a repeat returns the first receipt")
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	positionals, err := parseInterspersed(fs, args)
 	if err != nil {
@@ -482,7 +484,7 @@ func cmdSend(ctx context.Context, backend Backend, args []string, stdin io.Reade
 		return 2
 	}
 	if len(positionals) < 4 {
-		fmt.Fprintln(stderr, "usage: bunker send <channel> <account> <to> <text|-> [--cc addr]... [--subject s] [--attach path]... [--media path]... [--dry-run] [--json]")
+		fmt.Fprintln(stderr, "usage: bunker send <channel> <account> <to> <text|-> [--cc addr]... [--subject s] [--attach path]... [--media path]... [--idempotency-key k] [--dry-run] [--json]")
 		return 2
 	}
 	attachments := append(append([]string{}, []string(media)...), []string(attach)...)
@@ -511,7 +513,7 @@ func cmdSend(ctx context.Context, backend Backend, args []string, stdin io.Reade
 		Body:        body,
 		Attachments: attachments,
 	}
-	plan, receipt, err := backend.Send(ctx, out, *dryRun)
+	plan, receipt, err := backend.Send(core.WithIdempotencyKey(ctx, *idemKey), out, *dryRun)
 	if err != nil {
 		return fail(*jsonOut, stdout, stderr, err)
 	}
@@ -796,6 +798,9 @@ func printPlanResult(jsonOut, dryRun bool, plan core.Plan, receipt core.Receipt,
 		fmt.Fprintf(stdout, "[dry-run] would %s via %s/%s%s%s%s: %s\n", plan.Action, plan.Channel, plan.Account, to, cc, subject, plan.Preview)
 	} else {
 		fmt.Fprintf(stdout, "%s ok: %s%s (receipt %s)\n", plan.Action, plan.Target, cc, receipt.ID)
+		if receipt.Replayed {
+			fmt.Fprintln(stdout, "  already sent with this idempotency key: nothing was sent again")
+		}
 	}
 	for _, att := range plan.Attachments {
 		fmt.Fprintf(stdout, "  %s (%s, %d bytes)\n", att.Name, att.MIME, att.Size)

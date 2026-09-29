@@ -174,6 +174,10 @@ type Receipt struct {
 	// At above mirror the first successful entry, so a JSON consumer that
 	// only reads the top-level fields keeps working unchanged.
 	Recipients []RecipientResult `json:"recipients,omitempty"`
+	// Replayed is true when this receipt is a remembered one returned for
+	// a repeated idempotency key (see WithIdempotencyKey): nothing was
+	// sent this time, the message went out on the first call.
+	Replayed bool `json:"replayed,omitempty"`
 }
 
 // RecipientResult is one recipient's outcome within a fan-out send/reply.

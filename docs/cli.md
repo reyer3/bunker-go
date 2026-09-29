@@ -403,11 +403,20 @@ channel itself when the adapter implements `core.ReadMarker`:
 {"item": { <core.Item> }}
 ```
 
-## `bunker reply <id> <text|-> [--cc addr]... [--attach path]... [--dry-run] [--json]`
+## `bunker reply <id> <text|-> [--cc addr]... [--attach path]... [--idempotency-key k] [--dry-run] [--json]`
 
 Replies to item `<id>`. `<text>` can be `-` to read the body from stdin.
 `--dry-run` returns the `Plan` alone and never reaches the channel
 adapter.
+
+`--idempotency-key k` makes a retry safe: the daemon sends at most once
+per key. A repeat of a key that already sent returns the first call's
+plan and receipt, with `receipt.replayed: true`, and sends nothing; a
+repeat while the first call is still sending waits for it and shares its
+result; a failed send is forgotten, so the same key can retry it. Keys
+live in the daemon's memory for 24 hours (at most 1024 of them, least
+recently used dropped first) and are lost when it restarts. Reusing a key
+for a different message is an error. `send` takes the same flag.
 
 `--cc addr` (repeatable) adds a Cc recipient; each value may itself be a
 comma-separated list (`--cc "a@x.cl, b@x.cl"`), and the flag may be
@@ -430,11 +439,13 @@ on the first image only.
 `receipt` is the zero value (`{"ID":"","Channel":"","At":"0001-01-01T00:00:00Z"}`)
 when `dryRun` is `true`.
 
-## `bunker send <channel> <account> <to> <text|-> [--cc addr]... [--subject s] [--attach path]... [--media path]... [--dry-run] [--json]`
+## `bunker send <channel> <account> <to> <text|-> [--cc addr]... [--subject s] [--attach path]... [--media path]... [--idempotency-key k] [--dry-run] [--json]`
 
-Sends a fresh message, not tied to any existing item. Same `--dry-run` and
-JSON shape as `reply`, plus new `plan.Media`/`plan.Attachments` fields
-(see below).
+Sends a fresh message, not tied to any existing item. Same `--dry-run`,
+`--idempotency-key` and JSON shape as `reply`, plus new
+`plan.Media`/`plan.Attachments` fields (see below). A broadcast is
+remembered as a whole, including recipients that failed, so retrying
+those needs a new key.
 
 `<to>` is a comma-separated list of recipients (`"a@x.cl, b@x.cl"`):
 each entry is trimmed, empty entries are dropped, and the command fails
@@ -1254,9 +1265,14 @@ which answers `daemon_up: false` with a hint to run `bunker daemon`.
 | `health` | whether the daemon is up and, per account, `channel`, `account`, `state`, `since`, `last_error`, `restarts` and `last_item` (the newest stored item's time) |
 | `send` | a new message; `to` takes an address or a contact name, resolved like the CLI |
 | `reply` | a reply to an item |
+| `mark_read` | mark an item read (`id`); on WhatsApp and Matrix this sends the sender a read receipt |
+| `mark_unread` | put an item back in the unread inbox (`id`); on WhatsApp and Matrix only bunker changes |
+| `archive` | move a mail to the archive (`id`), like `bunker organize --move Archive`; mail only |
+| `move` | move a mail to another folder (`id`, `folder`); mail only |
+| `label` | add or remove labels on a mail (`id`, `add`, `remove`); mail only |
 
-Reads are annotated read-only; `send` and `reply` are annotated
-destructive.
+Reads are annotated read-only; `send`, `reply` and the organize tools
+are annotated destructive.
 
 `search_remote` and `backfill` sit in between, and are annotated
 neither read-only nor destructive (idempotent, open-world):
@@ -1287,12 +1303,37 @@ or `backfill` when the mail is not stored yet.
   the plan with an error saying nothing was sent.
 - The daemon's WhatsApp pacing and fan-out limits still apply. There is no
   bulk tool: one message per call.
+- A confirmed send has its own 5-minute timeout (reads keep 60 seconds),
+  because pacing can take a while. It carries an idempotency key derived
+  from the plan (channel, account, recipients or replied-to item, subject,
+  text and attachment paths), so retrying a confirm that timed out never
+  sends twice: the retry waits for, or replays, the first send's receipt
+  (`receipt.replayed: true`). The same text to the same person again
+  within 24 hours is answered the same way; change the text to send it
+  anew.
+
+**The organize tools follow the same rules.** `mark_read`,
+`mark_unread`, `archive`, `move` and `label` go through the same
+`Organize` and `MarkUnread` paths as `bunker organize` and
+`bunker unread`. They are outbound on some channels (a WhatsApp or
+Matrix read receipt), so by default they return only a plan:
+
+```json
+{"done": false, "plan": {"action": "mark_read", "id": "...", "channel": "whatsapp", "account": "personal",
+  "change": "mark read and send a read receipt", "notifies_sender": true}}
+```
+
+`notifies_sender` says whether the other side is told; `local_only`
+says only bunker's store changes (marking a chat message unread). They
+apply the change, and answer `done: true`, only with `--allow-send` and
+`confirm: true`. Folders and labels on WhatsApp or Matrix fail at plan
+time, and every channel or daemon error is a tool error.
 
 Claude Code:
 
 ```sh
 claude mcp add bunker -- bunker mcp                # plans only
-claude mcp add bunker -- bunker mcp --allow-send   # can send after confirm
+claude mcp add bunker -- bunker mcp --allow-send   # can send and organize after confirm
 ```
 
 Zed (`settings.json`; check Zed's docs if the key has changed):
