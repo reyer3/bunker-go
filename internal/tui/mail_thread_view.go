@@ -14,7 +14,7 @@ import (
 // it is wrapLines-wrapped like every other fixed block here), always
 // visible — never part of the scrollable window.
 func (m Model) threadTailLines() []string {
-	return wrapLines([]string{"", hintLine(m.width, m.leaveHints(threadHints)...)}, m.width)
+	return wrapLines([]string{m.tailNotice(), hintLine(m.width, m.withAskHint(m.leaveHints(threadHints), "a")...)}, m.width)
 }
 
 // threadHeadLines renders the K8 Subject title plus any loading/error

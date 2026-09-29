@@ -177,6 +177,6 @@ func (m Model) sidebarLinesAndHits() (lines []string, hits []inboxHit) {
 	}
 
 	add(separatorLine(styles, width), inboxHit{kind: hitNone})
-	add(styles.dim.Render(hintLine(width, sidebarHints...)), inboxHit{kind: hitNone})
+	add(styles.dim.Render(hintLine(width, m.withAskHint(sidebarHints, "a")...)), inboxHit{kind: hitNone})
 	return lines, hits
 }

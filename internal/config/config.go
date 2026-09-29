@@ -27,6 +27,7 @@ type Config struct {
 	Render   Render
 	Tui      Tui
 	App      App
+	Herdr    Herdr
 }
 
 // Render holds optional status-line presentation settings.
@@ -43,6 +44,14 @@ type Tui struct {
 	// explicit false; nil (the key absent) means the default, enabled.
 	// BUNKER_TUI_NOTIFY=0 is a second, independent opt-out.
 	Notify *bool
+}
+
+// Herdr holds the settings of bunker as a herdr side panel.
+type Herdr struct {
+	// Notify makes "bunker sidebar", when it runs inside herdr, announce
+	// new messages as herdr notifications. Off by default: it is opt-in
+	// because herdr plays a sound with each one.
+	Notify bool
 }
 
 // App holds the settings of "bunker app", the TUI in its own window.
@@ -64,6 +73,9 @@ type rawConfig struct {
 	App struct {
 		Command []string `toml:"command"`
 	} `toml:"app"`
+	Herdr struct {
+		Notify bool `toml:"notify"`
+	} `toml:"herdr"`
 }
 
 // Load parses the TOML file at path into a Config.
@@ -78,6 +90,7 @@ func Load(path string) (*Config, error) {
 		Render:   Render{Glyphs: raw.Render.Glyphs},
 		Tui:      Tui{Notify: raw.Tui.Notify},
 		App:      App{Command: raw.App.Command},
+		Herdr:    Herdr{Notify: raw.Herdr.Notify},
 	}
 	for _, entry := range raw.Account {
 		acc := Account{Options: make(map[string]interface{})}

@@ -87,7 +87,13 @@ func notificationText(fresh []core.Item, pendingExtra int) (title, body string) 
 // Firing resets pending to 0; not firing carries pendingBefore+freshCount
 // forward.
 func shouldNotify(lastNotifyAt time.Time, pendingBefore, freshCount int, now time.Time) (fire bool, pendingAfter int) {
-	if lastNotifyAt.IsZero() || now.Sub(lastNotifyAt) >= notifyRateLimit {
+	return shouldNotifyEvery(notifyRateLimit, lastNotifyAt, pendingBefore, freshCount, now)
+}
+
+// shouldNotifyEvery is shouldNotify with the rate limit as a parameter,
+// shared by the OSC 777 path and the injected notifier (herdr.go).
+func shouldNotifyEvery(limit time.Duration, lastNotifyAt time.Time, pendingBefore, freshCount int, now time.Time) (fire bool, pendingAfter int) {
+	if lastNotifyAt.IsZero() || now.Sub(lastNotifyAt) >= limit {
 		return true, 0
 	}
 	return false, pendingBefore + freshCount
@@ -117,6 +123,11 @@ func resolveNotifyEnabled(cfgNotify *bool, getenv func(string) string) bool {
 // returns a command that writes the sanitized, tmux-passthrough-wrapped
 // OSC 777 sequence to m.notifyWriter.
 func (m Model) maybeNotify(wasLoaded bool, oldGroups []inboxGroup, newItems []core.Item) (Model, tea.Cmd) {
+	if m.messageNotify != nil {
+		// An injected notifier (herdr, issue #82) replaces OSC 777, so a
+		// message is announced once, not by both.
+		return m.maybeNotifyMessage(wasLoaded, oldGroups, newItems)
+	}
 	if !wasLoaded || !m.notifyEnabled || !m.blurred {
 		return m, nil
 	}

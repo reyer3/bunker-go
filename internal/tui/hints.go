@@ -232,12 +232,35 @@ func (m Model) helpContext() string {
 	return "inbox"
 }
 
+// askHelpKeys are the ask key's help lines per section (issue #82),
+// shown only when an agent asker is wired.
+var askHelpKeys = map[string][2]string{
+	"sidebar": {"a", "preguntar a Claude (herdr) por la conversación"},
+	"chat":    {"Alt+A", "preguntar a Claude (herdr) por la conversación"},
+	"thread":  {"a", "preguntar a Claude (herdr) por el mensaje"},
+}
+
+// helpSectionsFor is helpSections plus the ask key's lines when ask.
+func helpSectionsFor(ask bool) []helpSection {
+	if !ask {
+		return helpSections
+	}
+	out := make([]helpSection, len(helpSections))
+	for i, s := range helpSections {
+		if k, ok := askHelpKeys[s.id]; ok {
+			s.keys = append(append([][2]string(nil), s.keys...), k)
+		}
+		out[i] = s
+	}
+	return out
+}
+
 // helpBody renders every help section and reports where the section for
-// ctx starts, so the overlay can open on it.
-func helpBody(ctx string) ([]string, int) {
+// ctx starts, so the overlay can open on it. ask adds the "a" key's lines.
+func helpBody(ctx string, ask bool) ([]string, int) {
 	var lines []string
 	start := 0
-	for i, s := range helpSections {
+	for i, s := range helpSectionsFor(ask) {
 		if i > 0 {
 			lines = append(lines, "")
 		}
@@ -256,7 +279,7 @@ func helpBody(ctx string) ([]string, int) {
 // openHelp shows the overlay on the current view's section.
 func (m Model) openHelp() Model {
 	m.helpCtx = m.helpContext()
-	_, m.helpScroll = helpBody(m.helpCtx)
+	_, m.helpScroll = helpBody(m.helpCtx, m.agentAsk != nil)
 	m.helpOpen = true
 	return m.clampHelpScroll()
 }
@@ -269,7 +292,7 @@ func (m Model) helpBodyHeight() int {
 }
 
 func (m Model) clampHelpScroll() Model {
-	body, _ := helpBody(m.helpCtx)
+	body, _ := helpBody(m.helpCtx, m.agentAsk != nil)
 	h := m.helpBodyHeight()
 	if h == 0 {
 		m.helpScroll = 0
@@ -301,7 +324,7 @@ func (m Model) updateHelp(key string) Model {
 // helpView renders the overlay: a fixed title line, then a window of
 // the sections that scrolls to fit the pane.
 func (m Model) helpView() string {
-	body, _ := helpBody(m.helpCtx)
+	body, _ := helpBody(m.helpCtx, m.agentAsk != nil)
 	if h := m.helpBodyHeight(); h > 0 && len(body) > h {
 		start := min(m.helpScroll, len(body)-h)
 		body = body[start : start+h]

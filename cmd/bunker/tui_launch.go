@@ -74,7 +74,7 @@ func cmdOpen(args []string, stdin *os.File, stdout, stderr io.Writer, deps runDe
 		fmt.Fprintln(stderr, "error: bunker open needs a terminal")
 		return 2
 	}
-	return runTUI(stdin, stdout, stderr, deps, tuiLaunch{openID: id})
+	return runTUI(stdin, stdout, stderr, deps, tuiLaunch{openID: id, asker: herdrAgentAsker(deps.env, deps.herdrRun)})
 }
 
 func cmdSidebar(args []string, stdin *os.File, stdout, stderr io.Writer, deps runDependencies) int {
@@ -90,5 +90,14 @@ func cmdSidebar(args []string, stdin *os.File, stdout, stderr io.Writer, deps ru
 		fmt.Fprintln(stderr, "error: bunker sidebar needs a terminal")
 		return 2
 	}
-	return runTUI(stdin, stdout, stderr, deps, tuiLaunch{sidebar: true, opener: herdrItemOpener(deps.env, deps.herdrRun)})
+	launch := tuiLaunch{
+		sidebar: true,
+		opener:  herdrItemOpener(deps.env, deps.herdrRun),
+		asker:   herdrAgentAsker(deps.env, deps.herdrRun),
+		unread:  herdrUnreadReporterFor(deps.env, deps.herdrRun),
+	}
+	if launch.opener != nil && deps.herdrNotifyEnabled() {
+		launch.notify = herdrMessageNotifier(deps.env, deps.herdrRun, true)
+	}
+	return runTUI(stdin, stdout, stderr, deps, launch)
 }

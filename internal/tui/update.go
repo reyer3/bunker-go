@@ -54,6 +54,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleOpenItemLoaded(msg)
 	case externalOpenDoneMsg:
 		return m.handleExternalOpenDone(msg)
+	case agentAskDoneMsg:
+		return m.handleAgentAskDone(msg)
+	case unreadReportedMsg:
+		return m.handleUnreadReported(msg)
+	case messageNotifiedMsg:
+		return m.handleMessageNotified(msg)
 	case contactsLoadedMsg:
 		return m.handleContactsLoaded(msg)
 	case mediaReadyMsg:
@@ -345,7 +351,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		var notifyCmd tea.Cmd
 		m, notifyCmd = m.maybeNotify(wasLoaded, oldGroups, msg.items)
-		return m, tea.Batch(nextPoll(m.pollToken), notifyCmd)
+		return m, tea.Batch(nextPoll(m.pollToken), notifyCmd, m.reportUnread())
 	case pollTickMsg:
 		if msg.token != m.pollToken || m.polling || m.client == nil {
 			return m, nil
@@ -522,6 +528,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.detail {
 				return m.undoRead()
 			}
+		case "a":
+			return m.askAgent()
 		case "m":
 			if id, ok := m.selectedItemID(); ok && m.client != nil {
 				m.marking = true
@@ -785,6 +793,8 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	switch msg.String() {
+	case chatAskKey:
+		return m.askAgent()
 	case "esc":
 		if m.openID != "" {
 			return m, m.quitOpenChat()
@@ -946,6 +956,8 @@ func (m Model) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "?":
 		return m.openHelp(), nil
+	case "a":
+		return m.askAgent()
 	case "esc", "q":
 		if m.openID != "" {
 			return m, tea.Quit

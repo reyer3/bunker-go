@@ -669,6 +669,54 @@ func TestAdapterOrganizeRejectsLabels(t *testing.T) {
 	}
 }
 
+func TestAdapterOrganizeRejectsUnread(t *testing.T) {
+	srv, state := newFakeHomeserver(t, nil)
+	adapter := newTestAdapter(t, srv, nil)
+
+	unseen := false
+	target := itemID("work", "!room:matrix.example.org", "$evt1")
+	err := adapter.Organize(context.Background(), target, core.OrganizeOp{Seen: &unseen})
+	if !errors.Is(err, core.ErrUnsupported) {
+		t.Fatalf("Organize Seen=false: err = %v, want core.ErrUnsupported", err)
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if len(state.readMarkers) != 0 {
+		t.Fatalf("readMarkers = %d, want 0", len(state.readMarkers))
+	}
+}
+
+// TestServiceMarkUnreadIsLocalOnly pins issue #98 end to end: with the
+// real adapter behind core.Service, marking a Matrix item unread must be
+// reported as a bunker-only change, never as one the homeserver made.
+func TestServiceMarkUnreadIsLocalOnly(t *testing.T) {
+	srv, state := newFakeHomeserver(t, nil)
+	adapter := newTestAdapter(t, srv, nil)
+
+	target := itemID("work", "!room:matrix.example.org", "$evt1")
+	sink := newMemSink()
+	if err := sink.Upsert(context.Background(), core.Item{ID: target, Channel: core.ChannelMatrix, Account: "work"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	reg := core.NewRegistry()
+	reg.Register(adapter)
+
+	local, err := core.NewService(sink, reg).MarkUnread(context.Background(), target)
+	if err != nil {
+		t.Fatalf("MarkUnread: %v", err)
+	}
+	if !local {
+		t.Fatal("MarkUnread on Matrix: localOnly = false, want true")
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if len(state.readMarkers) != 0 {
+		t.Fatalf("readMarkers = %d, want 0", len(state.readMarkers))
+	}
+}
+
 // waitForItemUnread polls sink for id's Unread flag to equal want. An
 // ephemeral (m.receipt) or account-data (m.fully_read) handler, unlike a
 // timeline Upsert, has no channel to synchronize a test on, since it
