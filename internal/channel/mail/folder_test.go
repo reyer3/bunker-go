@@ -122,6 +122,35 @@ func TestFolderMapResolveArchive(t *testing.T) {
 	}
 }
 
+// TestFolderMapResolveUnadvertisedJunk: a Dovecot-style server that
+// keeps its junk folder without \Junk still gets "Spam" moves routed to
+// it, under either spelling, instead of to a missing INBOX.Spam.
+func TestFolderMapResolveUnadvertisedJunk(t *testing.T) {
+	tests := []struct {
+		mailboxes []string
+		friendly  string
+		want      string
+	}{
+		{[]string{"INBOX", "INBOX.Junk"}, "Spam", "INBOX.Junk"},
+		{[]string{"INBOX", "INBOX.Spam"}, "Junk", "INBOX.Spam"},
+		{[]string{"INBOX", "INBOX.Junk", "INBOX.Spam"}, "Spam", "INBOX.Spam"},
+	}
+	for _, tt := range tests {
+		m := NewFolderMap('.', "INBOX")
+		m.SetMailboxes(tt.mailboxes)
+		got, err := m.ResolveExisting(tt.friendly)
+		if err != nil || got != tt.want {
+			t.Errorf("ResolveExisting(%q) with %v = %q, %v; want %q", tt.friendly, tt.mailboxes, got, err, tt.want)
+		}
+	}
+
+	m := NewFolderMap('.', "INBOX")
+	m.SetMailboxes([]string{"INBOX", "INBOX.Sent"})
+	if got, err := m.ResolveExisting("Spam"); err == nil {
+		t.Errorf("ResolveExisting(%q) = %q, want an error when no junk folder exists", "Spam", got)
+	}
+}
+
 func TestFolderMapResolveExistingMissingArchive(t *testing.T) {
 	m := NewFolderMap('.', "INBOX")
 	m.SetMailboxes([]string{"INBOX", "INBOX.Sent", "INBOX.Trash"})

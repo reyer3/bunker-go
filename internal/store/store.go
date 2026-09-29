@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	_ "modernc.org/sqlite"
 
@@ -111,6 +112,7 @@ type migration struct {
 var migrations = []migration{
 	{version: 1, apply: migrateV1},
 	{version: 2, apply: migrateV2},
+	{version: 3, apply: migrateV3},
 }
 
 // CurrentSchemaVersion returns the latest schema version this binary
@@ -166,6 +168,139 @@ func migrateV2(db *sql.DB) error {
 		)
 	`); err != nil {
 		return fmt.Errorf("create reactions table: %w", err)
+	}
+	return nil
+}
+
+// ftsSchema is the full-text index behind List's Filter.Query (#59).
+//
+// Design, and why:
+//
+//   - items_fts is a contentless FTS5 table (its content option is the
+//     empty string), so message bodies are not stored a second time: the
+//     index only needs to answer "which items match", and List reads the
+//     columns themselves from items. contentless_delete=1 (SQLite 3.43+,
+//     which modernc.org/sqlite bundles) lets a row be removed by rowid
+//     alone, without replaying the exact old column values.
+//   - The unicode61 tokenizer with remove_diacritics 2 folds case and
+//     accents on both sides, so "jose" finds "José".
+//   - Several indexed values are derived rather than stored as plain
+//     columns: recipients live in to_json and attachment names in
+//     attachments_json. An external-content table cannot express that
+//     (FTS5 would read the raw JSON back), so the indexed text is built
+//     with json_each at write time.
+//   - FTS rowids come from items_fts_map, not items.rowid: items has a
+//     TEXT primary key, so its implicit rowid is not stable and VACUUM may
+//     renumber it, silently pointing every index entry at the wrong item.
+//     items_fts_map's INTEGER PRIMARY KEY survives VACUUM.
+//   - Triggers, not the Go write paths, keep the index in sync: they fire
+//     for every statement that touches items (Upsert, EditItem,
+//     RevokeItem, Delete, and any future writer) inside the same
+//     transaction, so the index cannot drift from a forgotten call site.
+//     The UPDATE trigger is limited to the indexed columns, so MarkRead
+//     and MarkThreadReadUpTo (unread only) never reindex. The map row
+//     is added with INSERT ... WHERE NOT EXISTS rather than INSERT OR
+//     IGNORE because a trigger statement's conflict clause is overridden
+//     by the outer statement's: under Upsert's ON CONFLICT DO UPDATE, OR
+//     IGNORE would still fail with a UNIQUE constraint error.
+var ftsSchema = `
+CREATE TABLE IF NOT EXISTS items_fts_map (
+	fts_rowid INTEGER PRIMARY KEY,
+	item_id   TEXT NOT NULL UNIQUE
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(
+	subject, from_name, from_id, recipients, body, attachments, thread_name,
+	content = '',
+	contentless_delete = 1,
+	tokenize = 'unicode61 remove_diacritics 2'
+);
+
+CREATE TRIGGER IF NOT EXISTS items_fts_ai AFTER INSERT ON items BEGIN
+	INSERT INTO items_fts_map (item_id)
+	SELECT new.id WHERE NOT EXISTS (SELECT 1 FROM items_fts_map WHERE item_id = new.id);
+	INSERT INTO items_fts (rowid, subject, from_name, from_id, recipients, body, attachments, thread_name)
+	SELECT m.fts_rowid, new.subject, new.from_name, new.from_id,
+		` + ftsRecipientsExpr("new") + `,
+		new.body,
+		` + ftsAttachmentsExpr("new") + `,
+		new.thread_name
+	FROM items_fts_map m WHERE m.item_id = new.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS items_fts_au
+AFTER UPDATE OF subject, from_name, from_id, to_json, body, attachments_json, thread_name ON items BEGIN
+	DELETE FROM items_fts WHERE rowid = (SELECT fts_rowid FROM items_fts_map WHERE item_id = old.id);
+	INSERT INTO items_fts_map (item_id)
+	SELECT new.id WHERE NOT EXISTS (SELECT 1 FROM items_fts_map WHERE item_id = new.id);
+	INSERT INTO items_fts (rowid, subject, from_name, from_id, recipients, body, attachments, thread_name)
+	SELECT m.fts_rowid, new.subject, new.from_name, new.from_id,
+		` + ftsRecipientsExpr("new") + `,
+		new.body,
+		` + ftsAttachmentsExpr("new") + `,
+		new.thread_name
+	FROM items_fts_map m WHERE m.item_id = new.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS items_fts_ad AFTER DELETE ON items BEGIN
+	DELETE FROM items_fts WHERE rowid = (SELECT fts_rowid FROM items_fts_map WHERE item_id = old.id);
+	DELETE FROM items_fts_map WHERE item_id = old.id;
+END;
+`
+
+// ftsRecipientsExpr is the SQL expression, over row alias r (new, or i
+// in the backfill), that flattens to_json's addresses and display names
+// into one space-separated string for the index. json_valid guards a
+// hand-edited or corrupt value from failing the write it is attached to.
+func ftsRecipientsExpr(r string) string {
+	return `(SELECT coalesce(group_concat(coalesce(json_extract(value, '$.ID'), '') || ' ' || coalesce(json_extract(value, '$.Name'), ''), ' '), '')
+		FROM json_each(CASE WHEN json_valid(` + r + `.to_json) THEN ` + r + `.to_json ELSE '[]' END))`
+}
+
+// ftsAttachmentsExpr is ftsRecipientsExpr for attachments_json's file
+// names.
+func ftsAttachmentsExpr(r string) string {
+	return `(SELECT coalesce(group_concat(coalesce(json_extract(value, '$.Name'), ''), ' '), '')
+		FROM json_each(CASE WHEN json_valid(` + r + `.attachments_json) THEN ` + r + `.attachments_json ELSE '[]' END))`
+}
+
+// migrateV3 adds the full-text index (see ftsSchema) and backfills it
+// from every existing item. The backfill rebuilds the index from scratch
+// rather than appending, and runs in one transaction with the DDL, so
+// re-running it (e.g. after a crash before user_version was stamped)
+// converges on the same index instead of duplicating entries.
+func migrateV3(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin fts migration: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(ftsSchema); err != nil {
+		return fmt.Errorf("create fts schema: %w", err)
+	}
+	if _, err := tx.Exec(`INSERT INTO items_fts (items_fts) VALUES ('delete-all')`); err != nil {
+		return fmt.Errorf("clear fts index: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM items_fts_map`); err != nil {
+		return fmt.Errorf("clear fts map: %w", err)
+	}
+	if _, err := tx.Exec(`INSERT INTO items_fts_map (item_id) SELECT id FROM items`); err != nil {
+		return fmt.Errorf("backfill fts map: %w", err)
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO items_fts (rowid, subject, from_name, from_id, recipients, body, attachments, thread_name)
+		SELECT m.fts_rowid, i.subject, i.from_name, i.from_id,
+			` + ftsRecipientsExpr("i") + `,
+			i.body,
+			` + ftsAttachmentsExpr("i") + `,
+			i.thread_name
+		FROM items i JOIN items_fts_map m ON m.item_id = i.id
+	`); err != nil {
+		return fmt.Errorf("backfill fts index: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit fts migration: %w", err)
 	}
 	return nil
 }
@@ -522,12 +657,25 @@ func (s *Store) List(ctx context.Context, filter core.Filter) ([]core.Item, erro
 		args = append(args, boolToInt(*filter.Unread))
 	}
 	if filter.Query != "" {
-		// SQLite's LIKE has no default escape character, so without
-		// ESCAPE a user query such as "50%" or "a_b" would act as a
-		// wildcard pattern instead of matching literally.
-		conds = append(conds, `(i.subject LIKE ? ESCAPE '\' OR i.body LIKE ? ESCAPE '\')`)
-		like := "%" + escapeLike(filter.Query) + "%"
-		args = append(args, like, like)
+		if match := ftsMatchExpr(filter.Query); match != "" {
+			// Filter by id through the index rather than ordering by
+			// rank: List's contract (and every caller) is newest first.
+			conds = append(conds, `i.id IN (
+				SELECT m.item_id FROM items_fts f
+				JOIN items_fts_map m ON m.fts_rowid = f.rowid
+				WHERE items_fts MATCH ?)`)
+			args = append(args, match)
+		} else {
+			// A query with no word characters (e.g. "%" or "->") gives
+			// the tokenizer nothing to match, so fall back to a literal
+			// substring search. SQLite's LIKE has no default escape
+			// character, so without ESCAPE a query such as "%" or "_"
+			// would act as a wildcard pattern instead of matching
+			// literally.
+			conds = append(conds, `(i.subject LIKE ? ESCAPE '\' OR i.body LIKE ? ESCAPE '\')`)
+			like := "%" + escapeLike(filter.Query) + "%"
+			args = append(args, like, like)
+		}
 	}
 	if len(conds) > 0 {
 		query += " WHERE " + strings.Join(conds, " AND ")
@@ -567,6 +715,33 @@ func (s *Store) List(ctx context.Context, filter core.Filter) ([]core.Item, erro
 		}
 	}
 	return items, nil
+}
+
+// ftsMatchExpr turns free user text into an FTS5 MATCH expression, or
+// "" when the text has no token the index could match. Every
+// whitespace-separated word becomes an FTS5 string literal (double quotes
+// doubled), so operators such as OR, NEAR, -, * or ( in user input are
+// searched for as text and can never change the query's structure. The
+// words are ANDed (FTS5's implicit operator) and the last one gets a *
+// prefix so results appear while the user is still typing. Inside a
+// string, FTS5 runs the same tokenizer as the index, so "ana@example.com"
+// becomes the phrase "ana example com" and still matches the address.
+func ftsMatchExpr(q string) string {
+	var terms []string
+	for _, w := range strings.Fields(q) {
+		// A word with no letter or digit (e.g. "-" or "%") tokenizes to
+		// nothing; FTS5 treats an empty phrase as matching no rows, which
+		// would make the whole AND fail, so it is dropped instead.
+		if !strings.ContainsFunc(w, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsNumber(r) }) {
+			continue
+		}
+		terms = append(terms, `"`+strings.ReplaceAll(w, `"`, `""`)+`"`)
+	}
+	if len(terms) == 0 {
+		return ""
+	}
+	terms[len(terms)-1] += "*"
+	return strings.Join(terms, " ")
 }
 
 // likeEscaper escapes LIKE's wildcards (and the escape character itself)

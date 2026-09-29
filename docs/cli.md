@@ -289,8 +289,18 @@ returns to the inbox.
 
 Lists items.
 
-Flags: `--channel c`, `--account a`, `--unread`, `--label l`, `-q text`
-(substring match over subject and body), `--limit n`.
+Flags: `--channel c`, `--account a`, `--unread`, `--label l`, `-q text`,
+`--limit n`.
+
+`-q` is a full-text search over subject, sender name and address,
+recipients, body, attachment names and thread name, ignoring case and
+accents (`jose` finds `José`). Every word must match; the last one also
+matches as a prefix (`factu` finds `factura`). Operators and quotes in the
+text are searched for literally. A query with no letters or digits (e.g.
+`%`) falls back to a literal substring match over subject and body.
+Results stay newest first. Mail sync stores headers only today, so mail is
+found by subject, sender, recipients and thread, not yet by body or
+attachment names.
 
 ```json
 {"items": [ <core.Item as JSON, see below> ]}
