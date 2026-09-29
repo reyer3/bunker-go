@@ -39,6 +39,15 @@ type waClient interface {
 	RemoveEventHandler(id uint32) bool
 
 	SendMessage(ctx context.Context, to types.JID, message *waE2E.Message, extra ...whatsmeow.SendRequestExtra) (whatsmeow.SendResponse, error)
+
+	// BuildEdit, BuildRevoke and BuildReaction build the protocol
+	// messages that edit, delete for everyone and react to an existing
+	// message (see modify.go); SendMessage then delivers them like any
+	// other. BuildRevoke and BuildReaction need the original sender to
+	// key the target message: an empty JID (or our own) means ours.
+	BuildEdit(chat types.JID, id types.MessageID, newContent *waE2E.Message) *waE2E.Message
+	BuildRevoke(chat, sender types.JID, id types.MessageID) *waE2E.Message
+	BuildReaction(chat, sender types.JID, id types.MessageID, reaction string) *waE2E.Message
 	IsOnWhatsApp(ctx context.Context, phones []string) ([]types.IsOnWhatsAppResponse, error)
 	MarkRead(ctx context.Context, ids []types.MessageID, timestamp time.Time, chat, sender types.JID) error
 
