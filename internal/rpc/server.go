@@ -94,6 +94,13 @@ func (s *Server) call(ctx context.Context, req Request) (any, error) {
 		}
 		return listResult{Items: items}, nil
 
+	case MethodListPage:
+		var p listPageParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		return s.svc.ListPage(ctx, p.Filter, p.Query)
+
 	case MethodGet:
 		var p idParams
 		if err := json.Unmarshal(req.Params, &p); err != nil {

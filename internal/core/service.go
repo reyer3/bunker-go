@@ -65,10 +65,17 @@ type Service struct {
 	// rather than erroring.
 	health *HealthTracker
 
+	// queryClock anchors the query language's relative dates (after:7d)
+	// in ListPage; tests inject a fixed instant.
+	queryClock func() time.Time
 	// idempotency remembers recent sends by idempotency key (issue #67,
 	// see idempotency.go) so a retried Send or Reply is not sent twice.
 	idempotency *idempotencyCache
 }
+
+// SetQueryClock overrides the clock ListPage resolves relative query
+// dates against.
+func (s *Service) SetQueryClock(now func() time.Time) { s.queryClock = now }
 
 // SetHealthTracker wires the daemon adapter supervisor's shared
 // HealthTracker (R4) into Service.Health.
@@ -97,6 +104,7 @@ func NewService(store Store, registry *Registry) *Service {
 		avatarCacheCapBytes: avatarCacheCapBytes,
 		presenceLeases:      make(map[string]*presenceLease),
 		presenceAfterFunc:   defaultPresenceAfterFunc,
+		queryClock:          time.Now,
 		idempotency:         newIdempotencyCache(),
 	}
 }
@@ -122,6 +130,32 @@ func defaultChoosePause(min, max time.Duration) time.Duration {
 // List returns the items matching filter.
 func (s *Service) List(ctx context.Context, filter Filter) ([]Item, error) {
 	return s.store.List(ctx, filter)
+}
+
+// ListPage returns one newest-first page of the items matching filter
+// and the query-language string query (see ParseQueryAt; "" adds no
+// condition), resuming after filter.Cursor when set. filter.Limit <= 0
+// returns every match in one page. The query is parsed here, in the
+// daemon, so every entry point (CLI, MCP, a future TUI box) shares one
+// grammar and one clock. It only reads the store: nothing is marked read
+// and no adapter is contacted.
+func (s *Service) ListPage(ctx context.Context, filter Filter, query string) (Page, error) {
+	q, err := ParseQueryAt(query, s.queryClock())
+	if err != nil {
+		return Page{}, err
+	}
+	if len(q.Terms) > 0 {
+		// Keep a Match the caller already parsed: both must hold.
+		if filter.Match != nil {
+			q.Terms = append(append([]QueryTerm(nil), filter.Match.Terms...), q.Terms...)
+		}
+		filter.Match = &q
+	}
+	pager, ok := s.store.(PageLister)
+	if !ok {
+		return Page{}, fmt.Errorf("core: store cannot paginate: %w", ErrUnsupported)
+	}
+	return pager.ListPage(ctx, filter)
 }
 
 // Get returns the stored item for id, or ErrNotFound.

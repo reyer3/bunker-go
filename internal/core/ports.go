@@ -402,8 +402,34 @@ type Filter struct {
 	Thread  string
 	Unread  *bool
 	Label   string
-	Query   string
-	Limit   int
+	// Query is literal free text over the full-text index; operators and
+	// quotes in it are searched for as text (the TUI's search box and
+	// `list -q`). Match is the parsed query language instead.
+	Query string
+	Limit int
+	// Match, when set, must also hold: the parsed form of a
+	// query-language string (see ParseQuery). It is a pointer so Filter
+	// stays comparable with ==.
+	Match *Query `json:",omitempty"`
+	// Cursor resumes a PageLister.ListPage listing after the item a
+	// previous page's NextCursor named. List ignores it.
+	Cursor string `json:",omitempty"`
+}
+
+// Page is one page of a newest-first listing. NextCursor is empty on the
+// last page; otherwise passing it back as Filter.Cursor returns the next
+// one.
+type Page struct {
+	Items      []Item `json:"items"`
+	NextCursor string `json:"next_cursor"`
+}
+
+// PageLister is an optional Store capability: cursor-paginated List
+// (Service.ListPage). It is separate from Store so the many narrow
+// in-memory stores tests use keep compiling; internal/store implements
+// it.
+type PageLister interface {
+	ListPage(ctx context.Context, filter Filter) (Page, error)
 }
 
 // Plan describes what a write op would do (or did). dryRun calls return it

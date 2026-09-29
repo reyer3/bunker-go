@@ -80,13 +80,170 @@ func TestMCPListsTools(t *testing.T) {
 	for _, tool := range tools.Tools {
 		have[tool.Name] = tool
 	}
-	for _, name := range []string{"counts", "list", "read", "thread", "contacts", "calls", "health", "send", "reply"} {
+	for _, name := range []string{"counts", "list", "search", "search_remote", "backfill", "read", "thread", "contacts", "calls", "health", "send", "reply"} {
 		if have[name] == nil {
-			t.Errorf("tool %q missing", name)
+			t.Fatalf("tool %q missing", name)
 		}
 	}
 	if !have["read"].Annotations.ReadOnlyHint || !have["health"].Annotations.ReadOnlyHint || have["send"].Annotations.ReadOnlyHint {
 		t.Error("reads must be marked read-only and sends must not")
+	}
+	if !have["search"].Annotations.ReadOnlyHint || !have["list"].Annotations.ReadOnlyHint {
+		t.Error("search and list only read the store")
+	}
+	// The server-side tools write what they find into the store and
+	// reach the network: not read-only, but not destructive either.
+	for _, name := range []string{"search_remote", "backfill"} {
+		a := have[name].Annotations
+		if a.ReadOnlyHint || a.DestructiveHint == nil || *a.DestructiveHint || a.OpenWorldHint == nil || !*a.OpenWorldHint {
+			t.Errorf("%s annotations = %+v", name, a)
+		}
+	}
+}
+
+// mcpPagedBackend holds three items sharing a timestamp, so paging goes
+// through the id tiebreak.
+func mcpPagedBackend() *fakeBackend {
+	backend := mcpBackend()
+	ts := time.Date(2026, 9, 27, 10, 0, 0, 0, time.UTC)
+	for _, id := range []string{"mail:work:a", "mail:work:b", "mail:work:c"} {
+		backend.items[id] = core.Item{ID: id, Channel: core.ChannelMail, Account: "work", Subject: "factura", Body: strings.Repeat("x", 500), Timestamp: ts}
+	}
+	return backend
+}
+
+func TestMCPSearchPagesThroughTheStore(t *testing.T) {
+	backend := mcpPagedBackend()
+	s := mcpSession(t, backend, false)
+
+	res, out := callTool(t, s, "search", map[string]any{"query": `from:ana "orden de compra" -is:read`, "limit": 2})
+	items, _ := out["items"].([]any)
+	cursor, _ := out["next_cursor"].(string)
+	if res.IsError || len(items) != 2 || cursor == "" {
+		t.Fatalf("search page 1 = %v (%s)", out, toolText(res))
+	}
+	call := backend.listPageCalls[0]
+	if call.Query != `from:ana "orden de compra" -is:read` || call.Filter.Limit != 2 || call.Filter.Cursor != "" {
+		t.Fatalf("backend got %+v", call)
+	}
+	if body := items[0].(map[string]any)["body"].(string); len([]rune(body)) > mcpSnippetLimit+1 {
+		t.Errorf("search should return snippets like list, got %d runes", len([]rune(body)))
+	}
+
+	res, out = callTool(t, s, "search", map[string]any{"query": "factura", "limit": 2, "cursor": cursor})
+	items, _ = out["items"].([]any)
+	if res.IsError || len(items) != 2 || out["next_cursor"] != "" || backend.listPageCalls[1].Filter.Cursor != cursor {
+		t.Fatalf("search page 2 = %v (%s)", out, toolText(res))
+	}
+	if len(backend.readCalls) != 0 {
+		t.Fatalf("search must never read (and so never mark read): %+v", backend.readCalls)
+	}
+
+	res, _ = callTool(t, s, "search", map[string]any{"query": "  "})
+	if !res.IsError || !strings.Contains(toolText(res), "query is required") {
+		t.Fatalf("an empty query should be a tool error: %s", toolText(res))
+	}
+	backend.listErr = errors.New(`core: query: unknown operator "foo:"`)
+	res, _ = callTool(t, s, "search", map[string]any{"query": "foo:bar"})
+	if !res.IsError || !strings.Contains(toolText(res), `"foo:"`) {
+		t.Fatalf("a query error should reach the agent: %s", toolText(res))
+	}
+}
+
+func TestMCPListPaginatesAndStaysCompatible(t *testing.T) {
+	backend := mcpPagedBackend()
+	s := mcpSession(t, backend, false)
+
+	// Without a cursor, list still answers as before, with next_cursor
+	// added.
+	_, out := callTool(t, s, "list", map[string]any{"channel": "mail", "limit": 2})
+	items, _ := out["items"].([]any)
+	cursor, _ := out["next_cursor"].(string)
+	if len(items) != 2 || cursor == "" {
+		t.Fatalf("list page 1 = %v", out)
+	}
+	call := backend.listPageCalls[0]
+	if call.Query != "" || call.Filter.Channel != core.ChannelMail || call.Filter.Limit != 2 {
+		t.Fatalf("backend got %+v", call)
+	}
+	_, out = callTool(t, s, "list", map[string]any{"channel": "mail", "limit": 2, "cursor": cursor})
+	if items, _ := out["items"].([]any); len(items) != 1 || out["next_cursor"] != "" {
+		t.Fatalf("list page 2 = %v", out)
+	}
+	_, out = callTool(t, s, "list", nil)
+	if items, _ := out["items"].([]any); len(items) != 4 || backend.listPageCalls[2].Filter.Limit != mcpListDefault {
+		t.Fatalf("default list = %v, call %+v", out, backend.listPageCalls[2])
+	}
+}
+
+func TestMCPSearchRemote(t *testing.T) {
+	backend := mcpBackend()
+	backend.searchItems = []core.Item{{ID: "mail:work:9", Channel: core.ChannelMail, Account: "work", Subject: "viejo", Body: strings.Repeat("y", 500)}}
+	s := mcpSession(t, backend, false)
+
+	res, out := callTool(t, s, "search_remote", map[string]any{"account": "work", "from": "ana", "since": "2025-01-31", "before": "2w"})
+	items, _ := out["items"].([]any)
+	if res.IsError || len(items) != 1 {
+		t.Fatalf("search_remote = %v (%s)", out, toolText(res))
+	}
+	if len(backend.searchCalls) != 1 {
+		t.Fatalf("calls = %+v", backend.searchCalls)
+	}
+	c := backend.searchCalls[0]
+	wantSince := time.Date(2025, 1, 31, 0, 0, 0, 0, time.Local)
+	if c.Channel != core.ChannelMail || c.Account != "work" || c.Criteria.From != "ana" || c.Criteria.Folder != "INBOX" ||
+		c.Criteria.Limit != mcpListDefault || !c.Criteria.Since.Equal(wantSince) {
+		t.Fatalf("criteria = %+v", c)
+	}
+	if ago := time.Since(c.Criteria.Before); ago < 13*24*time.Hour || ago > 15*24*time.Hour {
+		t.Errorf("before 2w = %v, want about two weeks ago", c.Criteria.Before)
+	}
+	if body := items[0].(map[string]any)["body"].(string); len([]rune(body)) > mcpSnippetLimit+1 {
+		t.Errorf("search_remote should return snippets, got %d runes", len([]rune(body)))
+	}
+
+	res, _ = callTool(t, s, "search_remote", map[string]any{"account": "work", "since": "last week"})
+	if !res.IsError || !strings.Contains(toolText(res), "since") || len(backend.searchCalls) != 1 {
+		t.Fatalf("a bad date must fail before any server search: %s", toolText(res))
+	}
+}
+
+func TestMCPBackfill(t *testing.T) {
+	backend := mcpBackend()
+	backend.backfillResult = core.BackfillResult{Count: 2, FirstID: "mail:work:1", LastID: "mail:work:2"}
+	s := mcpSession(t, backend, false)
+
+	res, out := callTool(t, s, "backfill", map[string]any{"account": "work", "since": "30d", "dry_run": true})
+	if res.IsError || out["count"] != float64(2) || out["dry_run"] != true || out["first_id"] != "mail:work:1" {
+		t.Fatalf("backfill = %v (%s)", out, toolText(res))
+	}
+	c := backend.backfillCalls[0]
+	if c.Channel != core.ChannelMail || c.Account != "work" || c.Folder != "INBOX" || !c.DryRun {
+		t.Fatalf("backfill call = %+v", c)
+	}
+	if ago := time.Since(c.Since); ago < 29*24*time.Hour || ago > 31*24*time.Hour {
+		t.Errorf("since 30d = %v", c.Since)
+	}
+
+	callTool(t, s, "backfill", map[string]any{"account": "work", "since": "2026-01-01", "folder": "Archive"})
+	if c := backend.backfillCalls[1]; c.Folder != "Archive" || c.DryRun || !c.Since.Equal(time.Date(2026, 1, 1, 0, 0, 0, 0, time.Local)) {
+		t.Fatalf("backfill call = %+v", c)
+	}
+
+	// The schema marks since required; an empty one gets the handler's
+	// own error. Neither reaches the server.
+	res, _ = callTool(t, s, "backfill", map[string]any{"account": "work"})
+	if !res.IsError || !strings.Contains(toolText(res), "since") || len(backend.backfillCalls) != 2 {
+		t.Fatalf("backfill without since must fail before the server: %s", toolText(res))
+	}
+	res, _ = callTool(t, s, "backfill", map[string]any{"account": "work", "since": ""})
+	if !res.IsError || !strings.Contains(toolText(res), "since is required") || len(backend.backfillCalls) != 2 {
+		t.Fatalf("backfill without since must fail before the server: %s", toolText(res))
+	}
+	backend.backfillErr = core.ErrUnsupported
+	res, _ = callTool(t, s, "backfill", map[string]any{"account": "personal", "since": "1w"})
+	if !res.IsError {
+		t.Fatal("a backend error must be a tool error")
 	}
 }
 

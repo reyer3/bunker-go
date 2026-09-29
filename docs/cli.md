@@ -287,12 +287,19 @@ returns to the inbox.
 
 ## `bunker list [flags]`
 
-Lists items.
+Lists items from the local store, newest first (items sharing a
+timestamp are ordered by id, descending, so the order is total).
 
 Flags: `--channel c`, `--account a`, `--unread`, `--label l`, `-q text`,
-`--limit n`.
+`--query q`, `--cursor c`, `--limit n` (default 0, no limit).
 
-`-q` is a full-text search over subject, sender name and address,
+`--query` takes the query language below. `--cursor` resumes after the
+page a previous call returned: pass it that call's `next_cursor`. The
+cursor is opaque (base64 of the last item's timestamp and id), stable
+under ties, and a malformed one is an error rather than a restart from
+the top. Every flag combines with every other (AND).
+
+`-q` is a literal full-text search over subject, sender name and address,
 recipients, body, attachment names and thread name, ignoring case and
 accents (`jose` finds `José`). Every word must match; the last one also
 matches as a prefix (`factu` finds `factura`). Operators and quotes in the
@@ -306,8 +313,72 @@ attachments in the store). With `index_body_max_kb = 0` sync stores
 headers only and a mail's body becomes searchable only after it is read.
 
 ```json
-{"items": [ <core.Item as JSON, see below> ]}
+{"items": [ <core.Item as JSON, see below> ], "next_cursor": "eyJ0Ijo..."}
 ```
+
+`next_cursor` is always present and is `""` on the last page (with no
+`--limit`, every match is one page). Non-JSON output is one line per
+item (`<mark> <id>\t<subject>`, `*` for unread); when there is a next
+page, `next_cursor: <c>` goes to stderr so stdout stays one item per
+line.
+
+### Query language (`--query`, `bunker find`, the MCP `search` tool)
+
+Terms are separated by spaces and must all match. Operator names ignore
+case.
+
+| Term | Matches |
+|---|---|
+| `word` | free text over subject, sender, recipients, body, attachment and thread names, like `-q` (prefix-matched, ignoring case and accents) |
+| `"a phrase"` | those words together, in order (no prefix) |
+| `from:x` | the sender's name or address (`from:ana`, `from:ana@example.com`, `from:"Ana María"`) |
+| `to:x` | a recipient's name or address |
+| `subject:x` | the subject only |
+| `is:unread`, `is:read` | read state |
+| `has:attachment` | at least one attachment |
+| `in:<folder>` | mail folder (`Meta.folder`: `INBOX`, `Sent`, or the mailbox name), ignoring ASCII case, so `in:inbox` works; quote names with spaces |
+| `channel:mail\|whatsapp\|matrix` | one channel |
+| `account:x` | one account (exact name) |
+| `label:x` | items carrying that label, ignoring ASCII case |
+| `after:D` | on or after `D` |
+| `before:D` | strictly before `D` |
+| `-term` | negates any word, phrase or operator: `-spam`, `-"no reply"`, `-in:inbox`, `-from:bot` |
+
+`D` is either `YYYY-MM-DD` (the start of that day in the daemon's local
+time) or relative to now: `7d` (days), `2w` (weeks), `3m` (calendar
+months). `after:7d` is "in the last seven days"; `before:3m` is "older
+than three months".
+
+Negation keeps items the field does not apply to: `-in:inbox` also
+returns chats (which have no folder).
+
+Errors are loud, never a silently widened search: an unknown operator
+(`foo:bar`, or a typo like `form:ana`) names the operator; an operator
+with no value, an invalid `is:`/`has:`/`channel:` value, a malformed date
+and an unterminated quote are errors too. Only a letters-only prefix
+before `:` is an operator, so `10:30` is plain text; quote anything else
+containing a colon (`"http://x"`) to search for it. Values are always
+bound as parameters and quoted for the full-text index, so quotes, `%`,
+`_` and FTS5 syntax (`OR`, `NEAR`, `*`, `{col}:`) are searched for as
+text.
+
+Examples:
+
+```sh
+bunker list --query 'from:ana is:unread has:attachment after:2w' --json
+bunker list --query 'in:inbox -label:newsletter "orden de compra"' --limit 20 --json
+bunker list --query 'channel:whatsapp before:2026-01-01' --limit 20 --cursor eyJ0Ijo... --json
+```
+
+## `bunker find <query> [--cursor c] [--limit 50] [--json]`
+
+A shortcut for `bunker list --query`: the positionals are joined with
+spaces into the query, so `bunker find from:ana factura` needs no
+quoting (shell-quote phrases: `bunker find '"orden de compra"'`). It
+takes the same flags as `list` and prints the same output, but
+`--limit` defaults to 50 and a query is required. It searches the local
+store only; `bunker search` is the different command that asks the mail
+server.
 
 ## `bunker read <id> [--no-receipt] [--json]`
 
@@ -1183,7 +1254,10 @@ which answers `daemon_up: false` with a hint to run `bunker daemon`.
 | Tool | What it does |
 |---|---|
 | `counts` | unread counts per channel and account |
-| `list` | newest items with a 200-character snippet (`channel`, `account`, `unread`, `limit` ≤ 100) |
+| `list` | newest items with a 200-character snippet (`channel`, `account`, `unread`, `limit` ≤ 100, default 20, `cursor`); returns `items` and `next_cursor` |
+| `search` | the [query language](#query-language---query-bunker-find-the-mcp-search-tool) over the local store (`query`, `limit` ≤ 100, `cursor`); returns `items` (same shape as `list`) and `next_cursor`; reads only the store, never marks anything read |
+| `search_remote` | `bunker search mail`: an IMAP search on the mail server (`account`, `from`, `subject`, `since`, `before`, `folder` = `INBOX`, `limit` ≤ 100); returns `items` |
+| `backfill` | `bunker backfill mail`: fetch older mail into the store (`account`, `since`, `folder` = `INBOX`, `dry_run`); returns `dry_run`, `count`, `first_id`, `last_id` |
 | `read` | one item with its body (capped at 20,000 characters); **never marks it read** |
 | `thread` | a conversation's newest messages, oldest first |
 | `contacts` | the same matches as `bunker contacts` |
@@ -1199,6 +1273,27 @@ which answers `daemon_up: false` with a hint to run `bunker daemon`.
 
 Reads are annotated read-only; `send`, `reply` and the organize tools
 are annotated destructive.
+
+`search_remote` and `backfill` sit in between, and are annotated
+neither read-only nor destructive (idempotent, open-world):
+- They contact the mail server, so they need the account online and
+  take as long as IMAP does.
+- On the server they only read: nothing is sent, moved, deleted or
+  marked `\Seen` (`BODY.PEEK`), and the regular sync position does not
+  move.
+- They write to the local store. `search_remote` upserts every match
+  (headers, flags and bounded body text, like sync), so an item already
+  stored is refreshed from the server. `backfill` adds only mail the store
+  does not have; `dry_run` counts without storing.
+- Afterwards the mail is visible to `list` and `search`.
+
+Their `since`/`before` take the query language's dates: `YYYY-MM-DD`
+or a relative `7d`, `2w`, `3m`. Both are mail only. `backfill` takes a
+date, not a message count: the daemon's backfill searches the server
+by date (`UID SEARCH SINCE`).
+
+Agents are told to prefer `search` and only reach for `search_remote`
+or `backfill` when the mail is not stored yet.
 
 **Sending is opt-in twice:**
 - `send` and `reply` always build the dry-run plan first. By default they

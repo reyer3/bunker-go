@@ -15,6 +15,9 @@ import (
 // it got.
 type Backend interface {
 	List(ctx context.Context, filter core.Filter) ([]core.Item, error)
+	// ListPage is List with the query language and cursor pagination
+	// (`bunker list --query`, `bunker find`, the MCP search tool).
+	ListPage(ctx context.Context, filter core.Filter, query string) (core.Page, error)
 	Get(ctx context.Context, id string) (core.Item, error)
 	Fetch(ctx context.Context, id string) (core.Item, error)
 	Read(ctx context.Context, id string, markReceipt bool) (core.Item, error)
