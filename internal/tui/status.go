@@ -63,10 +63,17 @@ func (m Model) statusLine() (string, bool) {
 		}
 		down = append(down, fmt.Sprintf("%s/%s %s", channelLabel(h.Channel), safeLine(h.Account), state))
 	}
-	if len(down) == 0 {
+	var parts []string
+	if m.queryActive {
+		parts = append(parts, m.queryStatus())
+	}
+	if len(down) > 0 {
+		parts = append(parts, "⚠ "+strings.Join(down, " · "))
+	}
+	if len(parts) == 0 {
 		return "", false
 	}
-	return "⚠ " + strings.Join(down, " · "), true
+	return strings.Join(parts, " · "), true
 }
 
 // channelLabel is a channel's display name.

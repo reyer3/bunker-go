@@ -11,7 +11,8 @@ import (
 // Inbox filter (issue #39): "/" narrows the inbox to conversations whose
 // name, sender, subject or text contains what is typed, ignoring case
 // and accents. Enter keeps the filter and returns to the list; Esc
-// clears it.
+// clears it. Text with a query operator is sent to the daemon instead
+// (issue #62, query.go).
 
 // groupMatches reports whether any item of g matches the folded query.
 func groupMatches(g inboxGroup, query string) bool {
@@ -37,6 +38,12 @@ func (m Model) startFilter() Model {
 func (m Model) clearFilter() Model {
 	m.filtering = false
 	m.filterQuery = ""
+	m.filterErr = nil
+	m.filterIsQuery = false
+	if m.queryActive {
+		m = m.leaveQuery()
+	}
+	m.queryDebounceToken++
 	return m.clampSelection()
 }
 
@@ -53,7 +60,16 @@ func (m Model) updateFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		return m.clearFilter(), nil
 	case "enter":
+		if m.filterErr != nil {
+			// Keep typing: the error on the filter line says what to fix,
+			// and the text stays as typed.
+			return m, nil
+		}
 		m.filtering = false
+		if m.filterIsQuery && m.canQuery() && (!m.queryActive || m.queryText != m.filterQuery || m.queryErr != nil) {
+			m.queryDebounceToken++
+			return m.startQuery(m.filterQuery)
+		}
 		return m, nil
 	case "backspace":
 		if r := []rune(m.filterQuery); len(r) > 0 {
@@ -69,15 +85,21 @@ func (m Model) updateFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	m.selected = 0
-	return m.clampSelection(), nil
+	return m.afterFilterEdit()
 }
 
 // filterLine is the line above the inbox while a filter is typed or set.
 func (m Model) filterLine() (string, bool) {
 	switch {
+	case m.filtering && m.filterErr != nil:
+		return "/" + safeLine(m.filterQuery) + "▏ · " + queryErrorText(m.filterErr), true
+	case m.filtering && m.filterIsQuery && m.canQuery():
+		return "/" + safeLine(m.filterQuery) + "▏ · ↵ buscar · Esc quitar", true
 	case m.filtering:
 		return "/" + safeLine(m.filterQuery) + "▏ · ↵ aplicar · Esc quitar", true
+	case m.queryActive:
+		// The query itself is on the status line (queryStatus).
+		return "/ editar · Esc volver a la bandeja", true
 	case m.filterQuery != "":
 		return "filtro: " + safeLine(m.filterQuery) + " · / editar · Esc quitar", true
 	}

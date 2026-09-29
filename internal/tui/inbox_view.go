@@ -105,7 +105,7 @@ func (m Model) overviewLines(styles rowStyles, glyphs map[core.Channel]string, w
 		focusTab := i + 1
 		groups := m.sectionRows(channel)
 		lines = append(lines,
-			sectionHeaderLine(channel, glyphs[channel], styles, m.counts, width),
+			sectionHeaderLine(channel, glyphs[channel], styles, m.headerCounts(), width),
 			sectionRuleLine(channel, styles, width),
 		)
 		hits = append(hits, repeatHit(inboxHit{kind: hitFocus, tab: focusTab}, 2)...)
@@ -137,7 +137,7 @@ func (m Model) focusedSectionLines(channel core.Channel, styles rowStyles, glyph
 	focusTab := m.activeTab
 	groups := m.sectionRows(channel)
 	lines = []string{
-		sectionHeaderLine(channel, glyphs[channel], styles, m.counts, width),
+		sectionHeaderLine(channel, glyphs[channel], styles, m.headerCounts(), width),
 		sectionRuleLine(channel, styles, width),
 	}
 	hits = repeatHit(inboxHit{kind: hitFocus, tab: focusTab}, 2)

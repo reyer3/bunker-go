@@ -43,6 +43,17 @@ func (m Model) currentChannelFilter() (core.Channel, bool) {
 // existing newest-first order: the raw per-conversation groups, before
 // any Mail sender wrapping.
 func (m Model) threadGroups(channel core.Channel) []inboxGroup {
+	if m.queryActive {
+		// The daemon already applied the query: its results are shown
+		// as they are, never filtered again as text.
+		out := make([]inboxGroup, 0, len(m.queryGroups))
+		for _, g := range m.queryGroups {
+			if len(g.items) > 0 && g.items[0].Channel == channel {
+				out = append(out, g)
+			}
+		}
+		return out
+	}
 	out := make([]inboxGroup, 0, len(m.groups))
 	query := m.foldedFilter()
 	for _, g := range m.groups {
@@ -60,7 +71,9 @@ func (m Model) threadGroups(channel core.Channel) []inboxGroup {
 // navThread row per conversation, same order as before sender-groups.md.
 func (m Model) sectionRows(channel core.Channel) []navRow {
 	threads := m.threadGroups(channel)
-	if channel != core.ChannelMail {
+	// Query results list every matching conversation directly: folding
+	// them under sender headers would hide the very matches asked for.
+	if channel != core.ChannelMail || m.queryActive {
 		rows := make([]navRow, len(threads))
 		for i, t := range threads {
 			rows[i] = navRow{kind: navThread, thread: t}

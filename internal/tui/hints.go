@@ -133,7 +133,7 @@ var helpSections = []helpSection{
 		{"↵", "abrir"},
 		{"←/→", "plegar/desplegar un remitente"},
 		{"n", "nuevo mensaje (elegir contacto)"},
-		{"/", "filtrar por nombre o texto (Esc quita el filtro)"},
+		{"/", "filtrar por texto o consultar (ver Consultas)"},
 		{"r", "responder"},
 		{"m", "marcar leído (envía confirmación de lectura)"},
 		{"u", "deshacer el último leído (vuelve a sin leer)"},
@@ -142,6 +142,24 @@ var helpSections = []helpSection{
 		{"0", "volver a la vista general"},
 		{"Tab/⇧Tab", "siguiente/anterior sección"},
 		{"q", "salir"},
+	}},
+	{"query", "Consultas (/)", [][2]string{
+		{"texto", "filtra al instante lo ya cargado"},
+		{"from: to:", "remitente, destinatarios"},
+		{"subject:", "asunto"},
+		{"is:", "unread o read (sin leer, leído)"},
+		{"has:", "attachment (con adjuntos)"},
+		{"in:", "carpeta de correo (in:Archive)"},
+		{"channel:", "mail, whatsapp o matrix"},
+		{"account:", "cuenta"},
+		{"label:", "etiqueta"},
+		{"before:", "antes de AAAA-MM-DD, o 7d, 2w, 3m"},
+		{"after:", "desde esa fecha"},
+		{"\"a b\"", "frase exacta (from:\"Ana María\")"},
+		{"-x", "excluir una palabra u operador"},
+		{"↵", "con un operador, busca en todo el historial"},
+		{"↓ al final", "cargar más resultados"},
+		{"Esc", "volver a la bandeja"},
 	}},
 	{"sidebar", "Panel lateral", [][2]string{
 		{"j/k, ↑/↓", "mover selección"},
@@ -206,6 +224,8 @@ func (m Model) helpContext() string {
 		return "thread"
 	case m.picker != nil:
 		return "picker"
+	case m.filtering:
+		return "query"
 	case m.sidebar && !m.detail:
 		return "sidebar"
 	}

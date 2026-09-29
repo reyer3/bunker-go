@@ -31,11 +31,11 @@ func (m Model) sidebarTabCount(tab int) int {
 	if tab <= 0 || tab-1 >= len(channelOrder) {
 		total := 0
 		for _, ch := range channelOrder {
-			total += channelUnreadTotal(m.counts, ch)
+			total += channelUnreadTotal(m.headerCounts(), ch)
 		}
 		return total
 	}
-	return channelUnreadTotal(m.counts, channelOrder[tab-1])
+	return channelUnreadTotal(m.headerCounts(), channelOrder[tab-1])
 }
 
 // sidebarTabLine renders one entry of the channel list: a marker on the

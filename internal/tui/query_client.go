@@ -232,6 +232,19 @@ func (c *queryClient) Health(ctx context.Context) ([]core.AdapterHealth, error) 
 	})
 }
 
+// ListPage is an idempotent query (the / filter's daemon search, issue
+// #62); it errors with core.ErrUnsupported when the connection
+// underneath cannot page, so the filter falls back to memory.
+func (c *queryClient) ListPage(ctx context.Context, filter core.Filter, text string) (core.Page, error) {
+	return query(c, ctx, func(client Client) (core.Page, error) {
+		pc, ok := client.(PageClient)
+		if !ok {
+			return core.Page{}, fmt.Errorf("tui: list page: %w", core.ErrUnsupported)
+		}
+		return pc.ListPage(ctx, filter, text)
+	})
+}
+
 // Contacts is an idempotent query; it errors with core.ErrUnsupported when
 // the connection underneath has no contact listing.
 func (c *queryClient) Contacts(ctx context.Context, filter core.ContactFilter) ([]core.Contact, error) {
@@ -306,4 +319,7 @@ func (c *queryClient) Close() error {
 	return client.Close()
 }
 
-var _ Client = (*queryClient)(nil)
+var (
+	_ Client     = (*queryClient)(nil)
+	_ PageClient = (*queryClient)(nil)
+)

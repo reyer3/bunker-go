@@ -96,8 +96,31 @@ type Model struct {
 	unreadOnOpen string
 	// filterQuery narrows the inbox; filtering is true while it is typed
 	// (issue #39, filter.go).
-	filterQuery     string
-	filtering       bool
+	filterQuery string
+	filtering   bool
+	// filterErr is the typed filter's parse error, shown on the filter
+	// line without touching the text; filterIsQuery is true when it
+	// holds an operator (issue #62, query.go).
+	filterErr     error
+	filterIsQuery bool
+	// Daemon query results (issue #62, query.go): while queryActive, the
+	// sections show queryGroups (every loaded page of queryText's
+	// matches, grouped by conversation) instead of the inbox groups.
+	// queryCursor resumes the next page ("" when there is none),
+	// queryToken discards a stale page and queryDebounceToken a stale
+	// debounce tick. queryNoPaging remembers that the daemon cannot page
+	// queries, so the filter stays in memory for the session.
+	queryActive        bool
+	queryText          string
+	queryItems         []core.Item
+	queryGroups        []inboxGroup
+	queryCursor        string
+	queryLoading       bool
+	queryErr           error
+	queryToken         uint64
+	queryDebounceToken uint64
+	queryNoPaging      bool
+
 	glyphs          map[core.Channel]string
 	render          *lipgloss.Renderer
 	now             func() time.Time
