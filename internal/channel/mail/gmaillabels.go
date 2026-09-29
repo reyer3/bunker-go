@@ -187,16 +187,18 @@ func checkTagged(tag, line string) error {
 }
 
 // storeGmailLabels applies AddLabels/RemoveLabels as X-GM-LABELS over a
-// dedicated raw connection (see the package comment above).
-func (a *Adapter) storeGmailLabels(ctx context.Context, uid imap.UID, op labelOp) error {
+// dedicated raw connection (see the package comment above). mailbox is
+// the one uid belongs to: UIDs are per mailbox, so selecting INBOX for a
+// message synced from another folder would label the wrong message.
+func (a *Adapter) storeGmailLabels(ctx context.Context, mailbox string, uid imap.UID, op labelOp) error {
 	conn, err := dialRawIMAPXOAuth2(ctx, a.cfg, a.tokenSource, a.gmailTLSConfig)
 	if err != nil {
 		return fmt.Errorf("gmail labels: %w", err)
 	}
 	defer conn.Close()
 
-	if err := conn.Select("INBOX"); err != nil {
-		return fmt.Errorf("gmail labels: select INBOX: %w", err)
+	if err := conn.Select(mailbox); err != nil {
+		return fmt.Errorf("gmail labels: select %s: %w", mailbox, err)
 	}
 	if len(op.add) > 0 {
 		if err := conn.StoreGmailLabels(uid, imap.StoreFlagsAdd, op.add); err != nil {
@@ -224,8 +226,9 @@ type labelOp struct {
 // this Gmail extension item any more than it can STORE it. Every call
 // site treats a non-nil error as non-fatal to its own sync/reconcile/
 // fetch: log it and leave whatever Labels the item already had, so a
-// transient Gmail/network problem here never breaks mail sync.
-func (a *Adapter) fetchGmailLabelsRaw(ctx context.Context, uids []imap.UID) (map[imap.UID][]string, error) {
+// transient Gmail/network problem here never breaks mail sync. mailbox
+// is the one uids belong to (see storeGmailLabels).
+func (a *Adapter) fetchGmailLabelsRaw(ctx context.Context, mailbox string, uids []imap.UID) (map[imap.UID][]string, error) {
 	if len(uids) == 0 {
 		return map[imap.UID][]string{}, nil
 	}
@@ -235,8 +238,8 @@ func (a *Adapter) fetchGmailLabelsRaw(ctx context.Context, uids []imap.UID) (map
 	}
 	defer conn.Close()
 
-	if err := conn.Select("INBOX"); err != nil {
-		return nil, fmt.Errorf("gmail labels fetch: select INBOX: %w", err)
+	if err := conn.Select(mailbox); err != nil {
+		return nil, fmt.Errorf("gmail labels fetch: select %s: %w", mailbox, err)
 	}
 	labels, err := conn.FetchGmailLabels(uids)
 	if err != nil {

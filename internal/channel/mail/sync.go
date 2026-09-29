@@ -59,7 +59,9 @@ func (a *Adapter) Run(ctx context.Context, sink core.Sink) error {
 // goroutine per its docs — to runOnce's own goroutine, so sink writes
 // never race syncFrom's.
 type pendingUpdate struct {
-	deleteID string // set for an EXPUNGE resolved to a tracked UID
+	// goneID is set for an EXPUNGE resolved to a tracked UID: the item
+	// left INBOX, moved or deleted (see resolveVanished).
+	goneID   string
 	markID   string // set for a flag FETCH resolved to a tracked UID
 	markSeen bool
 	// labels is this FETCH's Dovecot keywords (T14a), applied to the
@@ -105,15 +107,17 @@ func (a *Adapter) runOnce(ctx context.Context, sink core.Sink, reconciled *bool)
 		// Expunge implements T9b's live reconciliation for moves/deletes
 		// made elsewhere (Roundcube, Gmail): the server only reports a
 		// sequence number, so it is resolved through tracker back to the
-		// UID-keyed item id this package uses.
+		// UID-keyed item id this package uses. The message is only
+		// reported gone from INBOX here; whether it was deleted or moved
+		// to another synced folder is resolveVanished's call (#53).
 		Expunge: func(seqNum uint32) {
 			uid, ok := tracker.expunge(seqNum)
 			if !ok {
 				return
 			}
-			id := fmt.Sprintf("mail:%s:%d.%d", a.cfg.Name, uidValidity, uid)
+			id := itemID(a.cfg.Name, "INBOX", uidValidity, uid)
 			select {
-			case updates <- pendingUpdate{deleteID: id}:
+			case updates <- pendingUpdate{goneID: id}:
 			default:
 			}
 		},
@@ -130,7 +134,7 @@ func (a *Adapter) runOnce(ctx context.Context, sink core.Sink, reconciled *bool)
 			if !ok {
 				return
 			}
-			id := fmt.Sprintf("mail:%s:%d.%d", a.cfg.Name, uidValidity, uid)
+			id := itemID(a.cfg.Name, "INBOX", uidValidity, uid)
 			select {
 			case updates <- pendingUpdate{
 				markID:   id,
@@ -153,26 +157,21 @@ func (a *Adapter) runOnce(ctx context.Context, sink core.Sink, reconciled *bool)
 		return fmt.Errorf("mail: discover folders for %q: %w", a.cfg.Name, err)
 	}
 
-	// firstConnect gates both INBOX's and Sent's startup reconciliation
-	// (T9c/K2) to run only once per process, on the first successful
-	// connection — *reconciled is only set true once both have run,
-	// below, so a Sent-folder error before that point still lets a later
-	// reconnect retry reconciling both.
+	// firstConnect gates INBOX's startup reconciliation (T9c) to run only
+	// once per process, on the first successful connection. Every other
+	// synced folder is reconciled on every pass over it (pollFolders),
+	// since that is also how a move out of it is noticed (#53).
 	firstConnect := reconciled != nil && !*reconciled
 
-	// K2: sync the Sent folder before selecting INBOX below, never after
-	// — INBOX stays selected from here through the whole IDLE loop, so
-	// this never re-selects away from it and misses a live EXPUNGE/FETCH
-	// another client makes on INBOX while this connection would
-	// otherwise be looking at Sent. Sent itself gets no live IDLE (only
-	// send.go's own APPEND is truly "live" for it); this bounded
-	// pull-sync on every (re)connect, mirroring INBOX's own initial-sync
-	// window, is what otherwise keeps it current (e.g. a message sent
-	// from the phone or webmail). A missing/unreachable Sent mailbox is
+	// K2/#52: sync every folder besides INBOX before selecting INBOX
+	// below, never after — INBOX stays selected from here through the
+	// whole IDLE loop, so this never re-selects away from it and misses a
+	// live EXPUNGE/FETCH another client makes on INBOX while this
+	// connection would otherwise be looking at another folder. Later
+	// passes over those folders run on their own short-lived connection
+	// (pollAndResolve) for the same reason. A folder that fails is
 	// logged, not fatal: mail sync otherwise works fine without it.
-	if err := a.syncSentFolder(ctx, client, sink, folders, firstConnect); err != nil {
-		log.Printf("mail: sync %q Sent folder: %v", a.cfg.Name, err)
-	}
+	pending := a.pollFolders(ctx, client, sink, folders, a.planSyncFolders(folders))
 
 	mbox, err := client.Select("INBOX", nil).Wait()
 	if err != nil {
@@ -181,9 +180,11 @@ func (a *Adapter) runOnce(ctx context.Context, sink core.Sink, reconciled *bool)
 	uidValidity = mbox.UIDValidity
 
 	if firstConnect {
-		if err := a.reconcileFolder(ctx, client, sink, "INBOX", mbox.UIDValidity); err != nil {
+		gone, err := a.reconcileFolder(ctx, client, sink, "INBOX", "INBOX", mbox.UIDValidity, nil)
+		if err != nil {
 			return err
 		}
+		pending = append(pending, gone...)
 		*reconciled = true
 	}
 
@@ -216,6 +217,25 @@ func (a *Adapter) runOnce(ctx context.Context, sink core.Sink, reconciled *bool)
 		reconcileTick = ticker.C
 	}
 
+	// #52: the other folders are polled, and #53: messages gone from a
+	// synced folder are looked for in the others, on a second, short-lived
+	// connection, unlike R4's reconcile above. Polling means SELECTing
+	// every other folder: done on this connection it would leave INBOX
+	// for the whole pass, so EXPUNGE and flag pushes made meanwhile would
+	// be lost and the sequence-number tracker the live EXPUNGE path
+	// depends on would go stale. That second connection lives only for
+	// the pass, once every folderPollInterval (or right after an
+	// EXPUNGE), which stays far under per-account connection caps; Fetch,
+	// Organize and Send already open their own the same way.
+	pollTicker := time.NewTicker(a.folderPollInterval)
+	defer pollTicker.Stop()
+	// settle fires expungeSettle after messages go missing, to look for
+	// them in the other folders; nil (never fires) while none are pending.
+	var settle <-chan time.Time
+	if len(pending) > 0 {
+		settle = time.After(expungeSettle)
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -223,6 +243,12 @@ func (a *Adapter) runOnce(ctx context.Context, sink core.Sink, reconciled *bool)
 			return ctx.Err()
 		case <-client.Closed():
 			return fmt.Errorf("mail: connection to %q closed", a.cfg.Name)
+		case <-pollTicker.C:
+			pending = a.pollAndResolve(ctx, sink, true, pending)
+			settle = nil
+		case <-settle:
+			pending = a.pollAndResolve(ctx, sink, false, pending)
+			settle = nil
 		case <-reconcileTick:
 			if err := idleCmd.Close(); err != nil {
 				return fmt.Errorf("mail: stop idle for %q (seen reconcile): %w", a.cfg.Name, err)
@@ -238,9 +264,10 @@ func (a *Adapter) runOnce(ctx context.Context, sink core.Sink, reconciled *bool)
 				return fmt.Errorf("mail: re-idle for %q (seen reconcile): %w", a.cfg.Name, err)
 			}
 		case upd := <-updates:
-			if upd.deleteID != "" {
-				if err := sink.Delete(ctx, upd.deleteID); err != nil && !errors.Is(err, core.ErrNotFound) {
-					return fmt.Errorf("mail: reconcile expunge %s: %w", upd.deleteID, err)
+			if upd.goneID != "" {
+				pending = append(pending, upd.goneID)
+				if settle == nil {
+					settle = time.After(expungeSettle)
 				}
 				continue
 			}
@@ -282,6 +309,98 @@ func (a *Adapter) runOnce(ctx context.Context, sink core.Sink, reconciled *bool)
 			}
 		}
 	}
+}
+
+// pollFolders syncs every folder of plan once on client, which it
+// leaves selected on the last one: for each, it reconciles the stored
+// items against the server (refreshing \Seen and keywords, and
+// collecting the ones gone from it, #53) and fetches what arrived since
+// its cursor (or the bounded initial window, on a folder synced for the
+// first time). It returns the ids of the stored items that went missing,
+// for resolveVanished. A folder that fails is logged and skipped, so one
+// broken folder never stops the others.
+func (a *Adapter) pollFolders(ctx context.Context, client *imapclient.Client, sink core.Sink, folders *FolderMap, plan []syncFolder) []string {
+	if len(plan) == 0 {
+		return nil
+	}
+	var stored []core.Item
+	if lister, ok := sink.(storeLister); ok {
+		items, err := lister.List(ctx, core.Filter{Channel: core.ChannelMail, Account: a.cfg.Name})
+		if err != nil {
+			a.logFolderError("list stored items", "", err)
+		} else {
+			stored = items
+		}
+	}
+
+	var gone []string
+	for _, f := range plan {
+		mbox, err := client.Select(f.Mailbox, nil).Wait()
+		if err != nil {
+			a.logFolderError("select", f.Mailbox, err)
+			continue
+		}
+		if stored != nil {
+			vanished, err := a.reconcileFolder(ctx, client, sink, f.Folder, f.Mailbox, mbox.UIDValidity, stored)
+			gone = append(gone, vanished...)
+			if err != nil {
+				a.logFolderError("reconcile", f.Mailbox, err)
+			}
+		}
+		// No live IDLE tracking is needed here (nil tracker): only INBOX
+		// is IDLEd, so there is no seq→UID EXPUNGE/FETCH mapping to keep
+		// for any other folder between passes.
+		if _, err := a.syncFrom(ctx, client, sink, folders, mbox.UIDValidity, 0, nil, mbox.NumMessages, f.Folder); err != nil {
+			a.logFolderError("sync", f.Mailbox, err)
+		}
+	}
+	return gone
+}
+
+// pollAndResolve is one pass on its own connection (see runOnce for why
+// not the IDLE one): when poll is set it re-LISTs the folders, so one
+// created in webmail since is picked up, and runs pollFolders over them;
+// then it hands every item gone missing (pending plus what the poll
+// found) to resolveVanished. It returns the ids still undecided, to be
+// retried on the next pass. A failure to connect is logged and keeps
+// every pending id for the next pass: without looking, a moved message
+// must not be taken for a deleted one.
+func (a *Adapter) pollAndResolve(ctx context.Context, sink core.Sink, poll bool, pending []string) []string {
+	if !poll && len(pending) == 0 {
+		return nil
+	}
+	client, err := a.dial(ctx, a.cfg, a.passwordSource, a.tokenSource, nil)
+	if err != nil {
+		a.logFolderError("connect for folder poll", "", err)
+		return pending
+	}
+	defer client.Close()
+
+	folders, err := discoverFolders(ctx, client, a.cfg)
+	if err != nil {
+		a.logFolderError("discover folders", "", err)
+		return pending
+	}
+	plan := a.planSyncFolders(folders)
+	if poll {
+		pending = append(pending, a.pollFolders(ctx, client, sink, folders, plan)...)
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+	kept, err := a.resolveVanished(ctx, client, sink, folders, plan, pending)
+	if err != nil {
+		a.logFolderError("resolve moved or deleted mail", "", err)
+	}
+	return kept
+}
+
+// logFolderError logs a failure in the passes over non-INBOX folders
+// (#52) at error level: none of them fails the connection, so this log
+// is the only place such a failure shows up.
+func (a *Adapter) logFolderError(what, mailbox string, err error) {
+	a.logger.Error("mail: folder sync: "+what,
+		"channel", string(core.ChannelMail), "account", a.cfg.Name, "folder", mailbox, "error", err)
 }
 
 // maxSeenReconcileItems bounds the periodic \Seen safety-net reconcile
@@ -356,6 +475,19 @@ func cursorKey(account, name string) string {
 	return fmt.Sprintf("mail:%s:%s", account, name)
 }
 
+// folderCursorName is the per-folder part of a folder's sync cursor keys
+// (#52). INBOX and Sent keep their pre-#52 names ("inbox", "sent") so an
+// existing database resumes where it left off; any other folder is keyed
+// by its exact mailbox name, case kept, since two mailboxes may differ
+// only in case.
+func folderCursorName(folder string) string {
+	switch folder {
+	case "INBOX", "Sent":
+		return strings.ToLower(folder)
+	}
+	return "folder:" + folder
+}
+
 // syncFrom fetches and upserts every message after sinceUID (or, when
 // sinceUID is 0, the last initialSyncLimit of the numMessages in the
 // selected mailbox), returning the
@@ -365,7 +497,7 @@ func cursorKey(account, name string) string {
 // mismatching UIDs; on that mismatch this resets to a fresh initial
 // sync.
 func (a *Adapter) syncFrom(ctx context.Context, client *imapclient.Client, sink core.Sink, folders *FolderMap, uidValidity uint32, sinceUID imap.UID, tracker *seqTracker, numMessages uint32, folder string) (imap.UID, error) {
-	cursorName := strings.ToLower(folder)
+	cursorName := folderCursorName(folder)
 	validityKey := cursorKey(a.cfg.Name, cursorName+".uidvalidity")
 	lastUIDKey := cursorKey(a.cfg.Name, cursorName+".last_uid")
 
@@ -425,13 +557,58 @@ func (a *Adapter) fetchAndUpsert(ctx context.Context, client *imapclient.Client,
 	return highWater, nil
 }
 
-// fetchAndUpsertRange FETCHes numSet's headers/flags/envelope and upserts
-// each resulting item via sink, exactly as fetchAndUpsert always did,
-// but without touching any sync cursor — extracted so Backfill
-// (backfill.go, H2) can reuse the identical item-building/upsert logic
-// on a UID set found by search, which must never move the regular Run
-// sync cursor forward. tracker may be nil (Backfill has none to feed).
+// fetchAndUpsertRange FETCHes numSet's headers/flags/envelope (and the
+// bounded body text, bodytext.go) and upserts each resulting item via
+// sink, exactly as fetchAndUpsert always did, but without touching any
+// sync cursor — extracted so Backfill (backfill.go, H2) can reuse the
+// identical item-building/upsert logic on a UID set found by search,
+// which must never move the regular Run sync cursor forward. tracker
+// may be nil (Backfill has none to feed). Every synced folder goes
+// through here, so mail in any of them is stored the same way (#52).
 func (a *Adapter) fetchAndUpsertRange(ctx context.Context, client *imapclient.Client, sink core.Sink, folders *FolderMap, numSet imap.NumSet, uidValidity uint32, highWater imap.UID, tracker *seqTracker, folder string) (imap.UID, error) {
+	fetched, err := a.fetchItems(ctx, client, folders, numSet, uidValidity, folder)
+	if err != nil {
+		return highWater, err
+	}
+
+	dedupe := a.newAllMailDedupe(ctx, sink, folders, folder, len(fetched))
+	for _, f := range fetched {
+		// R5: seqTracker.track must run before Sink.Upsert, not after.
+		// waitForUpsert-style test synchronization (and, in production,
+		// an EXPUNGE delivered on the imapclient handler goroutine)
+		// unblocks the instant Upsert is called; if track ran afterward,
+		// an EXPUNGE for this same sequence number landing in that gap
+		// would resolve to "untracked" and be silently dropped instead
+		// of reaching the store (the root cause of
+		// TestAdapterRunObservesExpungeFromAnotherClient's flakiness).
+		if tracker != nil {
+			tracker.track(f.seq, f.uid)
+		}
+		if !dedupe.skip(f) {
+			if err := dedupe.upsert(ctx, f.item); err != nil {
+				return highWater, err
+			}
+		}
+		if f.uid > highWater {
+			highWater = f.uid
+		}
+	}
+
+	return highWater, nil
+}
+
+// fetchedMsg is one message fetchItems read, built into an item.
+type fetchedMsg struct {
+	item  core.Item
+	seq   uint32
+	uid   imap.UID
+	draft bool
+}
+
+// fetchItems FETCHes numSet in the mailbox selected on client (folder's)
+// and builds each message into an item: headers, flags, envelope, the
+// bounded body text and, on Gmail, its labels. It stores nothing.
+func (a *Adapter) fetchItems(ctx context.Context, client *imapclient.Client, folders *FolderMap, numSet imap.NumSet, uidValidity uint32, folder string) ([]fetchedMsg, error) {
 	fetchOptions := &imap.FetchOptions{
 		UID:      true,
 		Flags:    true,
@@ -445,7 +622,7 @@ func (a *Adapter) fetchAndUpsertRange(ctx context.Context, client *imapclient.Cl
 	a.addBodyTextSections(fetchOptions)
 	messages, err := client.Fetch(numSet, fetchOptions).Collect()
 	if err != nil {
-		return highWater, fmt.Errorf("mail: fetch %s for %q: %w", folder, a.cfg.Name, err)
+		return nil, fmt.Errorf("mail: fetch %s for %q: %w", folder, a.cfg.Name, err)
 	}
 
 	// T14(a): Gmail's X-GM-LABELS never travels as an ordinary FLAGS
@@ -460,7 +637,7 @@ func (a *Adapter) fetchAndUpsertRange(ctx context.Context, client *imapclient.Cl
 		for i, msg := range messages {
 			uids[i] = msg.UID
 		}
-		labels, err := a.fetchGmailLabelsRaw(ctx, uids)
+		labels, err := a.fetchGmailLabelsRaw(ctx, mailboxFor(folders, folder), uids)
 		if err != nil {
 			log.Printf("mail: sync: gmail X-GM-LABELS fetch for %q failed, leaving Labels as synced: %v", a.cfg.Name, err)
 		} else {
@@ -468,65 +645,25 @@ func (a *Adapter) fetchAndUpsertRange(ctx context.Context, client *imapclient.Cl
 		}
 	}
 
+	out := make([]fetchedMsg, 0, len(messages))
 	for _, msg := range messages {
 		item := a.buildItem(msg, folders, uidValidity, folder)
 		a.fillBodyText(&item, msg)
 		if labels, ok := gmailLabels[msg.UID]; ok {
 			item.Labels = labels
 		}
-		// R5: seqTracker.track must run before Sink.Upsert, not after.
-		// waitForUpsert-style test synchronization (and, in production,
-		// an EXPUNGE delivered on the imapclient handler goroutine)
-		// unblocks the instant Upsert is called; if track ran afterward,
-		// an EXPUNGE for this same sequence number landing in that gap
-		// would resolve to "untracked" and be silently dropped instead
-		// of reaching the store (the root cause of
-		// TestAdapterRunObservesExpungeFromAnotherClient's flakiness).
-		if tracker != nil {
-			tracker.track(msg.SeqNum, msg.UID)
-		}
-		if err := sink.Upsert(ctx, item); err != nil {
-			return highWater, fmt.Errorf("mail: upsert %s: %w", item.ID, err)
-		}
-		if msg.UID > highWater {
-			highWater = msg.UID
-		}
+		out = append(out, fetchedMsg{item: item, seq: msg.SeqNum, uid: msg.UID, draft: hasFlag(msg.Flags, imap.FlagDraft)})
 	}
-
-	return highWater, nil
+	return out, nil
 }
 
-// syncSentFolder syncs the Sent mailbox (K2): it selects the folder
-// discovered via SPECIAL-USE \Sent, falling back to the configured
-// prefix (e.g. "INBOX.Sent") when the server advertises no special-use
-// attribute, reconciles previously stored Sent items against it once per
-// connection (parity with INBOX's own reconcileFolder) when
-// firstConnect, then imports/refreshes its most recent
-// a.initialSyncLimit messages via the same bounded syncFrom INBOX uses.
-// It leaves the Sent mailbox selected; the caller re-selects INBOX for
-// IDLE. A SELECT failure (no Sent mailbox yet, e.g. an account that has
-// never sent anything on a server that doesn't pre-create one) is
-// returned for the caller to log, never fatal to the connection.
-func (a *Adapter) syncSentFolder(ctx context.Context, client *imapclient.Client, sink core.Sink, folders *FolderMap, firstConnect bool) error {
-	mailbox := folders.Resolve("Sent")
-	mbox, err := client.Select(mailbox, nil).Wait()
-	if err != nil {
-		return fmt.Errorf("select %s: %w", mailbox, err)
-	}
-
-	if firstConnect {
-		if err := a.reconcileFolder(ctx, client, sink, "Sent", mbox.UIDValidity); err != nil {
-			return fmt.Errorf("reconcile: %w", err)
+func hasFlag(flags []imap.Flag, want imap.Flag) bool {
+	for _, f := range flags {
+		if strings.EqualFold(string(f), string(want)) {
+			return true
 		}
 	}
-
-	// No live IDLE tracking is needed for Sent (nil tracker): unlike
-	// INBOX, this mailbox is never IDLEd, so there is no seq→UID EXPUNGE/
-	// FETCH mapping to maintain between calls.
-	if _, err := a.syncFrom(ctx, client, sink, folders, mbox.UIDValidity, 0, nil, mbox.NumMessages, "Sent"); err != nil {
-		return fmt.Errorf("sync: %w", err)
-	}
-	return nil
+	return false
 }
 
 // referencesHeaderRe pulls every "<...>" message id token out of a raw
@@ -547,8 +684,10 @@ func stripAngle(s string) string {
 }
 
 // buildItem converts one FETCH response into a core.Item. folder is the
-// friendly mailbox name it was fetched from ("INBOX" or "Sent", K2):
-// it selects the id scheme (itemID), Meta["folder"], and two rules that
+// canonical folder it was fetched from ("INBOX", "Sent" (K2), or the
+// server's name for any other synced mailbox, #52): it selects the id
+// scheme (itemID), Meta["folder"] (how the user sees which mailbox an
+// item is in), and two rules that
 // hold regardless of what the raw message headers say — a Sent item is
 // always FromMe and never Unread, since it is what the user sent, not
 // what the server marked \Seen.

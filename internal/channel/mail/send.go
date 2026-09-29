@@ -85,10 +85,11 @@ func (a *Adapter) Send(ctx context.Context, out core.Outgoing) (core.Receipt, er
 	var inReplyTo string
 	var references []string
 	var origUID imap.UID
+	var origMailbox string
 	isReply := out.ReplyTo != ""
 
 	if isReply {
-		account, _, uidValidity, uid, err := parseItemID(out.ReplyTo)
+		account, origFolder, uidValidity, uid, err := parseItemID(out.ReplyTo)
 		if err != nil {
 			return core.Receipt{}, fmt.Errorf("mail: send: reply to %q: %w", out.ReplyTo, err)
 		}
@@ -96,10 +97,12 @@ func (a *Adapter) Send(ctx context.Context, out core.Outgoing) (core.Receipt, er
 			return core.Receipt{}, fmt.Errorf("mail: send: reply target %q is not for account %q: %w", out.ReplyTo, a.cfg.Name, core.ErrNotFound)
 		}
 		origUID = uid
+		// #52: the original may live in any synced folder, not just INBOX.
+		origMailbox = mailboxFor(folders, origFolder)
 
-		mbox, err := imapClient.Select("INBOX", &imap.SelectOptions{ReadOnly: true}).Wait()
+		mbox, err := imapClient.Select(origMailbox, &imap.SelectOptions{ReadOnly: true}).Wait()
 		if err != nil {
-			return core.Receipt{}, fmt.Errorf("mail: send: select INBOX: %w", err)
+			return core.Receipt{}, fmt.Errorf("mail: send: select %s: %w", origMailbox, err)
 		}
 		if mbox.UIDValidity != uidValidity {
 			return core.Receipt{}, fmt.Errorf("mail: send: reply target %q: mailbox UIDVALIDITY changed: %w", out.ReplyTo, core.ErrNotFound)
@@ -153,8 +156,8 @@ func (a *Adapter) Send(ctx context.Context, out core.Outgoing) (core.Receipt, er
 	}
 
 	if isReply {
-		if _, err := imapClient.Select("INBOX", nil).Wait(); err != nil {
-			return core.Receipt{}, fmt.Errorf("mail: send: re-select INBOX to mark answered: %w", err)
+		if _, err := imapClient.Select(origMailbox, nil).Wait(); err != nil {
+			return core.Receipt{}, fmt.Errorf("mail: send: re-select %s to mark answered: %w", origMailbox, err)
 		}
 		storeFlags := &imap.StoreFlags{Op: imap.StoreFlagsAdd, Silent: true, Flags: []imap.Flag{imap.FlagAnswered}}
 		if err := imapClient.Store(imap.UIDSetNum(origUID), storeFlags, nil).Close(); err != nil {

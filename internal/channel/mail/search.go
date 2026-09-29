@@ -44,6 +44,10 @@ func (a *Adapter) Search(ctx context.Context, store core.Store, criteria core.Se
 		return nil, fmt.Errorf("mail: search %s: %w", a.cfg.Name, err)
 	}
 	mailbox := folders.Resolve(folder)
+	// Ids and Meta use the canonical folder (#52), never the friendly
+	// name asked for, so "Archive" and "INBOX.Archive" name the same items
+	// Run's own sync of that folder stores.
+	folder = canonicalFolder(folders, mailbox)
 
 	mbox, err := client.Select(mailbox, &imap.SelectOptions{ReadOnly: true}).Wait()
 	if err != nil {

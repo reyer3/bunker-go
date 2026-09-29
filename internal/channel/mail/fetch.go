@@ -38,7 +38,7 @@ func (a *Adapter) Fetch(ctx context.Context, id string) (core.Item, error) {
 	if err != nil {
 		return core.Item{}, fmt.Errorf("mail: fetch %s: %w", id, err)
 	}
-	mailbox := folders.Resolve(folder)
+	mailbox := mailboxFor(folders, folder)
 
 	mbox, err := client.Select(mailbox, &imap.SelectOptions{ReadOnly: true}).Wait()
 	if err != nil {
@@ -71,7 +71,7 @@ func (a *Adapter) Fetch(ctx context.Context, id string) (core.Item, error) {
 		// T14(a): see fetchAndUpsert's identical comment — X-GM-LABELS
 		// needs the raw connection, and a failure here must never fail
 		// this Fetch.
-		labels, err := a.fetchGmailLabelsRaw(ctx, []imap.UID{uid})
+		labels, err := a.fetchGmailLabelsRaw(ctx, mailbox, []imap.UID{uid})
 		if err != nil {
 			log.Printf("mail: fetch: gmail X-GM-LABELS fetch for %q failed, leaving Labels as synced: %v", a.cfg.Name, err)
 		} else if l, ok := labels[uid]; ok {
