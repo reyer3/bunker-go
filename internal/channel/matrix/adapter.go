@@ -601,16 +601,21 @@ func (a *Adapter) resolveRoom(ctx context.Context, out core.Outgoing) (id.RoomID
 	return id.RoomID(target), nil
 }
 
-// Organize supports only read-state changes (op.Seen): Matrix has no
-// folders and bunker-go's labels do not map onto it. Any label/folder
-// mutation is rejected with core.ErrUnsupported instead of being silently
-// dropped.
+// Organize supports only marking read (op.Seen=true): Matrix has no
+// folders and bunker-go's labels do not map onto it. Label/folder
+// mutations and Seen=false are rejected with core.ErrUnsupported instead
+// of being silently dropped: a read marker cannot be moved back, and a
+// nil return would let core.Service.MarkUnread tell callers the server
+// changed when it did not (issue #98).
 func (a *Adapter) Organize(ctx context.Context, itemIDStr string, op core.OrganizeOp) error {
 	if len(op.AddLabels) > 0 || len(op.RemoveLabels) > 0 || op.MoveTo != "" {
 		return fmt.Errorf("matrix: labels and folders are not supported: %w", core.ErrUnsupported)
 	}
-	if op.Seen == nil || !*op.Seen {
+	if op.Seen == nil {
 		return nil
+	}
+	if !*op.Seen {
+		return fmt.Errorf("matrix: organize %s: marking a message unread: %w", itemIDStr, core.ErrUnsupported)
 	}
 	_, roomID, eventID, err := parseItemID(itemIDStr)
 	if err != nil {
