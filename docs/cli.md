@@ -1205,6 +1205,58 @@ kitty --title bunker --class dev.bunker.app /path/to/bunker
   `dev.bunker.app`, the window's class, so window-manager rules can
   place or focus the window. Each launch opens a new window.
 
+## `bunker sidebar`
+
+The TUI laid out for a narrow pane of about 28 to 45 columns: the herdr
+plugin's `sidebar` pane runs it (see `deploy/herdr`). It is the same
+program as bare `bunker`, with the same needs: a TTY (without one it
+prints `error: bunker sidebar needs a terminal` and exits 2) and a
+running daemon (else the same "cannot reach bunker daemon" hint, exit 1).
+
+- **Layout:** a short channel list (Todo, Mail, WhatsApp, Matrix) with
+  each one's unread count, the active one marked `▌`; then the
+  conversations of that channel, one line each: channel glyph (a chevron
+  on a Mail sender row), name and unread badge, the name truncated so the
+  badge always shows; then a one-line key hint.
+- **Keys:** `j`/`k` and the arrows move, `Tab`/`⇧Tab` or `1`/`2`/`3`/`0`
+  switch channel, `/` filters, `g` refreshes, `?` or `F1` shows help, `q`
+  quits. The other inbox keys work as in the full TUI.
+- **Enter:** inside herdr (`HERDR_ENV=1`) it opens the conversation in a
+  new herdr pane to the right and focuses it, and the list stays where it
+  was:
+
+  ```sh
+  herdr plugin pane open --plugin bunker --entrypoint open --placement split --direction right --env BUNKER_OPEN_ID=<id> --focus
+  ```
+
+  herdr is found the same way as for `bunker herdr toggle`
+  (`HERDR_BIN_PATH`, else `herdr` on `PATH`), the call has a 10s timeout,
+  and an id starting with `-` or holding a control character is never
+  passed on. A failure shows on the status line
+  (`no se pudo abrir: …`). Outside herdr, Enter opens the conversation in
+  place, as the full TUI does, and Esc goes back to the list.
+
+## `bunker open [<id>]`
+
+Starts the TUI directly on the conversation of item `<id>`: a WhatsApp
+or Matrix item opens its chat view, a mail item its mail thread view.
+With no argument it reads the id from `BUNKER_OPEN_ID`; that is how the
+herdr plugin's `open` pane gets it, since herdr runs a manifest pane's
+command as fixed argv and passes the id with `--env`.
+
+- **Leaving:** the pane exists for that one conversation, so Esc (and `q`
+  in the mail thread view, where it is not typed text) quits instead of
+  going back to an inbox. Leaving a chat still reports the presence and
+  typing as gone before exiting.
+- **No inbox:** it does not poll the inbox or send new-message
+  notifications (the sidebar that opened it already does).
+- **Errors:** no id or more than one argument prints usage and exits 2;
+  an id starting with `-` or holding a control character exits 2; no TTY
+  prints `error: bunker open needs a terminal` and exits 2; an
+  unreachable daemon prints the same hint as bare `bunker` and exits 1.
+  An id the daemon does not know shows
+  `No se pudo abrir la conversación: …` in the pane, and `q` or Esc quits.
+
 ## `bunker herdr toggle [--dry-run] [--json]`
 
 Docks bunker as a narrow panel on the left of the current herdr tab. It

@@ -122,6 +122,11 @@ Commands:
   render [--tmux] [--json]                                 tmux status segment
   app [--dry-run]                                          open the TUI in its
                                                              own terminal window
+  sidebar                                                  compact TUI for a
+                                                             narrow pane (herdr)
+  open [<id>]                                              TUI on one
+                                                             conversation (id or
+                                                             $BUNKER_OPEN_ID)
   herdr toggle [--dry-run] [--json]                        dock bunker as a left
                                                              panel in herdr, or
                                                              focus or close it

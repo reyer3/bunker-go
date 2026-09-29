@@ -46,6 +46,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.addChatAttachments(msg.path), nil
 	case unreadDoneMsg:
 		return m.handleUnreadDone(msg)
+	case openItemLoadedMsg:
+		return m.handleOpenItemLoaded(msg)
+	case externalOpenDoneMsg:
+		return m.handleExternalOpenDone(msg)
 	case contactsLoadedMsg:
 		return m.handleContactsLoaded(msg)
 	case mediaReadyMsg:
@@ -350,6 +354,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.String() == "f1" {
 			return m.openHelp(), nil
 		}
+		if m.openPending() {
+			return m.updateOpenPending(msg)
+		}
 		if m.picker != nil {
 			return m.updatePicker(msg)
 		}
@@ -395,6 +402,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			if !m.detail && m.filterQuery != "" {
 				return m.clearFilter(), nil
+			}
+			if m.detail && m.openID != "" {
+				return m, tea.Quit
 			}
 			if m.detail {
 				m.detail = false
@@ -772,6 +782,9 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "esc":
+		if m.openID != "" {
+			return m, m.quitOpenChat()
+		}
 		return m.leaveChat()
 	case "alt+enter":
 		m.composer.InsertRune('\n')
@@ -929,7 +942,13 @@ func (m Model) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "?":
 		return m.openHelp(), nil
-	case "esc":
+	case "esc", "q":
+		if m.openID != "" {
+			return m, tea.Quit
+		}
+		if msg.String() == "q" {
+			return m, nil
+		}
 		m.detail = false
 		m.threadMode = false
 		return m, nil

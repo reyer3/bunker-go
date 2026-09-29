@@ -35,6 +35,9 @@ func (m Model) inboxHits() []inboxHit {
 }
 
 func (m Model) inboxLinesAndHits() (lines []string, hits []inboxHit) {
+	if m.sidebar {
+		return m.sidebarLinesAndHits()
+	}
 	styles := m.styles()
 	glyphs := m.resolvedGlyphs()
 	width := m.width

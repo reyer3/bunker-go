@@ -31,6 +31,18 @@ func (m Model) openItem(index int) (Model, tea.Cmd) {
 		return m, nil
 	}
 	item := row.thread.items[0]
+	if m.externalOpen != nil {
+		// The sidebar hands the conversation to its own pane (issue
+		// #81) and stays on the list.
+		return m, openExternally(m.externalOpen, item.ID)
+	}
+	return m.openConversation(item)
+}
+
+// openConversation opens item's conversation in the view its channel
+// uses: Enter on an inbox row and "bunker open" (launch.go) both land
+// here, so a conversation opened either way behaves the same.
+func (m Model) openConversation(item core.Item) (Model, tea.Cmd) {
 	// K5 (conversation-view.md): WhatsApp/Matrix open into the chat view,
 	// which marks the conversation read with a receipt and loads it via
 	// Thread instead of the old plain single-item detail. Mail keeps the
