@@ -26,10 +26,27 @@ func discoverFolders(_ context.Context, client *imapclient.Client, cfg AccountCo
 	}
 
 	folders := NewFolderMap(sep, cfg.FolderPrefix)
+	var names []string
 	for _, entry := range entries {
+		if !selectable(entry) {
+			// A \Noselect parent (e.g. Gmail's "[Gmail]") cannot hold
+			// messages, so it must not satisfy a move's existence check.
+			continue
+		}
+		names = append(names, entry.Mailbox)
 		for _, attr := range entry.Attrs {
 			folders.SetSpecialUse(string(attr), entry.Mailbox)
 		}
 	}
+	folders.SetMailboxes(names)
 	return folders, nil
+}
+
+func selectable(entry *imap.ListData) bool {
+	for _, attr := range entry.Attrs {
+		if attr == imap.MailboxAttrNoSelect || attr == imap.MailboxAttrNonExistent {
+			return false
+		}
+	}
+	return true
 }
