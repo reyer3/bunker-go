@@ -1243,7 +1243,10 @@ which answers `daemon_up: false` with a hint to run `bunker daemon`.
 | Tool | What it does |
 |---|---|
 | `counts` | unread counts per channel and account |
-| `list` | newest items with a 200-character snippet (`channel`, `account`, `unread`, `limit` ≤ 100) |
+| `list` | newest items with a 200-character snippet (`channel`, `account`, `unread`, `limit` ≤ 100, default 20, `cursor`); returns `items` and `next_cursor` |
+| `search` | the [query language](#query-language---query-bunker-find-the-mcp-search-tool) over the local store (`query`, `limit` ≤ 100, `cursor`); returns `items` (same shape as `list`) and `next_cursor`; reads only the store, never marks anything read |
+| `search_remote` | `bunker search mail`: an IMAP search on the mail server (`account`, `from`, `subject`, `since`, `before`, `folder` = `INBOX`, `limit` ≤ 100); returns `items` |
+| `backfill` | `bunker backfill mail`: fetch older mail into the store (`account`, `since`, `folder` = `INBOX`, `dry_run`); returns `dry_run`, `count`, `first_id`, `last_id` |
 | `read` | one item with its body (capped at 20,000 characters); **never marks it read** |
 | `thread` | a conversation's newest messages, oldest first |
 | `contacts` | the same matches as `bunker contacts` |
@@ -1254,6 +1257,27 @@ which answers `daemon_up: false` with a hint to run `bunker daemon`.
 
 Reads are annotated read-only; `send` and `reply` are annotated
 destructive.
+
+`search_remote` and `backfill` sit in between, and are annotated
+neither read-only nor destructive (idempotent, open-world):
+- They contact the mail server, so they need the account online and
+  take as long as IMAP does.
+- On the server they only read: nothing is sent, moved, deleted or
+  marked `\Seen` (`BODY.PEEK`), and the regular sync position does not
+  move.
+- They write to the local store. `search_remote` upserts every match
+  (headers, flags and bounded body text, like sync), so an item already
+  stored is refreshed from the server. `backfill` adds only mail the store
+  does not have; `dry_run` counts without storing.
+- Afterwards the mail is visible to `list` and `search`.
+
+Their `since`/`before` take the query language's dates: `YYYY-MM-DD`
+or a relative `7d`, `2w`, `3m`. Both are mail only. `backfill` takes a
+date, not a message count: the daemon's backfill searches the server
+by date (`UID SEARCH SINCE`).
+
+Agents are told to prefer `search` and only reach for `search_remote`
+or `backfill` when the mail is not stored yet.
 
 **Sending is opt-in twice:**
 - `send` and `reply` always build the dry-run plan first. By default they
