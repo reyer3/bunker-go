@@ -80,12 +80,12 @@ func TestMCPListsTools(t *testing.T) {
 	for _, tool := range tools.Tools {
 		have[tool.Name] = tool
 	}
-	for _, name := range []string{"counts", "list", "read", "thread", "contacts", "calls", "send", "reply"} {
+	for _, name := range []string{"counts", "list", "read", "thread", "contacts", "calls", "health", "send", "reply"} {
 		if have[name] == nil {
 			t.Errorf("tool %q missing", name)
 		}
 	}
-	if !have["read"].Annotations.ReadOnlyHint || have["send"].Annotations.ReadOnlyHint {
+	if !have["read"].Annotations.ReadOnlyHint || !have["health"].Annotations.ReadOnlyHint || have["send"].Annotations.ReadOnlyHint {
 		t.Error("reads must be marked read-only and sends must not")
 	}
 }
@@ -184,6 +184,71 @@ func TestMCPDaemonDown(t *testing.T) {
 	res, _ := callTool(t, s, "counts", nil)
 	if !res.IsError || !strings.Contains(toolText(res), "daemon") {
 		t.Fatalf("a dead daemon should be a tool error: %s", toolText(res))
+	}
+}
+
+func TestMCPHealth(t *testing.T) {
+	backend := mcpBackend()
+	since := time.Date(2026, 9, 28, 9, 0, 0, 0, time.UTC)
+	backend.health = []core.AdapterHealth{
+		{Channel: core.ChannelWhatsApp, Account: "personal", State: core.AdapterConnected, Since: since},
+		{Channel: core.ChannelMail, Account: "work", State: core.AdapterBackoff, Since: since, LastError: "imap: login failed", Restarts: 3},
+	}
+	s := mcpSession(t, backend, false)
+
+	res, out := callTool(t, s, "health", nil)
+	if res.IsError || out["daemon_up"] != true {
+		t.Fatalf("health = %v (%s)", out, toolText(res))
+	}
+	adapters, _ := out["adapters"].([]any)
+	if len(adapters) != 2 {
+		t.Fatalf("adapters = %v", out["adapters"])
+	}
+	wa, mail := adapters[0].(map[string]any), adapters[1].(map[string]any)
+	if wa["state"] != "connected" || wa["since"] != "2026-09-28T09:00:00Z" || wa["last_item"] != "2026-09-28T10:00:00Z" {
+		t.Errorf("whatsapp = %v", wa)
+	}
+	if mail["state"] != "backoff" || mail["last_error"] != "imap: login failed" || mail["restarts"] != float64(3) {
+		t.Errorf("mail = %v", mail)
+	}
+	if _, ok := mail["last_item"]; ok {
+		t.Errorf("an account with no items has no last_item: %v", mail)
+	}
+}
+
+func TestMCPHealthDaemonDown(t *testing.T) {
+	dial := func(context.Context) (Backend, io.Closer, error) {
+		return nil, nil, errors.New("cannot reach bunker daemon")
+	}
+	server := newMCPServer(dial, false)
+	serverT, clientT := mcp.NewInMemoryTransports()
+	if _, err := server.Connect(context.Background(), serverT, nil); err != nil {
+		t.Fatal(err)
+	}
+	s, err := mcp.NewClient(&mcp.Implementation{Name: "test"}, nil).Connect(context.Background(), clientT, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	res, out := callTool(t, s, "health", nil)
+	if res.IsError || out["daemon_up"] != false {
+		t.Fatalf("a dead daemon is a successful health answer: %v (%s)", out, toolText(res))
+	}
+	if hint, _ := out["hint"].(string); !strings.Contains(hint, "bunker daemon") {
+		t.Errorf("hint = %q", hint)
+	}
+	if !strings.Contains(out["error"].(string), "cannot reach") {
+		t.Errorf("error = %v", out["error"])
+	}
+}
+
+func TestMCPHealthBackendError(t *testing.T) {
+	backend := mcpBackend()
+	backend.healthErr = errors.New("rpc: unknown method")
+	s := mcpSession(t, backend, false)
+	res, _ := callTool(t, s, "health", nil)
+	if !res.IsError || !strings.Contains(toolText(res), "unknown method") {
+		t.Fatalf("a reachable daemon that fails health is a tool error: %s", toolText(res))
 	}
 }
 

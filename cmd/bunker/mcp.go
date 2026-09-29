@@ -26,7 +26,7 @@ import (
 
 const mcpInstructions = `bunker is the user's inbox: mail, WhatsApp and Matrix in one store.
 Use counts and list to see what is new, read or thread to open it (reading never marks anything read),
-and contacts to find someone's address by name. send and reply return a plan (dry run) unless
+and contacts to find someone's address by name. health says whether the daemon and each account are connected. send and reply return a plan (dry run) unless
 confirm is true; confirming only works when the user started the server with --allow-send.
 Never send a message the user did not ask for.`
 
@@ -189,6 +189,21 @@ type (
 		Text    string `json:"text" jsonschema:"the reply"`
 		Confirm bool   `json:"confirm,omitempty" jsonschema:"false (default) returns the plan only; true sends, and only works when the server runs with --allow-send"`
 	}
+	mcpHealthOut struct {
+		DaemonUp bool               `json:"daemon_up" jsonschema:"whether the bunker daemon answered"`
+		Error    string             `json:"error,omitempty" jsonschema:"why the daemon could not be reached"`
+		Hint     string             `json:"hint,omitempty" jsonschema:"what the user can do about it"`
+		Adapters []mcpAdapterHealth `json:"adapters" jsonschema:"one entry per configured account"`
+	}
+	mcpAdapterHealth struct {
+		Channel   string `json:"channel"`
+		Account   string `json:"account"`
+		State     string `json:"state" jsonschema:"connecting, connected, backoff or stopped"`
+		Since     string `json:"since,omitempty" jsonschema:"when the adapter entered its state (RFC 3339)"`
+		LastError string `json:"last_error,omitempty" jsonschema:"the error behind the latest backoff or stop"`
+		Restarts  int    `json:"restarts" jsonschema:"how many times the adapter was restarted"`
+		LastItem  string `json:"last_item,omitempty" jsonschema:"time of the newest stored item for this account (RFC 3339), a proxy for the last sync"`
+	}
 	// mcpPlanOut carries the plan and receipt as plain JSON values:
 	// core.Receipt nests itself (fan-out recipients carry receipts), which
 	// a JSON schema cannot describe.
@@ -271,6 +286,11 @@ func newMCPServer(dial mcpDialer, allowSend bool) *mcp.Server {
 			return nil, mcpCallsOut{Calls: calls}, err
 		})
 
+	mcp.AddTool(server, &mcp.Tool{Name: "health", Description: "Whether the bunker daemon is running and, per account, its connection state, last error and newest stored item time.", Annotations: readOnly},
+		func(ctx context.Context, _ *mcp.CallToolRequest, _ mcpNoInput) (*mcp.CallToolResult, mcpHealthOut, error) {
+			return mcpHealth(ctx, dial)
+		})
+
 	mcp.AddTool(server, &mcp.Tool{Name: "send", Description: "Send a new message. Returns the plan only unless confirm is true and the server allows sending.", Annotations: outbound},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in mcpSendIn) (*mcp.CallToolResult, mcpPlanOut, error) {
 			return mcpOutbound(ctx, dial, allowSend, in.Confirm, func(ctx context.Context, b Backend, dryRun bool) (core.Plan, core.Receipt, error) {
@@ -322,4 +342,60 @@ func mcpOutbound(ctx context.Context, dial mcpDialer, allowSend, confirm bool, d
 		return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: text}}}, out, nil
 	}
 	return nil, out, nil
+}
+
+// mcpHealth answers the health tool. Unlike every other tool, a daemon
+// that cannot be dialed is the answer, not a failure: the agent asked
+// whether bunker is up, so "no, run bunker daemon" is a successful result.
+func mcpHealth(ctx context.Context, dial mcpDialer) (*mcp.CallToolResult, mcpHealthOut, error) {
+	ctx, cancel := context.WithTimeout(ctx, mcpCallTimeout)
+	defer cancel()
+	backend, closer, err := dial(ctx)
+	if err != nil {
+		return nil, mcpHealthOut{
+			Error:    err.Error(),
+			Hint:     "the bunker daemon is not running: start it with `bunker daemon` (or its service)",
+			Adapters: []mcpAdapterHealth{},
+		}, nil
+	}
+	if closer != nil {
+		defer closer.Close()
+	}
+	adapters, err := backend.Health(ctx)
+	if err != nil {
+		return nil, mcpHealthOut{}, err
+	}
+	out := mcpHealthOut{DaemonUp: true, Adapters: make([]mcpAdapterHealth, 0, len(adapters))}
+	for _, a := range adapters {
+		h := mcpAdapterHealth{
+			Channel: string(a.Channel), Account: a.Account, State: string(a.State),
+			LastError: a.LastError, Restarts: a.Restarts,
+		}
+		if !a.Since.IsZero() {
+			h.Since = a.Since.Format(time.RFC3339)
+		}
+		if t := newestItemTime(ctx, backend, a.Channel, a.Account); !t.IsZero() {
+			h.LastItem = t.Format(time.RFC3339)
+		}
+		out.Adapters = append(out.Adapters, h)
+	}
+	return nil, out, nil
+}
+
+// newestItemTime is the timestamp of the newest stored item for
+// channel/account: the daemon keeps no per-adapter sync clock, and the
+// newest item is what tells an agent how fresh the data is. It is best
+// effort, so a failing list only leaves the time out.
+func newestItemTime(ctx context.Context, b Backend, channel core.Channel, account string) time.Time {
+	items, err := b.List(ctx, core.Filter{Channel: channel, Account: account, Limit: 1})
+	if err != nil {
+		return time.Time{}
+	}
+	var newest time.Time
+	for _, it := range items {
+		if it.Channel == channel && it.Account == account && it.Timestamp.After(newest) {
+			newest = it.Timestamp
+		}
+	}
+	return newest
 }
