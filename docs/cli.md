@@ -1182,7 +1182,12 @@ kitty --title bunker --class dev.bunker.app /path/to/bunker
   a tmux pane still opens a window with images.
 - **Errors:** no supported terminal, a configured command not on `PATH`,
   or an unreachable daemon is an error and no window opens (a TUI without
-  the daemon would close at once).
+  the daemon would close at once). Besides stderr, every failure (also a
+  broken config or a window that fails to start) shows a desktop
+  notification via `notify-send` when it is installed, and appends a
+  timestamped line to `$XDG_STATE_HOME/bunker/app.log` (default
+  `~/.local/state/bunker/app.log`), so a launch from the desktop entry
+  never fails silently. `--dry-run` only prints to stderr.
 - **`--dry-run`:** prints the command line instead of opening the window.
 - **Desktop entry:** `make install` installs
   `deploy/desktop/bunker.desktop` (and its icon) under
