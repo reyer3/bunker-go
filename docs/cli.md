@@ -41,6 +41,22 @@ error that used to be silently lost, is logged via `log/slog` to
 carries them under a normal systemd unit. See `bunker health` below for
 querying the resulting per-adapter state instead of grepping logs.
 
+## `bunker version [--json]`
+
+Prints this binary's version (also `bunker --version`); it needs no
+daemon. A release build carries the version, short commit and build date
+goreleaser stamps in; a source build (`make dev`, `go build`, `go
+install`) falls back to the build info the Go toolchain embeds: the
+module version (`dev` for a plain checkout, a tag or a pseudo-version
+for `go install`) and the VCS revision and time.
+
+```json
+{"version":"0.12.0","commit":"abc1234","date":"2026-09-29T00:00:00Z","go":"go1.26.8","os":"linux","arch":"amd64","release":true}
+```
+
+`release` is false for `dev`, pseudo-version and `+dirty` builds: they
+never look for updates and `bunker update` refuses to replace them.
+
 ## `bunker` (no arguments): interactive side panel
 
 Running `bunker` with no arguments on a TTY opens a Bubble Tea side panel

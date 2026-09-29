@@ -58,6 +58,8 @@ Run without a command in a terminal to open the interactive UI.
 
 Commands:
   daemon [--fake]                                          run the daemon
+  version [--json]                                         this binary's version
+                                                             (also --version)
   list [--channel c] [--account a] [--unread] [--label l]  list items, newest
        [-q text] [--query q] [--cursor c] [--limit n]        first; --query takes
        [--json]                                              the query language,
