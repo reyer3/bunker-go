@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.8.0](https://github.com/reyer3/bunker-go/compare/v0.7.0...v0.8.0) (2026-09-29)
+
+
+### Features
+
+* **app:** report launcher errors via notify-send and a log file ([#85](https://github.com/reyer3/bunker-go/issues/85)) ([ccd0ab7](https://github.com/reyer3/bunker-go/commit/ccd0ab79603bd58bad2cd1ca1d55ae8d0516d15c))
+* herdr plugin and bunker herdr toggle ([#87](https://github.com/reyer3/bunker-go/issues/87)) ([43eb476](https://github.com/reyer3/bunker-go/commit/43eb4764a8aec5267a3d726b19e7f26365ad2332))
+* **mcp:** bunker mcp serves the inbox to AI agents over MCP ([#32](https://github.com/reyer3/bunker-go/issues/32)) ([d5be817](https://github.com/reyer3/bunker-go/commit/d5be817c3ce18a3007fe64d03af51ac857722d78)), closes [#31](https://github.com/reyer3/bunker-go/issues/31)
+* **mcp:** health tool with daemon and adapter status ([#84](https://github.com/reyer3/bunker-go/issues/84)) ([56f9768](https://github.com/reyer3/bunker-go/commit/56f9768c076b094d20f26bc650a7f5da317780af))
+* **store:** FTS5 full-text index with accent folding ([#89](https://github.com/reyer3/bunker-go/issues/89)) ([0a0eb16](https://github.com/reyer3/bunker-go/commit/0a0eb165e4f29e31d2eafb4d6d5179e358a5214c))
+* **tui:** / filters the inbox; chats show loading and empty states ([#45](https://github.com/reyer3/bunker-go/issues/45)) ([8ebb8db](https://github.com/reyer3/bunker-go/commit/8ebb8db863ca72bc79d3bf50289e12b206c58206)), closes [#39](https://github.com/reyer3/bunker-go/issues/39)
+* **tui:** bunker sidebar and bunker open for the herdr panel ([#92](https://github.com/reyer3/bunker-go/issues/92)) ([f763cbe](https://github.com/reyer3/bunker-go/commit/f763cbea6f3fea80e2d831cc1272e69e6acd83e7))
+* **tui:** one send gesture and one hint notation in every view ([#44](https://github.com/reyer3/bunker-go/issues/44)) ([bffb363](https://github.com/reyer3/bunker-go/commit/bffb363ffe705f00a2b2ddef49438edf2542b189))
+* **tui:** per-view key hints and a contextual, scrollable help ([#42](https://github.com/reyer3/bunker-go/issues/42)) ([f3454e7](https://github.com/reyer3/bunker-go/commit/f3454e74971a1855e5396cfdcc91ef0ff9fc1a1c)), closes [#36](https://github.com/reyer3/bunker-go/issues/36)
+* **tui:** show connection status and recover on its own ([#41](https://github.com/reyer3/bunker-go/issues/41)) ([3a589b0](https://github.com/reyer3/bunker-go/commit/3a589b02d740e453bba211f1e74c84764884268d)), closes [#35](https://github.com/reyer3/bunker-go/issues/35)
+* **tui:** undo mark-read with u, keep drafts, bunker unread ([#43](https://github.com/reyer3/bunker-go/issues/43)) ([92c8c7d](https://github.com/reyer3/bunker-go/commit/92c8c7dbee21489908bb71742ae718c834c1b2f3))
+
+
+### Bug Fixes
+
+* **mail:** resolve Archive via \Archive or the prefixed folder ([#86](https://github.com/reyer3/bunker-go/issues/86)) ([138f24f](https://github.com/reyer3/bunker-go/commit/138f24fed9e90ef18771460c6edf965e7fbd93b3))
+* **store:** apply the thread filter and escape LIKE patterns ([#83](https://github.com/reyer3/bunker-go/issues/83)) ([d2ae7a8](https://github.com/reyer3/bunker-go/commit/d2ae7a837edb7046f5c2c67bb69d2bc83bc79b52))
+* **tui:** every screen in Spanish, errors in human terms ([#40](https://github.com/reyer3/bunker-go/issues/40)) ([9a64017](https://github.com/reyer3/bunker-go/commit/9a64017e1d42e8e607fa86a46f1b3ebccdcf46a0)), closes [#34](https://github.com/reyer3/bunker-go/issues/34)
+* **whatsapp:** log dropped store errors and bound the presence revoke ([#88](https://github.com/reyer3/bunker-go/issues/88)) ([68cd061](https://github.com/reyer3/bunker-go/commit/68cd0611d54a619cde81bad442d6211f68322371))
+
 ## [0.7.0](https://github.com/reyer3/bunker-go/compare/v0.6.0...v0.7.0) (2026-09-28)
 
 
