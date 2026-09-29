@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.11.0](https://github.com/reyer3/bunker-go/compare/v0.10.0...v0.11.0) (2026-09-29)
+
+
+### Features
+
+* **herdr:** ask Claude about the open conversation, unread counts and notifications ([#103](https://github.com/reyer3/bunker-go/issues/103)) ([16a25ac](https://github.com/reyer3/bunker-go/commit/16a25acb62ae73e5bc016b4da0857a844333d99a))
+* **tui:** query language in / and the mail folder on rows ([#104](https://github.com/reyer3/bunker-go/issues/104)) ([3999d09](https://github.com/reyer3/bunker-go/commit/3999d094ff6aafb5d12347040f569e5d2b57b486))
+
+
+### Bug Fixes
+
+* **matrix:** mark-unread no longer claims a server change it did not make ([#101](https://github.com/reyer3/bunker-go/issues/101)) ([64a270b](https://github.com/reyer3/bunker-go/commit/64a270b62dcd860ac9fbd4ef601e719f90e1777c))
+
 ## [0.10.0](https://github.com/reyer3/bunker-go/compare/v0.9.0...v0.10.0) (2026-09-29)
 
 
