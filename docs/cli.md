@@ -1248,7 +1248,13 @@ chat shows as a thumbnail inside its bubble, instead of the
 - **Opening full size:** `Ctrl+O` opens the newest image, and a click on
   a thumbnail opens that one. `←`/`→` browse the conversation's images;
   `Esc` or a click closes the viewer and returns to the chat.
-- **Fetching:** thumbnails go through the same `Client.Download` as
+- **Embedded thumbnails:** a WhatsApp image, video, sticker or document
+  usually carries its own small preview (the attachment's `Thumbnail`).
+  The chat draws that first, with no download and no `ffmpeg`, and a
+  document with one shows it above its `📎 name (bytes)` line. `Ctrl+O`
+  on an image or video still downloads the full media for the viewer.
+- **Fetching:** without an embedded thumbnail, or when it does not
+  decode, thumbnails go through the same `Client.Download` as
   `Ctrl+D`. Each attachment is downloaded once, up to 25 MB, into
   `$XDG_CACHE_HOME/bunker-go/media`, which is created private, and reused
   after that. JPEG, PNG, GIF and still WebP images are supported. One
@@ -1265,6 +1271,7 @@ chat shows as a thumbnail inside its bubble, instead of the
 
 - **Thumbnail:** with kitty graphics on, a video attachment shows a frame
   in its bubble with a `▶ name · clic para reproducir` line. The frame is
+  the message's embedded thumbnail when it has one; otherwise it is
   grabbed with `ffmpeg` as an external process. The video is downloaded
   once, up to 64 MB, into the same media cache as images. When `ffmpeg`
   is missing or fails, the video keeps its text row.
@@ -1330,6 +1337,7 @@ which answers `daemon_up: false` with a hint to run `bunker daemon`.
 | `search_remote` | `bunker search mail`: an IMAP search on the mail server (`account`, `from`, `subject`, `since`, `before`, `folder` = `INBOX`, `limit` ≤ 100); returns `items` |
 | `backfill` | `bunker backfill mail`: fetch older mail into the store (`account`, `since`, `folder` = `INBOX`, `dry_run`); returns `dry_run`, `count`, `first_id`, `last_id` |
 | `read` | one item with its body (capped at 20,000 characters); **never marks it read** |
+| `attachment` | the text of one attachment (`id`, `index` from 0), downloaded like `bunker download` into a temp dir that is removed afterwards; see below; **never marks anything read** |
 | `thread` | a conversation's newest messages, oldest first |
 | `contacts` | the same matches as `bunker contacts` |
 | `calls` | live voice calls |
@@ -1350,6 +1358,28 @@ Reads are annotated read-only; `send`, `reply`, `edit`, `delete`,
 `delete` and `react` are gated exactly like `send`: a plan unless the
 call confirms and the server runs with `--allow-send`, and a confirmed
 retry is never applied twice.
+
+`attachment` lets an agent read an invoice, a contract or a spreadsheet.
+It returns `id`, `index`, `name`, `mime`, `size`, `format`, `has_text`,
+`text`, `truncated` and `note`:
+- `text/plain`, CSV, Markdown, JSON and XML come back as they are, decoded
+  to UTF-8 (the declared charset, else a byte order mark, else UTF-8,
+  else Windows-1252). HTML goes through the same HTML-to-text conversion
+  as mail bodies.
+- PDF needs poppler's `pdftotext` on `PATH`, run as an external process
+  with a 30-second timeout. Without it the tool fails with a hint to
+  install `poppler-utils`. A PDF with no text layer (a scan) answers
+  `has_text: false` with a note.
+- `.docx`, `.xlsx` and `.odt` are read from their XML (`word/document.xml`;
+  every sheet with its shared strings, one line per row, cells separated
+  by tabs; `content.xml`).
+- Images, audio and video are not downloaded: the answer is their name,
+  MIME type and size, `format: "media"`, `has_text: false` and a note
+  that there is no text.
+- Any other type (e.g. a legacy `.doc`) is an error, and so is an index
+  out of range.
+- The text is capped at 100 KB; a longer one is cut and says
+  `truncated: true`.
 
 `search_remote` and `backfill` sit in between, and are annotated
 neither read-only nor destructive (idempotent, open-world):
@@ -1820,6 +1850,12 @@ started (otherwise the user's reaction is simply removed). Edits,
 reactions and redactions never appear as items of their own. Both fields
 are absent of any effect for a plain, never-edited/revoked/reacted-to
 item (`Edited`/`Deleted` `false`, `Reactions` empty).
+
+An attachment may also carry `Thumbnail`: the small preview image
+(base64 JPEG or PNG, at most 64 KB) a WhatsApp image, video, sticker or
+document message embeds, which the TUI draws instead of downloading the
+media. It is absent when the message had none or it was not a valid
+image (the daemon logs and drops those).
 
 ## Adapter registration hook
 
