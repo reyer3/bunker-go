@@ -1192,7 +1192,13 @@ chat shows as a thumbnail inside its bubble, instead of the
 - **Opening full size:** `Ctrl+O` opens the newest image, and a click on
   a thumbnail opens that one. `←`/`→` browse the conversation's images;
   `Esc` or a click closes the viewer and returns to the chat.
-- **Fetching:** thumbnails go through the same `Client.Download` as
+- **Embedded thumbnails:** a WhatsApp image, video, sticker or document
+  usually carries its own small preview (the attachment's `Thumbnail`).
+  The chat draws that first, with no download and no `ffmpeg`, and a
+  document with one shows it above its `📎 name (bytes)` line. `Ctrl+O`
+  on an image or video still downloads the full media for the viewer.
+- **Fetching:** without an embedded thumbnail, or when it does not
+  decode, thumbnails go through the same `Client.Download` as
   `Ctrl+D`. Each attachment is downloaded once, up to 25 MB, into
   `$XDG_CACHE_HOME/bunker-go/media`, which is created private, and reused
   after that. JPEG, PNG, GIF and still WebP images are supported. One
@@ -1209,6 +1215,7 @@ chat shows as a thumbnail inside its bubble, instead of the
 
 - **Thumbnail:** with kitty graphics on, a video attachment shows a frame
   in its bubble with a `▶ name · clic para reproducir` line. The frame is
+  the message's embedded thumbnail when it has one; otherwise it is
   grabbed with `ffmpeg` as an external process. The video is downloaded
   once, up to 64 MB, into the same media cache as images. When `ffmpeg`
   is missing or fails, the video keeps its text row.
@@ -1764,17 +1771,29 @@ synced from the Sent folder — see `thread` above). It drives the chat
 view's right-aligned bubbles and is independent of `Unread` (mail's IMAP
 `\Seen` flag toggles on its own).
 
-`Edited`, `Deleted` and `Reactions` are S2's channel-agnostic WhatsApp
-edit/revoke/reaction model (Matrix can adopt the same shape later, not
-yet in scope). `Edited` is `true` once a channel-observed edit replaced
-`Body`. `Deleted` is `true` after a revoke; the row is kept (its place in
-`list`/`thread` pagination is preserved) but `Body` is cleared, and the
-TUI renders "mensaje eliminado" in its place. `Reactions` lists at most
-one entry per `Sender` — a newer reaction from the same sender replaces
-the previous one, and an empty `Emoji` removes it — rendered as a line of
-emoji under the message in the chat/thread view. Both fields are absent
-of any effect for a plain, never-edited/revoked/reacted-to item
-(`Edited`/`Deleted` `false`, `Reactions` empty).
+`Edited`, `Deleted` and `Reactions` are the channel-agnostic
+edit/revoke/reaction model shared by WhatsApp and Matrix. `Edited` is
+`true` once a channel-observed edit replaced `Body` (on Matrix, an
+`m.replace` edit by the original sender; edits by anyone else are
+ignored). `Deleted` is `true` after a revoke (on Matrix, a redaction of
+the message); the row is kept (its place in `list`/`thread` pagination
+is preserved) but `Body` is cleared, and the TUI renders "mensaje
+eliminado" in its place. `Reactions` lists at most one entry per
+`Sender` — a newer reaction from the same sender replaces the previous
+one, and an empty `Emoji` removes it — rendered as a line of emoji under
+the message in the chat/thread view. Matrix lets one user add several
+reactions to the same message: the newest is shown, and redacting it
+falls back to that user's previous one if it was seen since the daemon
+started (otherwise the user's reaction is simply removed). Edits,
+reactions and redactions never appear as items of their own. Both fields
+are absent of any effect for a plain, never-edited/revoked/reacted-to
+item (`Edited`/`Deleted` `false`, `Reactions` empty).
+
+An attachment may also carry `Thumbnail`: the small preview image
+(base64 JPEG or PNG, at most 64 KB) a WhatsApp image, video, sticker or
+document message embeds, which the TUI draws instead of downloading the
+media. It is absent when the message had none or it was not a valid
+image (the daemon logs and drops those).
 
 ## Adapter registration hook
 

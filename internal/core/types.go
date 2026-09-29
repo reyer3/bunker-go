@@ -3,7 +3,10 @@
 // libraries: adapters depend on core, never the other way around.
 package core
 
-import "time"
+import (
+	"bytes"
+	"time"
+)
 
 // Channel identifies which messaging surface an Item or Adapter belongs to.
 type Channel string
@@ -20,12 +23,31 @@ type Address struct {
 	Name string
 }
 
+// MaxThumbnailBytes bounds Attachment.Thumbnail. The previews a channel
+// embeds in a message (WhatsApp's JPEGThumbnail) are a few KB; anything
+// far larger is not a thumbnail, and every copy of it would ride along in
+// the store row, the adapters' item caches and every RPC listing.
+const MaxThumbnailBytes = 64 << 10
+
 // Attachment describes a file attached to an Item.
 type Attachment struct {
 	Name string
 	MIME string
 	Size int64
 	Ref  string
+	// Thumbnail is a small preview image the message itself carries
+	// (WhatsApp's embedded JPEGThumbnail), at most MaxThumbnailBytes. It
+	// lets a client preview the attachment without downloading the media.
+	// Empty when the channel sent none or it failed validation; omitted
+	// from JSON then, so rows and listings without one are unchanged.
+	Thumbnail []byte `json:",omitempty"`
+}
+
+// Equal reports whether a and b describe the same attachment. Thumbnail
+// makes Attachment non-comparable with ==, so callers compare with this.
+func (a Attachment) Equal(b Attachment) bool {
+	return a.Name == b.Name && a.MIME == b.MIME && a.Size == b.Size && a.Ref == b.Ref &&
+		bytes.Equal(a.Thumbnail, b.Thumbnail)
 }
 
 // Item is the unified representation of a message, mail thread entry, chat
@@ -55,8 +77,8 @@ type Item struct {
 	Timestamp time.Time
 	Meta      map[string]string
 	// Edited reports whether this item's Body was replaced by a
-	// channel-observed edit (see Sink.EditItem). Channel-agnostic: today
-	// only WhatsApp sets it, Matrix can adopt the same model later.
+	// channel-observed edit (see Sink.EditItem). Channel-agnostic:
+	// WhatsApp and Matrix both set it.
 	Edited bool
 	// Deleted reports whether this item was revoked/retracted at the
 	// source (see Sink.RevokeItem): the row is kept (its place in the
@@ -71,7 +93,7 @@ type Item struct {
 }
 
 // Reaction is one participant's emoji reaction to an Item, channel-
-// agnostic (WhatsApp today; Matrix can adopt the same shape later).
+// agnostic (WhatsApp and Matrix).
 type Reaction struct {
 	Sender string
 	Emoji  string

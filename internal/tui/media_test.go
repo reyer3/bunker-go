@@ -62,6 +62,13 @@ func runCmds(cmd tea.Cmd) []tea.Msg {
 
 func imageChatModel(t *testing.T, gfx kittygfx.Mode) (Model, *mediaClient, *bytes.Buffer) {
 	t.Helper()
+	return imageChatModelWith(t, gfx, core.Attachment{Name: "foto.jpg", MIME: "image/jpeg", Size: 1234})
+}
+
+// imageChatModelWith opens a chat holding one item with attachments and
+// runs every media fetch the open triggers.
+func imageChatModelWith(t *testing.T, gfx kittygfx.Mode, attachments ...core.Attachment) (Model, *mediaClient, *bytes.Buffer) {
+	t.Helper()
 	client := &mediaClient{}
 	model := chatReadyModel(client, "whatsapp:personal:1")
 	model.width, model.height = 60, 30
@@ -77,7 +84,7 @@ func imageChatModel(t *testing.T, gfx kittygfx.Mode) (Model, *mediaClient, *byte
 	msg.items = []core.Item{{
 		ID: "whatsapp:personal:img", Channel: core.ChannelWhatsApp, Account: "personal", Thread: "t",
 		From: core.Address{Name: "Alice"}, Body: "mira", Timestamp: time.Now(),
-		Attachments: []core.Attachment{{Name: "foto.jpg", MIME: "image/jpeg", Size: 1234}},
+		Attachments: attachments,
 	}}
 	updated, cmd := model.Update(msg)
 	model = updated.(Model)
