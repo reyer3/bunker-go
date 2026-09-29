@@ -53,11 +53,11 @@ func TestDiscoverFoldersProfiles(t *testing.T) {
 				"Spam":   "[Gmail]/Spam",
 				"Junk":   "[Gmail]/Spam",
 				"Drafts": "[Gmail]/Drafts",
-				// Gmail has no \Archive mailbox (archiving there means
-				// leaving INBOX; the mail stays in \All), and bunker-go
-				// never guesses or creates one, so this must fail.
-				"Archive":  "",
-				"Archives": "",
+				// Gmail has no \Archive mailbox: archiving there means
+				// leaving INBOX while the mail stays in \All, so the
+				// archive resolves to \All.
+				"Archive":  "[Gmail]/All Mail",
+				"Archives": "[Gmail]/All Mail",
 			},
 			wantAll: "[Gmail]/All Mail",
 		},
@@ -251,17 +251,95 @@ func TestAdapterOrganizeMoveProfiles(t *testing.T) {
 	}
 }
 
-// TestAdapterOrganizeMoveGmailArchiveFailsLoudly: with no \Archive on a
-// Gmail-like server, an archive move must fail and leave the mail put.
-func TestAdapterOrganizeMoveGmailArchiveFailsLoudly(t *testing.T) {
-	s := newProfileIMAPServer(t, gmailProfile())
+// TestAdapterOrganizeMoveGmailArchive: Gmail has no \Archive, so an
+// archive move takes the message out of INBOX into \All ("[Gmail]/All
+// Mail"), which on a real server is exactly dropping the INBOX label.
+func TestAdapterOrganizeMoveGmailArchive(t *testing.T) {
+	for _, moveTo := range []string{"Archive", "Archives"} {
+		t.Run(moveTo, func(t *testing.T) {
+			s := newProfileIMAPServer(t, gmailProfile())
+			s.Seed(t, "INBOX", seedMessage{MessageID: "<a@example.com>"})
+			cfg := s.Config("cl")
+			id := syncOneAndGetID(t, s.Addr, cfg)
+
+			adapter := newAdapter(cfg, nil, nil, testDialInsecure(s.Addr))
+			move, err := adapter.OrganizeMove(context.Background(), id, core.OrganizeOp{MoveTo: moveTo})
+			if err != nil {
+				t.Fatalf("OrganizeMove(%q) error = %v", moveTo, err)
+			}
+			if move.Folder != "[Gmail]/All Mail" {
+				t.Errorf("OrganizeMove(%q).Folder = %q, want %q", moveTo, move.Folder, "[Gmail]/All Mail")
+			}
+			if move.ID == id {
+				t.Errorf("OrganizeMove(%q).ID = %q, want the All Mail address", moveTo, move.ID)
+			}
+			if got := s.MessageIDs(t, "INBOX"); len(got) != 0 {
+				t.Errorf("INBOX still holds %v after archiving", got)
+			}
+			if got := s.MessageIDs(t, "[Gmail]/All Mail"); !reflect.DeepEqual(got, []string{"a@example.com"}) {
+				t.Errorf("[Gmail]/All Mail holds %v, want the archived message once", got)
+			}
+		})
+	}
+}
+
+// TestAdapterOrganizeMoveIntoOwnMailboxIsNoop: archiving a message that
+// already lives in \All must not MOVE it onto itself (a renumbered copy
+// or a duplicate); it is a no-op that keeps its id. The profile puts
+// \Sent on the \All mailbox so a Sent item's source is \All itself.
+func TestAdapterOrganizeMoveIntoOwnMailboxIsNoop(t *testing.T) {
+	profile := gmailProfile()
+	for i, mb := range profile.Mailboxes {
+		switch mb.Name {
+		case "[Gmail]/All Mail":
+			profile.Mailboxes[i].Attrs = []imap.MailboxAttr{imap.MailboxAttrAll, imap.MailboxAttrSent}
+		case "[Gmail]/Sent Mail":
+			profile.Mailboxes[i].Attrs = nil
+		}
+	}
+	s := newProfileIMAPServer(t, profile)
+	seeded := s.Seed(t, "[Gmail]/All Mail", seedMessage{MessageID: "<a@example.com>"})
+	cfg := s.Config("cl")
+	id := itemID(cfg.Name, "Sent", seeded.UIDValidity, seeded.UID)
+
+	adapter := newAdapter(cfg, nil, nil, testDialInsecure(s.Addr))
+	move, err := adapter.OrganizeMove(context.Background(), id, core.OrganizeOp{MoveTo: "Archive"})
+	if err != nil {
+		t.Fatalf("OrganizeMove(Archive) error = %v", err)
+	}
+	if move.ID != id || move.Folder != "" {
+		t.Errorf("OrganizeMove(Archive) = %+v, want {ID: %q} with the folder unchanged", move, id)
+	}
+	if got := s.FetchMessage(t, "[Gmail]/All Mail", "<a@example.com>"); got.UID != seeded.UID {
+		t.Errorf("message UID = %d after a no-op archive, want %d", got.UID, seeded.UID)
+	}
+	if got := s.MessageIDs(t, "[Gmail]/All Mail"); !reflect.DeepEqual(got, []string{"a@example.com"}) {
+		t.Errorf("[Gmail]/All Mail holds %v, want the message exactly once", got)
+	}
+}
+
+// TestAdapterOrganizeMoveArchiveMissingFailsLoudly: a generic server
+// with neither an archive folder nor \All must refuse an archive move
+// and leave the mail put, since bunker-go never creates folders.
+func TestAdapterOrganizeMoveArchiveMissingFailsLoudly(t *testing.T) {
+	profile := dovecotProfile(dovecotOptions{})
+	var mailboxes []profileMailbox
+	for _, mb := range profile.Mailboxes {
+		if mb.Name != "INBOX.Archive" {
+			mailboxes = append(mailboxes, mb)
+		}
+	}
+	profile.Mailboxes = mailboxes
+
+	s := newProfileIMAPServer(t, profile)
 	s.Seed(t, "INBOX", seedMessage{MessageID: "<a@example.com>"})
 	cfg := s.Config("cl")
 	id := syncOneAndGetID(t, s.Addr, cfg)
 
 	adapter := newAdapter(cfg, nil, nil, testDialInsecure(s.Addr))
-	if err := adapter.Organize(context.Background(), id, core.OrganizeOp{MoveTo: "Archive"}); err == nil {
-		t.Fatal("Organize(MoveTo Archive) error = nil on a server without an archive")
+	err := adapter.Organize(context.Background(), id, core.OrganizeOp{MoveTo: "Archive"})
+	if err == nil || !strings.Contains(err.Error(), "does not exist") {
+		t.Fatalf("Organize(MoveTo Archive) error = %v, want a does-not-exist error", err)
 	}
 	if got := s.MessageIDs(t, "INBOX"); len(got) != 1 {
 		t.Errorf("INBOX holds %v, want the message untouched", got)

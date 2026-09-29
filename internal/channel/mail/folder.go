@@ -87,7 +87,9 @@ func (m *FolderMap) SetMailboxes(names []string) {
 
 // Resolve returns the server-side mailbox name for a friendly folder
 // name. "INBOX" and names already carrying the configured prefix are
-// returned unchanged.
+// returned unchanged. "Archive"/"Archives" resolve, in order, to the
+// \Archive mailbox, a listed Archive/Archives folder (prefixed before
+// unprefixed), and finally the \All mailbox (Gmail's archive).
 func (m *FolderMap) Resolve(friendly string) string {
 	if friendly == "INBOX" {
 		return friendly
@@ -103,6 +105,16 @@ func (m *FolderMap) Resolve(friendly string) string {
 	// one beats a prefix-joined guess that may not exist.
 	if spellings, ok := unadvertisedSpellings[attr]; ok && hasAttr && m.listed {
 		if mailbox, ok := m.findListed(friendly, spellings); ok {
+			return mailbox
+		}
+	}
+	// Gmail has no archive mailbox: archiving there means dropping the
+	// INBOX label, and the message stays in the \All view ("[Gmail]/All
+	// Mail"), so a MOVE into \All is its archive. It is the last resort,
+	// after any real archive folder, and a server without \All still gets
+	// the prefix-joined guess that ResolveExisting refuses.
+	if hasAttr && attr == SpecialUseArchive {
+		if mailbox, ok := m.specialUse[SpecialUseAll]; ok {
 			return mailbox
 		}
 	}
