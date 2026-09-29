@@ -3,9 +3,12 @@ package whatsapp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"go.mau.fi/whatsmeow/types"
+
+	"github.com/reyer3/bunker-go/internal/core"
 )
 
 // Timing constants for the human-emulation choreography (T13b): a
@@ -63,7 +66,7 @@ func (a *Adapter) withHumanEmulation(ctx context.Context, jid types.JID, body st
 	if err := a.cli.SendPresence(ctx, types.PresenceAvailable); err != nil {
 		return fmt.Errorf("whatsapp: send: presence available: %w", err)
 	}
-	defer func() { _ = a.cli.SendPresence(ctx, types.PresenceUnavailable) }()
+	defer a.revokePresence(ctx, "send")
 
 	if err := a.cli.SendChatPresence(ctx, jid, types.ChatPresenceComposing, types.ChatPresenceMediaText); err != nil {
 		return fmt.Errorf("whatsapp: send: chat presence composing: %w", err)
@@ -74,4 +77,29 @@ func (a *Adapter) withHumanEmulation(ctx context.Context, jid types.JID, body st
 	}
 
 	return deliver()
+}
+
+// defaultPresenceRevokeTimeout bounds the "unavailable" presence sent
+// after a send or read. It runs deferred, after the real work already
+// succeeded or failed, so a stalled connection that never acknowledges
+// it would otherwise hold the caller (and the RPC behind it) forever.
+// A few seconds is ample for one small stanza on a healthy link.
+const defaultPresenceRevokeTimeout = 5 * time.Second
+
+// revokePresence sends presence unavailable at the end of a
+// human-emulated action (op names it in the log). It detaches from ctx's
+// cancellation, since a caller that gave up must still stop looking
+// "online" (which suppresses the phone's own notifications), but bounds
+// the call by presenceRevokeTimeout. A failure is logged, not returned:
+// the action itself is already done and must not be reported as failed.
+func (a *Adapter) revokePresence(ctx context.Context, op string) {
+	timeout := a.presenceRevokeTimeout
+	if timeout <= 0 {
+		timeout = defaultPresenceRevokeTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	defer cancel()
+	if err := a.cli.SendPresence(ctx, types.PresenceUnavailable); err != nil {
+		slog.Error("presence unavailable failed", "channel", string(core.ChannelWhatsApp), "account", a.account, "op", op, "error", err)
+	}
 }

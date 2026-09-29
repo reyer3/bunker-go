@@ -22,7 +22,7 @@ func (a *Adapter) MarkRead(ctx context.Context, id string) error {
 	if err := a.cli.SendPresence(ctx, types.PresenceAvailable); err != nil {
 		return fmt.Errorf("whatsapp: mark read %s: presence available: %w", id, err)
 	}
-	defer func() { _ = a.cli.SendPresence(ctx, types.PresenceUnavailable) }()
+	defer a.revokePresence(ctx, "mark_read")
 
 	if err := a.cli.MarkRead(ctx, []types.MessageID{msgID}, time.Now(), chatJID, sender); err != nil {
 		return fmt.Errorf("whatsapp: mark read %s: %w", id, err)
@@ -62,7 +62,7 @@ func (a *Adapter) MarkThreadRead(ctx context.Context, ids []string) error {
 	if err := a.cli.SendPresence(ctx, types.PresenceAvailable); err != nil {
 		return fmt.Errorf("whatsapp: mark thread read: presence available: %w", err)
 	}
-	defer func() { _ = a.cli.SendPresence(ctx, types.PresenceUnavailable) }()
+	defer a.revokePresence(ctx, "mark_thread_read")
 
 	now := time.Now()
 	for _, key := range order {

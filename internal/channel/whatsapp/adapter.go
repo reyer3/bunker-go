@@ -36,6 +36,10 @@ type Adapter struct {
 	historyLimit    int
 	fanout          core.FanoutPolicy
 
+	// presenceRevokeTimeout bounds the trailing presence-unavailable call
+	// (0 = defaultPresenceRevokeTimeout); tests shorten it.
+	presenceRevokeTimeout time.Duration
+
 	// sleep and rand01 drive the human-emulation choreography (T13b):
 	// they default to the real time.Sleep and math/rand.Float64, so
 	// production sends really do pause; tests override them (see
@@ -304,10 +308,16 @@ func (a *Adapter) handleEditOrRevoke(ctx context.Context, sink core.Sink, e *eve
 	switch proto.GetType() {
 	case waE2E.ProtocolMessage_MESSAGE_EDIT:
 		body, _, _ := bodyAndMedia(proto.GetEditedMessage())
-		_ = sink.EditItem(ctx, id, body)
+		// The edit is already consumed from the event stream and never
+		// redelivered, so a failed write is logged rather than dropped.
+		if err := sink.EditItem(ctx, id, body); err != nil {
+			core.LogSinkError(core.ChannelWhatsApp, a.account, "edit_item", err)
+		}
 		return true
 	case waE2E.ProtocolMessage_REVOKE:
-		_ = sink.RevokeItem(ctx, id)
+		if err := sink.RevokeItem(ctx, id); err != nil {
+			core.LogSinkError(core.ChannelWhatsApp, a.account, "revoke_item", err)
+		}
 		return true
 	default:
 		return false
@@ -323,7 +333,9 @@ func (a *Adapter) handleReaction(ctx context.Context, sink core.Sink, e *events.
 		return false
 	}
 	id := itemID(a.account, e.Info.Chat.String(), reaction.GetKey().GetID())
-	_ = sink.SetReaction(ctx, id, core.Reaction{Sender: e.Info.Sender.String(), Emoji: reaction.GetText()})
+	if err := sink.SetReaction(ctx, id, core.Reaction{Sender: e.Info.Sender.String(), Emoji: reaction.GetText()}); err != nil {
+		core.LogSinkError(core.ChannelWhatsApp, a.account, "set_reaction", err)
+	}
 	return true
 }
 
