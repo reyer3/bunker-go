@@ -384,6 +384,51 @@ type StatusPublisher interface {
 	PostStatus(ctx context.Context, status Status) (Receipt, error)
 }
 
+// Editor is an optional capability: an adapter that can replace the
+// text of a message this account sent (a WhatsApp edit, a Matrix
+// m.replace) implements it. Service only calls it for an item whose
+// FromMe is true, after checking MessageWindowLimiter's edit window.
+// item is the stored item, not just its id: the adapter needs what the
+// store knows about it (its thread, sender and timestamp) even after a
+// restart emptied its own caches.
+type Editor interface {
+	EditMessage(ctx context.Context, item Item, newText string) (Receipt, error)
+}
+
+// Deleter is an optional capability: an adapter that can delete a message
+// this account sent for everyone in the conversation (a WhatsApp revoke,
+// a Matrix redaction) implements it. Like Editor, Service only calls it
+// for a FromMe item within the channel's delete window.
+type Deleter interface {
+	DeleteMessage(ctx context.Context, item Item) (Receipt, error)
+}
+
+// Reactor is an optional capability: an adapter that can set or remove
+// this account's emoji reaction to any message implements it. An empty
+// emoji removes our reaction. OwnReactionSender is the Reaction.Sender
+// the adapter's inbound path records for this account's own reactions,
+// so the store row Service writes after React is the same one a later
+// echo (or the phone's own reaction) updates, never a second entry.
+type Reactor interface {
+	React(ctx context.Context, item Item, emoji string) (Receipt, error)
+	OwnReactionSender() string
+}
+
+// MessageWindows is how long after a message was sent the channel still
+// accepts an edit or a delete-for-everyone of it. Zero means no limit.
+type MessageWindows struct {
+	Edit   time.Duration
+	Delete time.Duration
+}
+
+// MessageWindowLimiter is optional: an adapter whose channel only accepts
+// edits or deletes within a time window (WhatsApp) implements it, so
+// Service refuses a late one up front, on dry-run too, instead of sending
+// something the other side silently ignores.
+type MessageWindowLimiter interface {
+	MessageWindows() MessageWindows
+}
+
 // Retrier is an optional capability: adapters that may store an item they
 // could not fully process the first time (e.g. an encrypted event with no
 // megolm session yet) implement it to retry those items once new keys

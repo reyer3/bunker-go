@@ -28,7 +28,8 @@ type attachmentKey struct {
 }
 
 // Adapter is an in-memory core.Adapter that also implements Sender,
-// Organizer, StatusPublisher, Fetcher and AttachmentDownloader.
+// Organizer, StatusPublisher, Fetcher, AttachmentDownloader, Editor,
+// Deleter and Reactor.
 type Adapter struct {
 	channel core.Channel
 	account string
@@ -40,6 +41,7 @@ type Adapter struct {
 	statuses       []core.Status
 	seq            int
 	attachmentData map[attachmentKey][]byte
+	actions        []MessageAction
 }
 
 var (
@@ -49,6 +51,9 @@ var (
 	_ core.StatusPublisher      = (*Adapter)(nil)
 	_ core.Fetcher              = (*Adapter)(nil)
 	_ core.AttachmentDownloader = (*Adapter)(nil)
+	_ core.Editor               = (*Adapter)(nil)
+	_ core.Deleter              = (*Adapter)(nil)
+	_ core.Reactor              = (*Adapter)(nil)
 )
 
 // New returns a fake adapter for (channel, account) preloaded with seed
@@ -173,4 +178,48 @@ func (a *Adapter) DownloadAttachment(_ context.Context, item core.Item, index in
 		return nil, fmt.Errorf("fake: download %s attachment %d: %w", item.ID, index, core.ErrNotFound)
 	}
 	return io.NopCloser(bytes.NewReader(data)), nil
+}
+
+// MessageAction records one EditMessage, DeleteMessage or React call.
+type MessageAction struct {
+	Action string // "edit", "delete" or "react"
+	ID     string
+	Text   string // the new text, or the emoji ("" removes it)
+}
+
+// ReactionSender is the Reaction.Sender this adapter reports for its own
+// reactions (core.Reactor.OwnReactionSender).
+const ReactionSender = "me"
+
+// EditMessage records the edit and returns a synthetic Receipt.
+func (a *Adapter) EditMessage(_ context.Context, item core.Item, newText string) (core.Receipt, error) {
+	return a.recordAction(MessageAction{Action: "edit", ID: item.ID, Text: newText})
+}
+
+// DeleteMessage records the delete and returns a synthetic Receipt.
+func (a *Adapter) DeleteMessage(_ context.Context, item core.Item) (core.Receipt, error) {
+	return a.recordAction(MessageAction{Action: "delete", ID: item.ID})
+}
+
+// React records the reaction and returns a synthetic Receipt.
+func (a *Adapter) React(_ context.Context, item core.Item, emoji string) (core.Receipt, error) {
+	return a.recordAction(MessageAction{Action: "react", ID: item.ID, Text: emoji})
+}
+
+// OwnReactionSender implements core.Reactor.
+func (a *Adapter) OwnReactionSender() string { return ReactionSender }
+
+// MessageActions returns every edit, delete and react call, in order.
+func (a *Adapter) MessageActions() []MessageAction {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]MessageAction(nil), a.actions...)
+}
+
+func (a *Adapter) recordAction(action MessageAction) (core.Receipt, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.actions = append(a.actions, action)
+	a.seq++
+	return core.Receipt{ID: fmt.Sprintf("fake-%s-%d", action.Action, a.seq), Channel: a.channel, At: time.Now()}, nil
 }
