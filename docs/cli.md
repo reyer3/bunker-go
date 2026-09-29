@@ -879,6 +879,62 @@ Puts an item back in the unread inbox.
 
 The TUI's `u` key uses this to undo the last mark-read.
 
+## `bunker edit <id> <text|-> [--idempotency-key k] [--dry-run] [--json]`
+
+Replaces the text of one of your own messages; everyone in the chat sees
+the edit. `-` reads the text from stdin.
+- **WhatsApp:** only within 20 minutes of sending (whatsmeow's
+  `EditWindow`); a later edit fails before anything is sent
+  (`the channel no longer allows this change`), on `--dry-run` too. The
+  edit goes out with the same typing emulation and pacing as a send.
+- **Matrix:** an `m.replace` edit, encrypted in encrypted rooms. No time
+  limit.
+- **Mail:** unsupported.
+
+Messages with attachments cannot be edited (the caption edit is not
+implemented), and someone else's message is refused. On success the
+stored item carries the new body and `Edited: true`.
+
+```
+[dry-run] would edit whatsapp:personal:<chat>/<msg> via whatsapp/personal to: new text
+edit ok: whatsapp:personal:<chat>/<msg> (receipt whatsapp:personal:<chat>/<edit>)
+```
+
+`--json` returns `{"dryRun", "plan", "receipt"}` like `send`, with
+`plan.action` `"edit"`, `plan.target` the item id and `plan.preview` the
+new text.
+
+## `bunker delete <id> [--yes] [--idempotency-key k] [--dry-run] [--json]`
+
+Deletes one of your own messages for everyone. It plans first (the
+plan's `preview` is the text about to disappear), then, on a terminal,
+asks `Delete for everyone ...? [y/N]`. Without a terminal (a script, a
+pipe) it refuses unless `--yes` is given, since nothing can be asked.
+- **WhatsApp:** a revoke, only within two days of sending.
+- **Matrix:** a redaction of the event. No time limit.
+- **Mail:** unsupported.
+
+The stored item is kept with an empty body and `Deleted: true`, as when
+the other side deletes a message. `--json` has `plan.action` `"delete"`.
+
+## `bunker react <id> <emoji|--remove> [--idempotency-key k] [--dry-run] [--json]`
+
+Sets your reaction to any message (yours or anyone's) to one emoji,
+replacing your previous reaction on it; `--remove` takes it away. Text
+that is not a single emoji is refused.
+- **WhatsApp:** a reaction message; removing sends an empty one, which
+  is how WhatsApp withdraws it. Paced like a send, with a short pause
+  instead of typing.
+- **Matrix:** an `m.annotation`, encrypted in encrypted rooms. Matrix
+  allows several reactions per person; bunker keeps one, so a new
+  reaction first redacts your previous ones on that message, and
+  `--remove` redacts them. Removing when bunker knows of no reaction of
+  yours fails.
+- **Mail:** unsupported.
+
+`--json` has `plan.action` `"react"` and `plan.preview` the emoji (empty
+for a removal). The stored item's `Reactions` gets (or loses) your entry.
+
 ## `bunker contacts [query] [--channel c] [--account a] [--limit n] [--json]`
 
 Lists who you can write to or call, merged across accounts:
@@ -1316,6 +1372,21 @@ chat shows as a thumbnail inside its bubble, instead of the
 - **Without graphics:** inside tmux or a plain terminal, `Ctrl+O` plays
   the conversation's newest video in `mpv`'s own window.
 
+## Editing, deleting and reacting in the TUI's chat view
+
+The chat view has no message selection (the composer always has focus
+and plain keys are draft text), so these keys act on the latest message:
+
+| Key | Action |
+|-----|--------|
+| `Alt+E` | put your last text message in the composer; `Ctrl+S` (or ↵) previews the edit, ↵ confirms, `Esc` cancels and gives your draft back |
+| `Alt+X` | delete your last message for everyone, after a confirm |
+| `Alt++` (or `Alt+=`) | react to the last message received: `1`-`6` pick 👍 ❤️ 😂 😮 😢 🙏, `0` removes your reaction, then ↵ confirms |
+
+Each builds the same dry-run plan as `bunker edit`/`delete`/`react`
+first, and the same channel rules apply (WhatsApp's 20-minute edit
+window, no media edits). The conversation reloads afterwards.
+
 ## Emoji completion in the TUI's chat composer
 
 Typing `:` followed by at least two letters at the end of a chat draft
@@ -1374,14 +1445,20 @@ which answers `daemon_up: false` with a hint to run `bunker daemon`.
 | `health` | whether the daemon is up and, per account, `channel`, `account`, `state`, `since`, `last_error`, `restarts` and `last_item` (the newest stored item's time); plus `update_available` and `latest_version` from the daemon's release check |
 | `send` | a new message; `to` takes an address or a contact name, resolved like the CLI |
 | `reply` | a reply to an item |
+| `edit` | edit one of the user's own messages (`id`, `text`), like `bunker edit` |
+| `delete` | delete one of the user's own messages for everyone (`id`), like `bunker delete` |
+| `react` | react to any message (`id`, `emoji`; an empty `emoji` removes ours), like `bunker react` |
 | `mark_read` | mark an item read (`id`); on WhatsApp and Matrix this sends the sender a read receipt |
 | `mark_unread` | put an item back in the unread inbox (`id`); on WhatsApp and Matrix only bunker changes |
 | `archive` | move a mail to the archive (`id`), like `bunker organize --move Archive`; mail only |
 | `move` | move a mail to another folder (`id`, `folder`); mail only |
 | `label` | add or remove labels on a mail (`id`, `add`, `remove`); mail only |
 
-Reads are annotated read-only; `send`, `reply` and the organize tools
-are annotated destructive.
+Reads are annotated read-only; `send`, `reply`, `edit`, `delete`,
+`react` and the organize tools are annotated destructive. `edit`,
+`delete` and `react` are gated exactly like `send`: a plan unless the
+call confirms and the server runs with `--allow-send`, and a confirmed
+retry is never applied twice.
 
 `attachment` lets an agent read an invoice, a contract or a spreadsheet.
 It returns `id`, `index`, `name`, `mime`, `size`, `format`, `has_text`,

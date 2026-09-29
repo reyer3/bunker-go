@@ -38,7 +38,11 @@ const sendReplyTimeout = 15 * time.Minute
 // connection — shortCommandTimeout's 30s is comfortably enough for every
 // other command but not guaranteed for that.
 func commandTimeout(cmd string) time.Duration {
-	if cmd == "send" || cmd == "reply" || cmd == "download" {
+	switch cmd {
+	case "send", "reply", "download",
+		// edit, delete and react go through the same WhatsApp pacing
+		// as a send, and delete may also wait on its confirmation.
+		"edit", "delete", "react":
 		return sendReplyTimeout
 	}
 	return shortCommandTimeout

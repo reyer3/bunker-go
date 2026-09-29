@@ -333,7 +333,14 @@ func (a *Adapter) handleReaction(ctx context.Context, sink core.Sink, e *events.
 		return false
 	}
 	id := itemID(a.account, e.Info.Chat.String(), reaction.GetKey().GetID())
-	if err := sink.SetReaction(ctx, id, core.Reaction{Sender: e.Info.Sender.String(), Emoji: reaction.GetText()}); err != nil {
+	sender := e.Info.Sender.String()
+	if own := a.OwnReactionSender(); e.Info.IsFromMe && own != "" {
+		// Our reaction from the phone (whose sender carries its device,
+		// or our LID in a LID chat) must land on the same row React
+		// writes for this device, or the chat shows two of ours.
+		sender = own
+	}
+	if err := sink.SetReaction(ctx, id, core.Reaction{Sender: sender, Emoji: reaction.GetText()}); err != nil {
 		core.LogSinkError(core.ChannelWhatsApp, a.account, "set_reaction", err)
 	}
 	return true

@@ -195,6 +195,13 @@ type Model struct {
 	// matches the real send's receipt ID (chatOptimistic.id) — the
 	// stored FromMe item then renders in its place, deduplicated.
 	chatOptimistic *chatOptimisticMsg
+	// chatAction is the edit, delete or reaction on screen (see
+	// chat_actions.go); chatEditID is our message being edited in the
+	// composer, with the draft set aside for it in chatEditDraft.
+	chatAction      *chatAction
+	chatActionToken uint64
+	chatEditID      string
+	chatEditDraft   string
 	// emojiSel is the highlighted entry of the emoji completion list
 	// (emoji.go), and emojiDismissed the draft Esc dismissed it on: the
 	// list stays hidden until the draft changes again.

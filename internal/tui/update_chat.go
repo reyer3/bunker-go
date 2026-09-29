@@ -18,6 +18,9 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.chatSending || m.chatPreviewPending {
 		return m, nil
 	}
+	if m.chatAction != nil {
+		return m.updateChatAction(msg)
+	}
 	if m.chatConfirm {
 		switch msg.String() {
 		case "esc":
@@ -65,7 +68,16 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case chatAskKey:
 		return m.askAgent()
+	case chatEditKey:
+		return m.startChatEdit()
+	case chatDeleteKey:
+		return m.startChatDelete()
+	case chatReactKey, chatReactKeyAlt:
+		return m.startChatReact()
 	case "esc":
+		if m.chatEditID != "" {
+			return m.cancelChatEdit(), nil
+		}
 		if m.openID != "" {
 			return m, m.quitOpenChat()
 		}
@@ -74,6 +86,9 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.composer.InsertRune('\n')
 		return m.resizeChatComposer(), nil
 	case "enter", "ctrl+s":
+		if m.chatEditID != "" {
+			return m.previewChatEdit()
+		}
 		body := strings.TrimSpace(m.composer.Value())
 		if body == "" && len(m.chatAttachments) == 0 {
 			return m, nil

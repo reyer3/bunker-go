@@ -318,6 +318,43 @@ func (c *queryClient) Download(ctx context.Context, id string, index int, destPa
 	return client.Download(ctx, id, index, destPath, opts)
 }
 
+// EditMessage, DeleteMessage and React are forwarded at most once, like
+// Send: they change a message the other side already has. A connection
+// without the capability reports core.ErrUnsupported.
+func (c *queryClient) EditMessage(ctx context.Context, id, text string, dryRun bool) (core.Plan, core.Receipt, error) {
+	return c.messageAction(ctx, func(mc MessageClient) (core.Plan, core.Receipt, error) {
+		return mc.EditMessage(ctx, id, text, dryRun)
+	})
+}
+
+func (c *queryClient) DeleteMessage(ctx context.Context, id string, dryRun bool) (core.Plan, core.Receipt, error) {
+	return c.messageAction(ctx, func(mc MessageClient) (core.Plan, core.Receipt, error) {
+		return mc.DeleteMessage(ctx, id, dryRun)
+	})
+}
+
+func (c *queryClient) React(ctx context.Context, id, emoji string, dryRun bool) (core.Plan, core.Receipt, error) {
+	return c.messageAction(ctx, func(mc MessageClient) (core.Plan, core.Receipt, error) {
+		return mc.React(ctx, id, emoji, dryRun)
+	})
+}
+
+func (c *queryClient) messageAction(ctx context.Context, do func(MessageClient) (core.Plan, core.Receipt, error)) (core.Plan, core.Receipt, error) {
+	if err := c.acquire(ctx); err != nil {
+		return core.Plan{}, core.Receipt{}, err
+	}
+	defer c.release()
+	client, err := c.activeClient()
+	if err != nil {
+		return core.Plan{}, core.Receipt{}, err
+	}
+	mc, ok := client.(MessageClient)
+	if !ok {
+		return core.Plan{}, core.Receipt{}, fmt.Errorf("tui: edit, delete or react: %w", core.ErrUnsupported)
+	}
+	return do(mc)
+}
+
 func (c *queryClient) Close() error {
 	c.mu.Lock()
 	if c.closed {
@@ -333,6 +370,7 @@ func (c *queryClient) Close() error {
 }
 
 var (
-	_ Client     = (*queryClient)(nil)
-	_ PageClient = (*queryClient)(nil)
+	_ Client        = (*queryClient)(nil)
+	_ PageClient    = (*queryClient)(nil)
+	_ MessageClient = (*queryClient)(nil)
 )

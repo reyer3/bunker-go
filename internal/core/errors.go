@@ -28,3 +28,13 @@ var ErrAttachmentTooLarge = errors.New("core: attachment exceeds the download si
 // bytes actually downloaded does not match the attachment's declared
 // Size (checked only when Size is known, i.e. > 0).
 var ErrSizeMismatch = errors.New("core: downloaded size does not match the declared attachment size")
+
+// ErrNotOwnMessage is returned by Service.EditMessage/DeleteMessage when
+// the item was not sent by this account: a channel only lets its sender
+// edit or delete a message for everyone.
+var ErrNotOwnMessage = errors.New("core: not a message sent by this account")
+
+// ErrWindowExpired is returned by Service.EditMessage/DeleteMessage when
+// the message is older than the channel's edit or delete window (see
+// MessageWindowLimiter).
+var ErrWindowExpired = errors.New("core: the channel no longer allows this change: its time window has passed")

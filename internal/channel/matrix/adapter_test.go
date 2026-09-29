@@ -197,6 +197,9 @@ type fakeState struct {
 	sentEvents  []sentEvent
 	readMarkers [][]byte
 	typingCalls []typingCall
+	// redactions lists every PUT .../rooms/<roomID>/redact/<eventID>/<txn>
+	// path (client.RedactEvent), in order.
+	redactions []string
 
 	// getEventResponses serves GET .../rooms/<roomID>/event/<eventID>
 	// (client.GetEvent), keyed by the raw eventID string, for
@@ -274,6 +277,12 @@ func newFakeHomeserver(t *testing.T, syncSeq []*mautrix.RespSync) (*httptest.Ser
 			n := len(state.sentEvents)
 			state.mu.Unlock()
 			json.NewEncoder(w).Encode(map[string]string{"event_id": fmt.Sprintf("$sent%d", n)})
+		case strings.Contains(r.URL.Path, "/redact/") && r.Method == http.MethodPut:
+			state.mu.Lock()
+			state.redactions = append(state.redactions, r.URL.Path)
+			n := len(state.redactions)
+			state.mu.Unlock()
+			json.NewEncoder(w).Encode(map[string]string{"event_id": fmt.Sprintf("$redaction%d", n)})
 		case strings.Contains(r.URL.Path, "/typing/") && r.Method == http.MethodPut:
 			body, _ := io.ReadAll(r.Body)
 			roomID := r.URL.Path

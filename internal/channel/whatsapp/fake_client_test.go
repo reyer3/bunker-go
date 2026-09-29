@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types"
@@ -173,6 +174,45 @@ func (f *fakeWAClient) SendMessage(_ context.Context, to types.JID, message *waE
 		resp.ID = "FAKE-MSG-ID"
 	}
 	return resp, nil
+}
+
+// BuildEdit, BuildRevoke and BuildReaction build the same message shapes
+// *whatsmeow.Client does, keying the target as ours when sender is
+// empty or this client's own user, so tests can assert on what would go
+// over the wire.
+func (f *fakeWAClient) BuildEdit(chat types.JID, id types.MessageID, newContent *waE2E.Message) *waE2E.Message {
+	return &waE2E.Message{EditedMessage: &waE2E.FutureProofMessage{Message: &waE2E.Message{
+		ProtocolMessage: &waE2E.ProtocolMessage{
+			Key:           &waCommon.MessageKey{FromMe: boolPtr(true), ID: strPtr(string(id)), RemoteJID: strPtr(chat.String())},
+			Type:          waE2E.ProtocolMessage_MESSAGE_EDIT.Enum(),
+			EditedMessage: newContent,
+		},
+	}}}
+}
+
+func (f *fakeWAClient) BuildRevoke(chat, sender types.JID, id types.MessageID) *waE2E.Message {
+	return &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{
+		Type: waE2E.ProtocolMessage_REVOKE.Enum(),
+		Key:  f.messageKey(chat, sender, id),
+	}}
+}
+
+func (f *fakeWAClient) BuildReaction(chat, sender types.JID, id types.MessageID, reaction string) *waE2E.Message {
+	return &waE2E.Message{ReactionMessage: &waE2E.ReactionMessage{
+		Key:  f.messageKey(chat, sender, id),
+		Text: strPtr(reaction),
+	}}
+}
+
+func (f *fakeWAClient) messageKey(chat, sender types.JID, id types.MessageID) *waCommon.MessageKey {
+	key := &waCommon.MessageKey{FromMe: boolPtr(true), ID: strPtr(string(id)), RemoteJID: strPtr(chat.String())}
+	if !sender.IsEmpty() && sender.User != f.OwnJID().User {
+		key.FromMe = boolPtr(false)
+		if chat.Server == types.GroupServer {
+			key.Participant = strPtr(sender.ToNonAD().String())
+		}
+	}
+	return key
 }
 
 func (f *fakeWAClient) IsOnWhatsApp(_ context.Context, phones []string) ([]types.IsOnWhatsAppResponse, error) {

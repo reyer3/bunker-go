@@ -73,6 +73,10 @@ type Service struct {
 	// idempotency remembers recent sends by idempotency key (issue #67,
 	// see idempotency.go) so a retried Send or Reply is not sent twice.
 	idempotency *idempotencyCache
+	// messageClock is what EditMessage/DeleteMessage measure a
+	// message's age against the channel's MessageWindows with; tests
+	// inject a fixed instant.
+	messageClock func() time.Time
 }
 
 // SetQueryClock overrides the clock ListPage resolves relative query
@@ -124,6 +128,7 @@ func NewService(store Store, registry *Registry) *Service {
 		presenceAfterFunc:   defaultPresenceAfterFunc,
 		queryClock:          time.Now,
 		idempotency:         newIdempotencyCache(),
+		messageClock:        time.Now,
 	}
 }
 

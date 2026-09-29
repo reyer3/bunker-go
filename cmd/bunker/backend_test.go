@@ -72,6 +72,9 @@ type fakeBackend struct {
 	call             core.Call
 	calls            []core.Call
 	callErr          error
+
+	actionCalls []messageActionCall
+	actionErr   error
 }
 
 type placeCallCall struct {
@@ -109,6 +112,43 @@ func (f *fakeBackend) ControlCall(ctx context.Context, id string, action core.Ca
 
 func (f *fakeBackend) Calls(ctx context.Context) ([]core.Call, error) {
 	return f.calls, f.callErr
+}
+
+// messageActionCall records one EditMessage, DeleteMessage or React call.
+type messageActionCall struct {
+	Action string
+	ID     string
+	Text   string
+	DryRun bool
+	Key    string // the idempotency key ctx carried
+}
+
+func (f *fakeBackend) messageAction(ctx context.Context, action, id, text string, dryRun bool) (core.Plan, core.Receipt, error) {
+	f.actionCalls = append(f.actionCalls, messageActionCall{Action: action, ID: id, Text: text, DryRun: dryRun, Key: core.IdempotencyKey(ctx)})
+	if f.actionErr != nil {
+		return core.Plan{}, core.Receipt{}, f.actionErr
+	}
+	preview := text
+	if action == "delete" {
+		preview = f.items[id].Body
+	}
+	plan := core.Plan{Action: action, Channel: core.ChannelWhatsApp, Account: "personal", Target: id, Preview: preview}
+	if dryRun {
+		return plan, core.Receipt{}, nil
+	}
+	return plan, f.receipt, nil
+}
+
+func (f *fakeBackend) EditMessage(ctx context.Context, id, text string, dryRun bool) (core.Plan, core.Receipt, error) {
+	return f.messageAction(ctx, "edit", id, text, dryRun)
+}
+
+func (f *fakeBackend) DeleteMessage(ctx context.Context, id string, dryRun bool) (core.Plan, core.Receipt, error) {
+	return f.messageAction(ctx, "delete", id, "", dryRun)
+}
+
+func (f *fakeBackend) React(ctx context.Context, id, emoji string, dryRun bool) (core.Plan, core.Receipt, error) {
+	return f.messageAction(ctx, "react", id, emoji, dryRun)
 }
 
 func (f *fakeBackend) MarkUnread(ctx context.Context, id string) (bool, error) {
