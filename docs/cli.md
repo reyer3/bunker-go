@@ -332,11 +332,20 @@ channel itself when the adapter implements `core.ReadMarker`:
 {"item": { <core.Item> }}
 ```
 
-## `bunker reply <id> <text|-> [--cc addr]... [--attach path]... [--dry-run] [--json]`
+## `bunker reply <id> <text|-> [--cc addr]... [--attach path]... [--idempotency-key k] [--dry-run] [--json]`
 
 Replies to item `<id>`. `<text>` can be `-` to read the body from stdin.
 `--dry-run` returns the `Plan` alone and never reaches the channel
 adapter.
+
+`--idempotency-key k` makes a retry safe: the daemon sends at most once
+per key. A repeat of a key that already sent returns the first call's
+plan and receipt, with `receipt.replayed: true`, and sends nothing; a
+repeat while the first call is still sending waits for it and shares its
+result; a failed send is forgotten, so the same key can retry it. Keys
+live in the daemon's memory for 24 hours (at most 1024 of them, least
+recently used dropped first) and are lost when it restarts. Reusing a key
+for a different message is an error. `send` takes the same flag.
 
 `--cc addr` (repeatable) adds a Cc recipient; each value may itself be a
 comma-separated list (`--cc "a@x.cl, b@x.cl"`), and the flag may be
@@ -359,11 +368,13 @@ on the first image only.
 `receipt` is the zero value (`{"ID":"","Channel":"","At":"0001-01-01T00:00:00Z"}`)
 when `dryRun` is `true`.
 
-## `bunker send <channel> <account> <to> <text|-> [--cc addr]... [--subject s] [--attach path]... [--media path]... [--dry-run] [--json]`
+## `bunker send <channel> <account> <to> <text|-> [--cc addr]... [--subject s] [--attach path]... [--media path]... [--idempotency-key k] [--dry-run] [--json]`
 
-Sends a fresh message, not tied to any existing item. Same `--dry-run` and
-JSON shape as `reply`, plus new `plan.Media`/`plan.Attachments` fields
-(see below).
+Sends a fresh message, not tied to any existing item. Same `--dry-run`,
+`--idempotency-key` and JSON shape as `reply`, plus new
+`plan.Media`/`plan.Attachments` fields (see below). A broadcast is
+remembered as a whole, including recipients that failed, so retrying
+those needs a new key.
 
 `<to>` is a comma-separated list of recipients (`"a@x.cl, b@x.cl"`):
 each entry is trimmed, empty entries are dropped, and the command fails
@@ -1192,6 +1203,14 @@ destructive.
   the plan with an error saying nothing was sent.
 - The daemon's WhatsApp pacing and fan-out limits still apply. There is no
   bulk tool: one message per call.
+- A confirmed send has its own 5-minute timeout (reads keep 60 seconds),
+  because pacing can take a while. It carries an idempotency key derived
+  from the plan (channel, account, recipients or replied-to item, subject,
+  text and attachment paths), so retrying a confirm that timed out never
+  sends twice: the retry waits for, or replays, the first send's receipt
+  (`receipt.replayed: true`). The same text to the same person again
+  within 24 hours is answered the same way; change the text to send it
+  anew.
 
 Claude Code:
 

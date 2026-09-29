@@ -28,7 +28,8 @@ const mcpInstructions = `bunker is the user's inbox: mail, WhatsApp and Matrix i
 Use counts and list to see what is new, read or thread to open it (reading never marks anything read),
 and contacts to find someone's address by name. health says whether the daemon and each account are connected. send and reply return a plan (dry run) unless
 confirm is true; confirming only works when the user started the server with --allow-send.
-Never send a message the user did not ask for.`
+A confirmed send that timed out is safe to retry with the same arguments: it is never sent twice
+(the receipt then says replayed). Never send a message the user did not ask for.`
 
 // mcpBodyLimit caps a message body in tool results: an agent needs the
 // text, not megabytes of quoted mail history.
@@ -70,19 +71,10 @@ func cmdMCP(args []string, stderr io.Writer) int {
 	return 0
 }
 
-// withBackend runs fn against a fresh daemon connection.
+// withBackend runs fn against a fresh daemon connection, with the read
+// timeout (sends use mcpSendTimeout, see mcpOutbound).
 func withBackend[T any](ctx context.Context, dial mcpDialer, fn func(context.Context, Backend) (T, error)) (T, error) {
-	var zero T
-	ctx, cancel := context.WithTimeout(ctx, mcpCallTimeout)
-	defer cancel()
-	backend, closer, err := dial(ctx)
-	if err != nil {
-		return zero, err
-	}
-	if closer != nil {
-		defer closer.Close()
-	}
-	return fn(ctx, backend)
+	return withBackendTimeout(ctx, dial, mcpCallTimeout, fn)
 }
 
 // mcpItem is an item as tools return it: the body is a snippet in
@@ -315,17 +307,25 @@ func newMCPServer(dial mcpDialer, allowSend bool) *mcp.Server {
 
 // mcpOutbound always plans first. It only sends when the call confirms
 // and the server allows it; a confirm on a plans-only server returns the
-// plan together with the reason nothing was sent.
+// plan together with the reason nothing was sent. A real send carries an
+// idempotency key derived from the plan (issue #67), so an agent that
+// retries a confirm after a timeout gets the first receipt back instead
+// of sending the message twice.
 func mcpOutbound(ctx context.Context, dial mcpDialer, allowSend, confirm bool, do func(context.Context, Backend, bool) (core.Plan, core.Receipt, error)) (*mcp.CallToolResult, mcpPlanOut, error) {
 	type result struct {
 		plan    core.Plan
 		receipt *core.Receipt
 	}
-	res, err := withBackend(ctx, dial, func(ctx context.Context, b Backend) (result, error) {
+	timeout := mcpCallTimeout
+	if confirm && allowSend {
+		timeout = mcpSendTimeout
+	}
+	res, err := withBackendTimeout(ctx, dial, timeout, func(ctx context.Context, b Backend) (result, error) {
 		plan, _, err := do(ctx, b, true)
 		if err != nil || !confirm || !allowSend {
 			return result{plan: plan}, err
 		}
+		ctx = core.WithIdempotencyKey(ctx, mcpIdempotencyKey(plan))
 		plan, receipt, err := do(ctx, b, false)
 		return result{plan: plan, receipt: &receipt}, err
 	})

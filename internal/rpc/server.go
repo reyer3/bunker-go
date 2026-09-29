@@ -139,7 +139,7 @@ func (s *Server) call(ctx context.Context, req Request) (any, error) {
 		if err := json.Unmarshal(req.Params, &p); err != nil {
 			return nil, fmt.Errorf("rpc: bad params: %w", err)
 		}
-		plan, receipt, err := s.svc.Reply(ctx, p.ID, p.Body, p.Cc, p.Attachments, p.DryRun)
+		plan, receipt, err := s.svc.Reply(core.WithIdempotencyKey(ctx, p.IdempotencyKey), p.ID, p.Body, p.Cc, p.Attachments, p.DryRun)
 		if err != nil {
 			return nil, err
 		}
@@ -150,7 +150,7 @@ func (s *Server) call(ctx context.Context, req Request) (any, error) {
 		if err := json.Unmarshal(req.Params, &p); err != nil {
 			return nil, fmt.Errorf("rpc: bad params: %w", err)
 		}
-		plan, receipt, err := s.svc.Send(ctx, p.Outgoing, p.DryRun)
+		plan, receipt, err := s.svc.Send(core.WithIdempotencyKey(ctx, p.IdempotencyKey), p.Outgoing, p.DryRun)
 		if err != nil {
 			return nil, err
 		}

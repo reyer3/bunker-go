@@ -28,6 +28,7 @@ type fakeBackend struct {
 	counts map[core.Channel]map[string]int
 
 	sendCalls     []core.Outgoing
+	sendKeys      []string // idempotency key each Send/Reply's ctx carried
 	replyCalls    []replyCall
 	organizeCalls []organizeCall
 	statusCalls   []statusCall
@@ -234,6 +235,7 @@ func (f *fakeBackend) Counts(ctx context.Context) (map[core.Channel]map[string]i
 
 func (f *fakeBackend) Reply(ctx context.Context, id, body string, cc, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
 	f.replyCalls = append(f.replyCalls, replyCall{ID: id, Body: body, Cc: cc, Attachments: attachments, DryRun: dryRun})
+	f.sendKeys = append(f.sendKeys, core.IdempotencyKey(ctx))
 	if f.replyErr != nil {
 		return core.Plan{}, core.Receipt{}, f.replyErr
 	}
@@ -247,6 +249,7 @@ func (f *fakeBackend) Reply(ctx context.Context, id, body string, cc, attachment
 func (f *fakeBackend) Send(ctx context.Context, out core.Outgoing, dryRun bool) (core.Plan, core.Receipt, error) {
 	f.sendCalls = append(f.sendCalls, out)
 	f.sendDryRuns = append(f.sendDryRuns, dryRun)
+	f.sendKeys = append(f.sendKeys, core.IdempotencyKey(ctx))
 	if f.sendErr != nil {
 		return core.Plan{}, core.Receipt{}, f.sendErr
 	}
