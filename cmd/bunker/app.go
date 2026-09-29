@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -8,8 +9,10 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/reyer3/bunker-go/internal/config"
 	"github.com/reyer3/bunker-go/internal/rpc"
@@ -82,6 +85,11 @@ type appDeps struct {
 	environ    func() []string
 	daemonUp   func() error
 	start      func(argv, env []string) error
+	// notify runs a notification command (notify-send) to completion.
+	notify  func(argv []string) error
+	getenv  func(string) string
+	homeDir func() (string, error)
+	now     func() time.Time
 }
 
 var defaultAppDeps = appDeps{
@@ -91,6 +99,77 @@ var defaultAppDeps = appDeps{
 	environ:    os.Environ,
 	daemonUp:   pingDaemon,
 	start:      startDetached,
+	notify:     runNotify,
+	getenv:     os.Getenv,
+	homeDir:    os.UserHomeDir,
+	now:        time.Now,
+}
+
+// appNotifySummary is the desktop notification's title when "bunker
+// app" fails.
+const appNotifySummary = "bunker no pudo abrirse"
+
+// runNotify runs argv and waits for it, bounded so a notification
+// daemon that never answers cannot keep "bunker app" alive.
+func runNotify(argv []string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, argv[0], argv[1:]...).Run()
+}
+
+// appLogPath is where "bunker app" records its failures:
+// $XDG_STATE_HOME/bunker/app.log, else ~/.local/state/bunker/app.log.
+// A relative XDG_STATE_HOME is ignored, as the XDG spec requires.
+func appLogPath(deps appDeps) (string, error) {
+	if dir := deps.getenv("XDG_STATE_HOME"); filepath.IsAbs(dir) {
+		return filepath.Join(dir, "bunker", "app.log"), nil
+	}
+	home, err := deps.homeDir()
+	if err != nil {
+		return "", fmt.Errorf("app: locate the log: %w", err)
+	}
+	return filepath.Join(home, ".local", "state", "bunker", "app.log"), nil
+}
+
+// appendAppLog appends one timestamped line for msg to the app log.
+func appendAppLog(deps appDeps, msg string) error {
+	path, err := appLogPath(deps)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("app: log dir: %w", err)
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
+	if err != nil {
+		return fmt.Errorf("app: open log: %w", err)
+	}
+	line := deps.now().Format(time.RFC3339) + " " + strings.ReplaceAll(msg, "\n", " ") + "\n"
+	if _, err := f.WriteString(line); err != nil {
+		f.Close()
+		return fmt.Errorf("app: write log: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("app: write log: %w", err)
+	}
+	return nil
+}
+
+// reportAppError makes a failure visible when "bunker app" was started
+// from the desktop entry, where nobody reads stderr: a desktop
+// notification when notify-send is installed, and a line in the app log.
+// Reporting problems are only warnings on stderr: the launch has already
+// failed and the exit code says so.
+func reportAppError(deps appDeps, stderr io.Writer, msg string) {
+	if _, err := deps.lookPath("notify-send"); err == nil {
+		argv := []string{"notify-send", "--app-name=bunker", "--urgency=critical", appNotifySummary, msg}
+		if err := deps.notify(argv); err != nil {
+			fmt.Fprintln(stderr, "warning: app: notify-send:", err)
+		}
+	}
+	if err := appendAppLog(deps, msg); err != nil {
+		fmt.Fprintln(stderr, "warning:", err)
+	}
 }
 
 // pingDaemon checks the daemon is reachable before opening the window:
@@ -127,6 +206,19 @@ func cmdApp(args []string, stdout, stderr io.Writer, deps appDeps) int {
 		return 2
 	}
 
+	// fail prints msg (and any hints) and, outside --dry-run, reports it
+	// on the desktop too: launched from the desktop entry, stderr is lost.
+	fail := func(msg string, hints ...string) int {
+		fmt.Fprintln(stderr, "error:", msg)
+		for _, h := range hints {
+			fmt.Fprintln(stderr, "hint:", h)
+		}
+		if !*dryRun {
+			reportAppError(deps, stderr, msg)
+		}
+		return 1
+	}
+
 	var custom []string
 	cfg, err := deps.loadConfig()
 	switch {
@@ -135,31 +227,26 @@ func cmdApp(args []string, stdout, stderr io.Writer, deps appDeps) int {
 	case errors.Is(err, fs.ErrNotExist):
 		// No config file: the built-in terminal choice.
 	default:
-		fmt.Fprintln(stderr, "error: load config:", err)
-		return 1
+		return fail(fmt.Sprintf("load config: %v", err))
 	}
 	exe, err := deps.executable()
 	if err != nil {
-		fmt.Fprintln(stderr, "error: app: locate the bunker binary:", err)
-		return 1
+		return fail(fmt.Sprintf("app: locate the bunker binary: %v", err))
 	}
 	argv, err := appCommand(custom, exe, deps.lookPath)
 	if err != nil {
-		fmt.Fprintln(stderr, "error:", err)
-		return 1
+		return fail(err.Error())
 	}
 	if *dryRun {
 		fmt.Fprintln(stdout, strings.Join(argv, " "))
 		return 0
 	}
 	if err := deps.daemonUp(); err != nil {
-		fmt.Fprintf(stderr, "error: cannot reach bunker daemon at %s: %v\n", rpc.DefaultSocketPath(), err)
-		fmt.Fprintln(stderr, "hint: start it with 'bunker daemon' (or 'systemctl --user start bunker')")
-		return 1
+		return fail(fmt.Sprintf("cannot reach bunker daemon at %s: %v", rpc.DefaultSocketPath(), err),
+			"start it with 'bunker daemon' (or 'systemctl --user start bunker')")
 	}
 	if err := deps.start(argv, appEnv(deps.environ())); err != nil {
-		fmt.Fprintf(stderr, "error: app: start %s: %v\n", argv[0], err)
-		return 1
+		return fail(fmt.Sprintf("app: start %s: %v", argv[0], err))
 	}
 	return 0
 }
