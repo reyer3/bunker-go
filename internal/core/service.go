@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -151,7 +152,9 @@ func (s *Service) Thread(ctx context.Context, channel, account, thread string, b
 // the server and upserts the result into the store — so a later
 // `bunker download` on the same id works exactly like it does for
 // anything sync already knew about. An unknown account, or a native id
-// the server itself doesn't have, both stay ErrNotFound.
+// the server itself doesn't have, both stay ErrNotFound. A full mail
+// copy fetched for an item the store already has is persisted too (see
+// persistFetchedBody).
 func (s *Service) Fetch(ctx context.Context, id string) (Item, error) {
 	item, err := s.store.Get(ctx, id)
 	if err != nil {
@@ -174,7 +177,36 @@ func (s *Service) Fetch(ctx context.Context, id string) (Item, error) {
 		// in-memory cache after a restart); the stored copy is still valid.
 		return item, nil
 	}
-	return fetched, err
+	if err != nil {
+		return Item{}, err
+	}
+	if err := s.persistFetchedBody(ctx, item, fetched); err != nil {
+		return Item{}, err
+	}
+	return fetched, nil
+}
+
+// persistFetchedBody saves the body and attachments of a full mail copy
+// the adapter just fetched into the stored item (#91), so reading a mail
+// once makes it searchable and later downloads need no second full
+// fetch. Only those two fields are taken from fetched: every other one
+// (read state, labels, folder meta) stays as stored, since those are
+// kept current by sync and by this process's own organize calls, not by
+// a one-off read. Chat items are left alone: their adapters' Fetch
+// returns a cached copy that may predate a stored edit or revoke.
+func (s *Service) persistFetchedBody(ctx context.Context, stored, fetched Item) error {
+	if stored.Channel != ChannelMail || (fetched.Body == "" && len(fetched.Attachments) == 0) {
+		return nil
+	}
+	if fetched.Body == stored.Body && slices.Equal(fetched.Attachments, stored.Attachments) {
+		return nil
+	}
+	stored.Body = fetched.Body
+	stored.Attachments = fetched.Attachments
+	if err := s.store.Upsert(ctx, stored); err != nil {
+		return fmt.Errorf("core: fetch %s: persist body: %w", stored.ID, err)
+	}
+	return nil
 }
 
 // parseItemIDPrefix splits a core.Item.ID's leading "<channel>:<account>:"

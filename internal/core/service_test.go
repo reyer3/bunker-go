@@ -1159,6 +1159,57 @@ func TestServiceFetchUsesFetcherCapability(t *testing.T) {
 	}
 }
 
+// TestServiceFetchPersistsStoredMailBody (#91): reading a mail the store
+// already has saves the adapter's full body into the store, so search
+// finds it, while every local field (read state, labels, meta) stays as
+// stored.
+func TestServiceFetchPersistsStoredMailBody(t *testing.T) {
+	item := core.Item{
+		ID: "mail:cl:1", Channel: core.ChannelMail, Account: "cl",
+		Subject: "asunto", Unread: false, Labels: []string{"Clientes"},
+		Meta: map[string]string{"folder": "INBOX"},
+	}
+	store := newMemStore(item)
+	reg := core.NewRegistry()
+	reg.Register(&spyAdapter{channel: core.ChannelMail, account: "cl"})
+	svc := core.NewService(store, reg)
+
+	if _, err := svc.Fetch(context.Background(), item.ID); err != nil {
+		t.Fatalf("Fetch returned error: %v", err)
+	}
+	stored, err := store.Get(context.Background(), item.ID)
+	if err != nil {
+		t.Fatalf("store.Get: %v", err)
+	}
+	if stored.Body != "fetched" {
+		t.Errorf("stored.Body = %q, want the fetched body persisted", stored.Body)
+	}
+	if stored.Subject != "asunto" || stored.Unread || len(stored.Labels) != 1 || stored.Meta["folder"] != "INBOX" {
+		t.Errorf("stored = %+v, want local fields kept", stored)
+	}
+}
+
+// TestServiceFetchDoesNotPersistChatCopy: a chat adapter's Fetch may
+// return a cached copy older than a stored edit, so it is never saved.
+func TestServiceFetchDoesNotPersistChatCopy(t *testing.T) {
+	item := core.Item{ID: "whatsapp:wa:1", Channel: core.ChannelWhatsApp, Account: "wa", Body: "editado", Edited: true}
+	store := newMemStore(item)
+	reg := core.NewRegistry()
+	reg.Register(&spyAdapter{channel: core.ChannelWhatsApp, account: "wa"})
+	svc := core.NewService(store, reg)
+
+	if _, err := svc.Fetch(context.Background(), item.ID); err != nil {
+		t.Fatalf("Fetch returned error: %v", err)
+	}
+	stored, err := store.Get(context.Background(), item.ID)
+	if err != nil {
+		t.Fatalf("store.Get: %v", err)
+	}
+	if stored.Body != "editado" {
+		t.Errorf("stored.Body = %q, want the stored chat body untouched", stored.Body)
+	}
+}
+
 func TestServiceListAndCounts(t *testing.T) {
 	unread := core.Item{ID: "mail:cl:1", Channel: core.ChannelMail, Account: "cl", Unread: true}
 	read := core.Item{ID: "mail:cl:2", Channel: core.ChannelMail, Account: "cl", Unread: false}
