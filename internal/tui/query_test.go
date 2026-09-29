@@ -382,7 +382,7 @@ func TestQueryDaemonErrorShowsOnStatusLine(t *testing.T) {
 }
 
 func TestHelpListsQueryOperators(t *testing.T) {
-	body, _ := helpBody("query")
+	body, _ := helpBody("query", false)
 	text := strings.Join(body, "\n")
 	for _, want := range []string{"Consultas (/)", "from: to:", "is:", "in:", "before:", "-x", "Esc"} {
 		if !strings.Contains(text, want) {
