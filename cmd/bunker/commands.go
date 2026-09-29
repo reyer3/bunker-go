@@ -122,6 +122,9 @@ Commands:
   render [--tmux] [--json]                                 tmux status segment
   app [--dry-run]                                          open the TUI in its
                                                              own terminal window
+  herdr toggle [--dry-run] [--json]                        dock bunker as a left
+                                                             panel in herdr, or
+                                                             focus or close it
   mcp [--allow-send]                                       MCP server on stdio
                                                              for AI agents (sends
                                                              are plans unless

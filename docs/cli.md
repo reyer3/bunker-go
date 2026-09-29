@@ -1188,6 +1188,57 @@ kitty --title bunker --class dev.bunker.app /path/to/bunker
   `dev.bunker.app`, the window's class, so window-manager rules can
   place or focus the window. Each launch opens a new window.
 
+## `bunker herdr toggle [--dry-run] [--json]`
+
+Docks bunker as a narrow panel on the left of the current herdr tab. It
+is the `bunker.toggle` action of the herdr plugin in `deploy/herdr` (see
+its README to install it and bind a key), and needs herdr 0.8.0 or later.
+It talks to herdr only through the `herdr` CLI: `HERDR_BIN_PATH` when
+set (herdr sets it for plugin commands), else `herdr` on `PATH`.
+
+It lists the panes, takes the tab of the focused pane (or `HERDR_TAB_ID`
+when herdr reports none focused), and looks there for a pane labelled
+`bunker`:
+
+- **Focused:** closes it (`herdr pane close <pane>`).
+- **Not focused:** focuses it (`herdr plugin pane focus <pane>`).
+- **None:** opens the plugin's `sidebar` pane and docks it:
+
+  ```sh
+  herdr plugin pane open --plugin bunker --entrypoint sidebar --placement split --target-pane <focused> --direction right --no-focus
+  herdr pane swap --source-pane <new-pane> --target-pane <focused>
+  herdr pane resize --direction left --amount 0.25 --pane <new-pane>
+  herdr pane rename <new-pane> bunker
+  herdr plugin pane focus <new-pane>
+  ```
+
+  The split opens right of the focused pane without focus, the swap moves
+  it to the left, and the resize leaves it a quarter of the split. The
+  label is how the next toggle finds it. If a step after the open fails,
+  the new pane is closed again so a later toggle does not open a second
+  one.
+
+- **Limitation:** the panel docks beside the focused pane, so in a tab
+  split into several panes it is as tall as that pane, not a full-height
+  column at the tab's edge.
+- **`--dry-run`:** runs only the read-only `herdr pane list` and prints
+  the herdr commands it would run, one per line, with `<new-pane>` for the
+  id the open would return. Nothing changes.
+- **Errors:** herdr not found, no herdr server answering (outside herdr),
+  an error response from herdr (its message is shown), or a pane id that
+  does not look like a herdr id (such as one starting with `-`), which is
+  never passed on as an argument. Everything is bounded by a 10s timeout.
+
+Plain output is the action and pane (`open w1:p5`, `focus w1:p3`,
+`close w1:p3`). JSON:
+
+```json
+{"action":"open","tab":"w1:t1","pane":"w1:p5","anchor":"w1:p1","dryRun":false,"commands":[["plugin","pane","open","--plugin","bunker", ...], ...]}
+```
+
+`pane` is empty in an open dry run; `anchor` (the pane it docks beside)
+is only set for `open`.
+
 ## `bunker render [--tmux] [--json]`
 
 Renders the tmux status segment: one glyph and unread count per channel,

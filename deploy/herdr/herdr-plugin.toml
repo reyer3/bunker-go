@@ -1,0 +1,25 @@
+# bunker as a herdr plugin (herdr 0.8.0+). See README.md next to this file.
+id = "bunker"
+name = "bunker"
+version = "0.1.0"
+min_herdr_version = "0.8.0"
+description = "Mail, WhatsApp and Matrix in a side panel"
+platforms = ["linux", "macos"]
+
+# The panel "bunker herdr toggle" docks on the left. For now it runs the
+# full TUI; a compact "bunker sidebar" view made for a narrow column comes
+# in #81.
+[[panes]]
+id = "sidebar"
+title = "bunker"
+placement = "split"
+command = ["bunker"]
+
+# Opens the panel beside the focused pane, focuses it when it is open, and
+# closes it when it is already focused. Bind it to a key, see README.md.
+[[actions]]
+id = "toggle"
+title = "Toggle bunker"
+description = "Open, focus or close the bunker side panel"
+contexts = ["workspace"]
+command = ["bunker", "herdr", "toggle"]
