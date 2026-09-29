@@ -279,7 +279,7 @@ func cmdList(ctx context.Context, backend Backend, args []string, stdout, stderr
 	account := fs.String("account", "", "filter by account")
 	unread := fs.Bool("unread", false, "only unread items")
 	label := fs.String("label", "", "filter by label")
-	query := fs.String("q", "", "full-text query over subject and body")
+	query := fs.String("q", "", "full-text query over subject, sender, recipients, body, attachment and thread names")
 	limit := fs.Int("limit", 0, "max items (0 = no limit)")
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {

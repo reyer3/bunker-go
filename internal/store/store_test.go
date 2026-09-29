@@ -446,6 +446,13 @@ func TestListFiltersByThread(t *testing.T) {
 	}
 }
 
+// TestListQueryMatchesLikeWildcardsLiterally guards the LIKE fallback
+// List keeps for queries with no word characters (see ftsMatchExpr):
+// "%", "_" and "\" must match literally, never act as LIKE wildcards or
+// its escape. Word queries such as "50%" now go through the FTS index,
+// where punctuation separates tokens (so "50%" is the word "50" and, as
+// the last word, a prefix that also finds "500"); the "a_b" case checks
+// that path still does not treat "_" as a single-character wildcard.
 func TestListQueryMatchesLikeWildcardsLiterally(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
@@ -464,6 +471,10 @@ func TestListQueryMatchesLikeWildcardsLiterally(t *testing.T) {
 		it.Subject = ""
 		it.Body = body
 		it.Labels = nil
+		// sampleItem's addresses tokenize to "a b cl" and "c d cl",
+		// which the FTS "a_b" case would otherwise match on every row.
+		it.From = core.Address{}
+		it.To = nil
 		if err := s.Upsert(ctx, it); err != nil {
 			t.Fatalf("Upsert %s: %v", id, err)
 		}
@@ -473,9 +484,10 @@ func TestListQueryMatchesLikeWildcardsLiterally(t *testing.T) {
 		query string
 		want  string
 	}{
-		{"50%", "mail:cl:pct"},
+		{"%", "mail:cl:pct"},
+		{"_", "mail:cl:under"},
+		{`\`, "mail:cl:slash"},
 		{"a_b", "mail:cl:under"},
-		{`C:\`, "mail:cl:slash"},
 	} {
 		got, err := s.List(ctx, core.Filter{Query: tc.query})
 		if err != nil {
