@@ -35,7 +35,8 @@ When mail the user expects is not stored (old mail beyond the initial sync), sea
 server and backfill fetches older mail since a date; both contact the server and add what they find to
 the store, never marking anything read. Prefer search first.
 send and reply return a plan (dry run) unless confirm is true; confirming only works when the user
-started the server with --allow-send.
+started the server with --allow-send. edit and delete (the user's own messages only) and react follow
+the same rule.
 A confirmed send that timed out is safe to retry with the same arguments: it is never sent twice
 (the receipt then says replayed). mark_read, mark_unread, archive, move and label follow the same rule:
 they return a plan (what changes, and whether the sender is notified: marking a WhatsApp or Matrix
@@ -417,6 +418,7 @@ func newMCPServer(dial mcpDialer, allowSend bool) *mcp.Server {
 		})
 
 	addMCPOrganizeTools(server, dial, allowSend)
+	addMCPMessageTools(server, dial, allowSend)
 
 	return server
 }

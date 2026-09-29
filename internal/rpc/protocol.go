@@ -62,6 +62,9 @@ const (
 	MethodCalls             = "calls"
 	MethodContacts          = "contacts"
 	MethodMarkUnread        = "mark_unread"
+	MethodEdit              = "edit"
+	MethodDelete            = "delete"
+	MethodReact             = "react"
 )
 
 type listParams struct {
@@ -136,6 +139,30 @@ type sendParams struct {
 	Outgoing       core.Outgoing `json:"outgoing"`
 	DryRun         bool          `json:"dryRun"`
 	IdempotencyKey string        `json:"idempotency_key,omitempty"`
+}
+
+// editParams, deleteParams and reactParams are MethodEdit's,
+// MethodDelete's and MethodReact's params (issues #76, #17). They carry
+// an optional IdempotencyKey like replyParams; the result is a
+// planReceiptResult. An empty Emoji removes our reaction.
+type editParams struct {
+	ID             string `json:"id"`
+	Text           string `json:"text"`
+	DryRun         bool   `json:"dryRun"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+}
+
+type deleteParams struct {
+	ID             string `json:"id"`
+	DryRun         bool   `json:"dryRun"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+}
+
+type reactParams struct {
+	ID             string `json:"id"`
+	Emoji          string `json:"emoji"`
+	DryRun         bool   `json:"dryRun"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
 }
 
 type planReceiptResult struct {

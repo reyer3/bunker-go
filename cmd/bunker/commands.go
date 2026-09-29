@@ -79,6 +79,15 @@ Commands:
        [--dry-run] [--json]                                 send a fresh message
                                                              (<to> and each --cc
                                                              may be a comma list)
+  edit <id> <text|-> [--dry-run] [--json]                 edit our own message
+                                                             (WhatsApp: within
+                                                             20 minutes)
+  delete <id> [--yes] [--dry-run] [--json]                 delete our own
+                                                             message for everyone
+                                                             (asks first; --yes
+                                                             when not a terminal)
+  react <id> <emoji|--remove> [--dry-run] [--json]         react to a message,
+                                                             or remove ours
   organize <id> [--label x]... [--unlabel x]...
        [--move folder] [--seen|--unseen] [--dry-run] [--json]
   status post <channel> <account> <text>
@@ -171,6 +180,12 @@ func runWithBackend(ctx context.Context, backend Backend, args []string, stdin i
 		return cmdReply(ctx, backend, args[1:], stdin, stdout, stderr)
 	case "send":
 		return cmdSend(ctx, backend, args[1:], stdin, stdout, stderr)
+	case "edit":
+		return cmdEdit(ctx, backend, args[1:], stdin, stdout, stderr)
+	case "delete":
+		return cmdDelete(ctx, backend, args[1:], stdin, stdout, stderr)
+	case "react":
+		return cmdReact(ctx, backend, args[1:], stdout, stderr)
 	case "organize":
 		return cmdOrganize(ctx, backend, args[1:], stdout, stderr)
 	case "status":

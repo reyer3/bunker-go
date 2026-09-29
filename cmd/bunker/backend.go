@@ -55,6 +55,13 @@ type Backend interface {
 	// MarkUnread puts an item back in the unread inbox (`bunker unread`);
 	// localOnly reports that only bunker's store changed.
 	MarkUnread(ctx context.Context, id string) (localOnly bool, err error)
+	// EditMessage, DeleteMessage and React change a message already in a
+	// conversation (`bunker edit`, `bunker delete`, `bunker react`):
+	// edit and delete only our own, react anyone's (an empty emoji
+	// removes our reaction).
+	EditMessage(ctx context.Context, id, text string, dryRun bool) (core.Plan, core.Receipt, error)
+	DeleteMessage(ctx context.Context, id string, dryRun bool) (core.Plan, core.Receipt, error)
+	React(ctx context.Context, id, emoji string, dryRun bool) (core.Plan, core.Receipt, error)
 }
 
 var (

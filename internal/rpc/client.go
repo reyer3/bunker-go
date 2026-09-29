@@ -190,6 +190,34 @@ func (c *Client) Send(ctx context.Context, out core.Outgoing, dryRun bool) (core
 	return res.Plan, res.Receipt, nil
 }
 
+// EditMessage replaces the text of our own message id. An idempotency key
+// in ctx goes on the wire, as for Reply.
+func (c *Client) EditMessage(ctx context.Context, id, text string, dryRun bool) (core.Plan, core.Receipt, error) {
+	var res planReceiptResult
+	if err := c.call(ctx, MethodEdit, editParams{ID: id, Text: text, DryRun: dryRun, IdempotencyKey: core.IdempotencyKey(ctx)}, &res); err != nil {
+		return core.Plan{}, core.Receipt{}, err
+	}
+	return res.Plan, res.Receipt, nil
+}
+
+// DeleteMessage deletes our own message id for everyone.
+func (c *Client) DeleteMessage(ctx context.Context, id string, dryRun bool) (core.Plan, core.Receipt, error) {
+	var res planReceiptResult
+	if err := c.call(ctx, MethodDelete, deleteParams{ID: id, DryRun: dryRun, IdempotencyKey: core.IdempotencyKey(ctx)}, &res); err != nil {
+		return core.Plan{}, core.Receipt{}, err
+	}
+	return res.Plan, res.Receipt, nil
+}
+
+// React sets our reaction to item id to emoji; an empty emoji removes it.
+func (c *Client) React(ctx context.Context, id, emoji string, dryRun bool) (core.Plan, core.Receipt, error) {
+	var res planReceiptResult
+	if err := c.call(ctx, MethodReact, reactParams{ID: id, Emoji: emoji, DryRun: dryRun, IdempotencyKey: core.IdempotencyKey(ctx)}, &res); err != nil {
+		return core.Plan{}, core.Receipt{}, err
+	}
+	return res.Plan, res.Receipt, nil
+}
+
 // Organize mutates an item's labels/folder/read state.
 func (c *Client) Organize(ctx context.Context, id string, op core.OrganizeOp, dryRun bool) (core.Plan, error) {
 	var res planResult

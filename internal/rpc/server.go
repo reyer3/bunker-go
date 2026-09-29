@@ -163,6 +163,39 @@ func (s *Server) call(ctx context.Context, req Request) (any, error) {
 		}
 		return planReceiptResult{Plan: plan, Receipt: receipt}, nil
 
+	case MethodEdit:
+		var p editParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		plan, receipt, err := s.svc.EditMessage(core.WithIdempotencyKey(ctx, p.IdempotencyKey), p.ID, p.Text, p.DryRun)
+		if err != nil {
+			return nil, err
+		}
+		return planReceiptResult{Plan: plan, Receipt: receipt}, nil
+
+	case MethodDelete:
+		var p deleteParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		plan, receipt, err := s.svc.DeleteMessage(core.WithIdempotencyKey(ctx, p.IdempotencyKey), p.ID, p.DryRun)
+		if err != nil {
+			return nil, err
+		}
+		return planReceiptResult{Plan: plan, Receipt: receipt}, nil
+
+	case MethodReact:
+		var p reactParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		plan, receipt, err := s.svc.React(core.WithIdempotencyKey(ctx, p.IdempotencyKey), p.ID, p.Emoji, p.DryRun)
+		if err != nil {
+			return nil, err
+		}
+		return planReceiptResult{Plan: plan, Receipt: receipt}, nil
+
 	case MethodOrganize:
 		var p organizeParams
 		if err := json.Unmarshal(req.Params, &p); err != nil {
