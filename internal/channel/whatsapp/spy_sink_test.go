@@ -28,6 +28,11 @@ type spySink struct {
 		upTo    time.Time
 	}
 	markThreadReadUpToErr error
+	// editErr, revokeErr and reactionErr, when set, fail the matching
+	// write so tests can prove the adapter logs it instead of dropping it.
+	editErr     error
+	revokeErr   error
+	reactionErr error
 }
 
 func newSpySink() *spySink {
@@ -101,6 +106,9 @@ func (s *spySink) SetCursor(_ context.Context, key, val string) error {
 func (s *spySink) EditItem(_ context.Context, id, body string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.editErr != nil {
+		return s.editErr
+	}
 	for i, item := range s.upserted {
 		if item.ID == id {
 			s.upserted[i].Body = body
@@ -114,6 +122,9 @@ func (s *spySink) EditItem(_ context.Context, id, body string) error {
 func (s *spySink) RevokeItem(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.revokeErr != nil {
+		return s.revokeErr
+	}
 	for i, item := range s.upserted {
 		if item.ID == id {
 			s.upserted[i].Body = ""
@@ -127,6 +138,9 @@ func (s *spySink) RevokeItem(_ context.Context, id string) error {
 func (s *spySink) SetReaction(_ context.Context, id string, reaction core.Reaction) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.reactionErr != nil {
+		return s.reactionErr
+	}
 	for i, item := range s.upserted {
 		if item.ID == id {
 			var kept []core.Reaction
