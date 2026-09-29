@@ -77,8 +77,8 @@ type Item struct {
 	Timestamp time.Time
 	Meta      map[string]string
 	// Edited reports whether this item's Body was replaced by a
-	// channel-observed edit (see Sink.EditItem). Channel-agnostic: today
-	// only WhatsApp sets it, Matrix can adopt the same model later.
+	// channel-observed edit (see Sink.EditItem). Channel-agnostic:
+	// WhatsApp and Matrix both set it.
 	Edited bool
 	// Deleted reports whether this item was revoked/retracted at the
 	// source (see Sink.RevokeItem): the row is kept (its place in the
@@ -93,7 +93,7 @@ type Item struct {
 }
 
 // Reaction is one participant's emoji reaction to an Item, channel-
-// agnostic (WhatsApp today; Matrix can adopt the same shape later).
+// agnostic (WhatsApp and Matrix).
 type Reaction struct {
 	Sender string
 	Emoji  string
