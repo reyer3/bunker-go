@@ -1122,7 +1122,8 @@ previewed and confirmed `Reply` as the text:
 Serves bunker to AI agents (Claude Code, Zed's agent panel, any MCP host)
 as an [MCP](https://modelcontextprotocol.io) server on stdio. Every tool
 call is one daemon RPC on a fresh connection, so the server survives
-daemon restarts. A dead daemon is a tool error.
+daemon restarts. A dead daemon is a tool error, except for `health`,
+which answers `daemon_up: false` with a hint to run `bunker daemon`.
 
 | Tool | What it does |
 |---|---|
@@ -1132,6 +1133,7 @@ daemon restarts. A dead daemon is a tool error.
 | `thread` | a conversation's newest messages, oldest first |
 | `contacts` | the same matches as `bunker contacts` |
 | `calls` | live voice calls |
+| `health` | whether the daemon is up and, per account, `channel`, `account`, `state`, `since`, `last_error`, `restarts` and `last_item` (the newest stored item's time) |
 | `send` | a new message; `to` takes an address or a contact name, resolved like the CLI |
 | `reply` | a reply to an item |
 
