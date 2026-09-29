@@ -275,6 +275,9 @@ func (m *memStore) List(ctx context.Context, filter core.Filter) ([]core.Item, e
 		if filter.Account != "" && it.Account != filter.Account {
 			continue
 		}
+		if filter.Thread != "" && it.Thread != filter.Thread {
+			continue
+		}
 		if filter.Unread != nil && it.Unread != *filter.Unread {
 			continue
 		}

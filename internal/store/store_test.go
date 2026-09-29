@@ -411,6 +411,86 @@ func TestListFiltersByChannelAccountUnreadLabelQuery(t *testing.T) {
 	}
 }
 
+func TestListFiltersByThread(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	inThread := sampleItem()
+	sameThreadOtherAccount := sampleItem()
+	sameThreadOtherAccount.ID = "mail:other:1"
+	sameThreadOtherAccount.Account = "other"
+	otherThread := sampleItem()
+	otherThread.ID = "mail:cl:2"
+	otherThread.Thread = "t2"
+
+	for _, it := range []core.Item{inThread, sameThreadOtherAccount, otherThread} {
+		if err := s.Upsert(ctx, it); err != nil {
+			t.Fatalf("Upsert %s: %v", it.ID, err)
+		}
+	}
+
+	got, err := s.List(ctx, core.Filter{Channel: core.ChannelMail, Account: "cl", Thread: "t1"})
+	if err != nil {
+		t.Fatalf("List by thread: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != inThread.ID {
+		t.Fatalf("List by thread = %+v, want just %s", got, inThread.ID)
+	}
+
+	byThreadOnly, err := s.List(ctx, core.Filter{Thread: "t2"})
+	if err != nil {
+		t.Fatalf("List by thread only: %v", err)
+	}
+	if len(byThreadOnly) != 1 || byThreadOnly[0].ID != otherThread.ID {
+		t.Fatalf("List by thread only = %+v, want just %s", byThreadOnly, otherThread.ID)
+	}
+}
+
+func TestListQueryMatchesLikeWildcardsLiterally(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	items := map[string]string{
+		"mail:cl:pct":       "descuento 50% hoy",
+		"mail:cl:pctdecoy":  "descuento 500 hoy",
+		"mail:cl:under":     "archivo a_b.txt",
+		"mail:cl:underdeco": "archivo axb.txt",
+		"mail:cl:slash":     `ruta C:\tmp`,
+		"mail:cl:slashdeco": "ruta C:tmp",
+	}
+	for id, body := range items {
+		it := sampleItem()
+		it.ID = id
+		it.Subject = ""
+		it.Body = body
+		it.Labels = nil
+		if err := s.Upsert(ctx, it); err != nil {
+			t.Fatalf("Upsert %s: %v", id, err)
+		}
+	}
+
+	for _, tc := range []struct {
+		query string
+		want  string
+	}{
+		{"50%", "mail:cl:pct"},
+		{"a_b", "mail:cl:under"},
+		{`C:\`, "mail:cl:slash"},
+	} {
+		got, err := s.List(ctx, core.Filter{Query: tc.query})
+		if err != nil {
+			t.Fatalf("List query %q: %v", tc.query, err)
+		}
+		if len(got) != 1 || got[0].ID != tc.want {
+			ids := make([]string, len(got))
+			for i, it := range got {
+				ids[i] = it.ID
+			}
+			t.Fatalf("List query %q = %v, want just %s", tc.query, ids, tc.want)
+		}
+	}
+}
+
 func TestCounts(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
