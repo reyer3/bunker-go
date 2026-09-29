@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"errors"
 	"io/fs"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/reyer3/bunker-go/internal/config"
 )
@@ -60,9 +63,28 @@ func TestAppEnvDropsTmux(t *testing.T) {
 	}
 }
 
-func testAppDeps(cfg *config.Config, cfgErr error, installed ...string) (appDeps, *[][]string) {
+// testAppDeps fakes the system for cmdApp. The app log goes under a
+// per-test XDG_STATE_HOME and the home directory is unavailable, so a
+// test can never write to the real ~/.local/state; notify-send is only
+// "installed" when listed in installed, and running it fails the test
+// unless the test replaces notify.
+func testAppDeps(t *testing.T, cfg *config.Config, cfgErr error, installed ...string) (appDeps, *[][]string) {
+	t.Helper()
 	var started [][]string
+	state := t.TempDir()
 	return appDeps{
+		notify: func(argv []string) error {
+			t.Errorf("unexpected notification %q", argv)
+			return nil
+		},
+		getenv: func(key string) string {
+			if key == "XDG_STATE_HOME" {
+				return state
+			}
+			return ""
+		},
+		homeDir:    func() (string, error) { return "", errors.New("no home in tests") },
+		now:        func() time.Time { return time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC) },
 		loadConfig: func() (*config.Config, error) { return cfg, cfgErr },
 		executable: func() (string, error) { return "/opt/bunker", nil },
 		lookPath:   onPath(installed...),
@@ -79,7 +101,7 @@ func testAppDeps(cfg *config.Config, cfgErr error, installed ...string) (appDeps
 }
 
 func TestCmdApp(t *testing.T) {
-	deps, started := testAppDeps(nil, fs.ErrNotExist, "ghostty")
+	deps, started := testAppDeps(t, nil, fs.ErrNotExist, "ghostty")
 	var stdout, stderr bytes.Buffer
 	if code := cmdApp(nil, &stdout, &stderr, deps); code != 0 {
 		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
@@ -89,7 +111,7 @@ func TestCmdApp(t *testing.T) {
 	}
 
 	cfg := &config.Config{App: config.App{Command: []string{"kitty", "bunker"}}}
-	deps, started = testAppDeps(cfg, nil, "ghostty", "kitty")
+	deps, started = testAppDeps(t, cfg, nil, "ghostty", "kitty")
 	stdout.Reset()
 	if code := cmdApp([]string{"--dry-run"}, &stdout, &stderr, deps); code != 0 {
 		t.Fatalf("dry-run code = %d", code)
@@ -98,22 +120,112 @@ func TestCmdApp(t *testing.T) {
 		t.Fatalf("dry-run started %q, printed %q; want nothing started and the configured command", *started, stdout.String())
 	}
 
-	deps, _ = testAppDeps(nil, fs.ErrNotExist)
+	deps, _ = testAppDeps(t, nil, fs.ErrNotExist)
 	stderr.Reset()
 	if code := cmdApp(nil, &stdout, &stderr, deps); code != 1 || !strings.Contains(stderr.String(), "no supported terminal") {
 		t.Fatalf("code = %d, stderr = %q; want a clear failure", code, stderr.String())
 	}
 
-	deps, _ = testAppDeps(nil, errors.New("config: load: bad toml"), "ghostty")
+	deps, _ = testAppDeps(t, nil, errors.New("config: load: bad toml"), "ghostty")
 	stderr.Reset()
 	if code := cmdApp(nil, &stdout, &stderr, deps); code != 1 || !strings.Contains(stderr.String(), "bad toml") {
 		t.Fatalf("a broken config should fail loudly: code = %d, stderr = %q", code, stderr.String())
 	}
 
-	deps, started = testAppDeps(nil, fs.ErrNotExist, "ghostty")
+	deps, started = testAppDeps(t, nil, fs.ErrNotExist, "ghostty")
 	deps.daemonUp = func() error { return errors.New("connection refused") }
 	stderr.Reset()
 	if code := cmdApp(nil, &stdout, &stderr, deps); code != 1 || len(*started) != 0 || !strings.Contains(stderr.String(), "cannot reach bunker daemon") {
 		t.Fatalf("with the daemon down: code = %d, started %q, stderr = %q; want a clear error and no window", code, *started, stderr.String())
+	}
+}
+
+// appLog reads the app log under deps' XDG_STATE_HOME ("" when absent).
+func appLog(t *testing.T, deps appDeps) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(deps.getenv("XDG_STATE_HOME"), "bunker", "app.log"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return ""
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func TestCmdAppReportsFailuresOnTheDesktop(t *testing.T) {
+	deps, _ := testAppDeps(t, nil, fs.ErrNotExist, "ghostty", "notify-send")
+	deps.daemonUp = func() error { return errors.New("connection refused") }
+	var notified [][]string
+	deps.notify = func(argv []string) error {
+		notified = append(notified, argv)
+		return nil
+	}
+	var stdout, stderr bytes.Buffer
+	if code := cmdApp(nil, &stdout, &stderr, deps); code != 1 {
+		t.Fatalf("code = %d, want 1", code)
+	}
+	if len(notified) != 1 {
+		t.Fatalf("notified = %q, want one notification", notified)
+	}
+	n := notified[0]
+	if n[0] != "notify-send" || n[1] != "--app-name=bunker" || n[len(n)-2] != appNotifySummary ||
+		!strings.Contains(n[len(n)-1], "cannot reach bunker daemon") || !strings.Contains(n[len(n)-1], "connection refused") {
+		t.Fatalf("notification = %q, want app bunker, a Spanish summary and the error as the body", n)
+	}
+	if !strings.Contains(stderr.String(), "cannot reach bunker daemon") {
+		t.Fatalf("stderr = %q, the error must still go there", stderr.String())
+	}
+
+	log := appLog(t, deps)
+	if !strings.HasPrefix(log, "2026-01-02T03:04:05Z ") || !strings.Contains(log, "connection refused") ||
+		strings.Count(log, "\n") != 1 {
+		t.Fatalf("app.log = %q, want one timestamped line with the error", log)
+	}
+	info, err := os.Stat(filepath.Join(deps.getenv("XDG_STATE_HOME"), "bunker"))
+	if err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("log dir: %v, %v; want mode 0700", info, err)
+	}
+
+	// A second failure appends rather than overwrites.
+	deps.start = func(argv, env []string) error { return errors.New("exec format error") }
+	deps.daemonUp = func() error { return nil }
+	if code := cmdApp(nil, &stdout, &stderr, deps); code != 1 {
+		t.Fatalf("start failure code = %d, want 1", code)
+	}
+	if log := appLog(t, deps); strings.Count(log, "\n") != 2 || !strings.Contains(log, "app: start ghostty: exec format error") {
+		t.Fatalf("app.log = %q, want the start failure appended", log)
+	}
+}
+
+func TestCmdAppSkipsNotifyWhenAbsent(t *testing.T) {
+	// No terminal and no notify-send: testAppDeps fails the test if
+	// notify runs, and the log still records the failure.
+	deps, _ := testAppDeps(t, nil, fs.ErrNotExist)
+	var stdout, stderr bytes.Buffer
+	if code := cmdApp(nil, &stdout, &stderr, deps); code != 1 {
+		t.Fatalf("code = %d, want 1", code)
+	}
+	if log := appLog(t, deps); !strings.Contains(log, "no supported terminal found") {
+		t.Fatalf("app.log = %q, want the failure logged without notify-send", log)
+	}
+	if strings.Contains(stderr.String(), "warning") {
+		t.Fatalf("stderr = %q, a missing notify-send is not worth a warning", stderr.String())
+	}
+}
+
+func TestCmdAppDryRunHasNoSideEffects(t *testing.T) {
+	// A bad [app] command under --dry-run fails on stderr only.
+	cfg := &config.Config{App: config.App{Command: []string{"wezterm"}}}
+	deps, started := testAppDeps(t, cfg, nil, "ghostty", "notify-send")
+	var stdout, stderr bytes.Buffer
+	if code := cmdApp([]string{"--dry-run"}, &stdout, &stderr, deps); code != 1 || !strings.Contains(stderr.String(), `"wezterm" is not on PATH`) {
+		t.Fatalf("code = %d, stderr = %q; want the bad command reported", code, stderr.String())
+	}
+	if len(*started) != 0 {
+		t.Fatalf("dry-run started %q", *started)
+	}
+	if log := appLog(t, deps); log != "" {
+		t.Fatalf("dry-run wrote app.log: %q", log)
 	}
 }
