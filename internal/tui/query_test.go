@@ -397,8 +397,8 @@ func TestHelpListsQueryOperators(t *testing.T) {
 }
 
 // TestQueryResultsGolden goldens daemon results: the same rows as the
-// inbox, grouped by channel section, and the active query on the status
-// line.
+// inbox, the Mail folder dimmed on the row from a subfolder, and the
+// active query on the status line.
 func TestQueryResultsGolden(t *testing.T) {
 	items := queryResultItems()
 	client := &pageClient{pages: map[string]core.Page{"": {Items: items, NextCursor: "c1"}}}

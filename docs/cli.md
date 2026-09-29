@@ -197,7 +197,13 @@ not under sender headers) until `Esc`, and moving past the last result
 loads the next page. The status line shows the active query and how many
 conversations it found; a typo such as `foo:` shows `consulta inválida:
 operador desconocido "foo:"` on the filter line and keeps the text. A
-daemon without `list_page` keeps the in-memory filter and says so. An opened chat says
+daemon without `list_page` keeps the in-memory filter and says so.
+
+A mail row from a folder other than INBOX shows the folder dimmed beside
+its time, and the mail thread header shows it after the subject, in a
+short form: the account's `folder_prefix`/`folder_sep` are stripped
+(`INBOX.Clientes.Acme` reads `Clientes/Acme`) and Gmail's special folders
+are named in Spanish (`[Gmail]/All Mail` reads `Todos`). An opened chat says
 `cargando mensajes…` while it loads and `sin mensajes todavía` when there
 is no history yet.
 

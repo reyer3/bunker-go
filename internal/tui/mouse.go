@@ -80,6 +80,7 @@ func (m Model) openThread(item core.Item) (Model, tea.Cmd) {
 		m.threadKey = item.ID
 	}
 	m.threadSubject = item.Subject
+	m.threadFolder = m.folderTag(item)
 	m.threadItems = nil
 	m.threadExpanded = nil
 	m.threadSelected = 0

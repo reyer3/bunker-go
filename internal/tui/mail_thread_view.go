@@ -26,10 +26,25 @@ func (m Model) threadHeadLines() []string {
 	if subject == "" {
 		subject = "(sin asunto)"
 	}
-	if m.width > 0 {
-		subject = runewidth.Truncate(subject, m.width, "…")
+	// The folder follows the subject, dimmed: it says where this
+	// conversation lives (useful once / can open one from any folder)
+	// without competing with the subject. It goes first when space is
+	// short.
+	folder := ""
+	if m.threadFolder != "" {
+		folder = "  " + m.threadFolder
 	}
-	lines := []string{m.styles().title.Render(subject)}
+	if m.width > 0 {
+		if runewidth.StringWidth(folder)+folderMinTitle > m.width {
+			folder = ""
+		}
+		subject = runewidth.Truncate(subject, m.width-runewidth.StringWidth(folder), "…")
+	}
+	title := m.styles().title.Render(subject)
+	if folder != "" {
+		title += m.styles().dim.Render(folder)
+	}
+	lines := []string{title}
 	if m.threadLoading {
 		lines = append(lines, "Cargando conversación…")
 	}

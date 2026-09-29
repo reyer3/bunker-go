@@ -120,7 +120,7 @@ func (m Model) overviewLines(styles rowStyles, glyphs map[core.Channel]string, w
 		}
 		offset += len(groups)
 
-		rowUnits := buildRowUnits(groups, localSelected, width, glyphs, m.counts, styles, m.clock())
+		rowUnits := buildRowUnits(groups, localSelected, width, glyphs, m.counts, styles, m.clock(), m.folderTag)
 		shown := layoutSectionRows(rowUnits, shares[i], localSelected, focusTab, styles, width)
 		unitLines, unitHits := flattenRowUnits(shown)
 		lines = append(lines, unitLines...)
@@ -145,7 +145,7 @@ func (m Model) focusedSectionLines(channel core.Channel, styles rowStyles, glyph
 		return append(lines, m.emptySectionLine(styles, width)), append(hits, inboxHit{kind: hitNone})
 	}
 
-	rowUnits := buildRowUnits(groups, m.selected, width, glyphs, m.counts, styles, m.clock())
+	rowUnits := buildRowUnits(groups, m.selected, width, glyphs, m.counts, styles, m.clock(), m.folderTag)
 	share := 1 << 20
 	if height > 0 {
 		share = height - sectionFixedLines

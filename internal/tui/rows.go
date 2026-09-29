@@ -111,8 +111,9 @@ func channelHasMultipleAccounts(counts map[core.Channel]map[string]int, channel 
 // text is truncated/padded to its cell budget with go-runewidth before
 // any lipgloss style wraps it, so custom glyphs (including a Supplementary
 // PUA override like U+100000) and wide/emoji text measure consistently
-// with the rest of the TUI.
-func buildRow(group inboxGroup, selected bool, width int, glyphs map[core.Channel]string, counts map[core.Channel]map[string]int, styles rowStyles, now time.Time) (line1, line2 string) {
+// with the rest of the TUI. folder is the item's short mail folder name
+// (see folderTag), shown dimmed beside the time; "" shows none.
+func buildRow(group inboxGroup, selected bool, width int, glyphs map[core.Channel]string, counts map[core.Channel]map[string]int, styles rowStyles, now time.Time, folder string) (line1, line2 string) {
 	item := group.items[0]
 	title, dimmed := rowTitle(item)
 	glyph := glyphs[item.Channel]
@@ -129,8 +130,18 @@ func buildRow(group inboxGroup, selected bool, width int, glyphs map[core.Channe
 		marker = "▌" // ▌
 	}
 
-	rightPlain := accountTag + "  " + timeStr + "  " + badgeText
+	folderPart := ""
+	if folder != "" {
+		folderPart = "  " + folder
+	}
 	leftFixed := runewidth.StringWidth(marker) + 1 + runewidth.StringWidth(glyph) + 1
+	// The folder is the first thing a narrow row gives up: the title,
+	// time and badge are what identify the conversation.
+	if folderPart != "" && width > 0 &&
+		width-leftFixed-runewidth.StringWidth(folderPart+accountTag+"  "+timeStr+"  "+badgeText) < folderMinTitle {
+		folderPart = ""
+	}
+	rightPlain := folderPart + accountTag + "  " + timeStr + "  " + badgeText
 	rightWidth := runewidth.StringWidth(rightPlain)
 
 	// titlePadded is the title, truncated and right-padded to fill the
@@ -183,7 +194,7 @@ func buildRow(group inboxGroup, selected bool, width int, glyphs map[core.Channe
 		titleStyle = styles.dim
 	}
 	line1 = marker + " " + styles.glyph[item.Channel].Render(glyph) + " " + titleStyle.Render(titlePadded) +
-		styles.dim.Render(accountTag+"  "+timeStr) + "  " + styles.badge[item.Channel].Render(badgeText)
+		styles.dim.Render(folderPart+accountTag+"  "+timeStr) + "  " + styles.badge[item.Channel].Render(badgeText)
 	if preview != "" {
 		line2 = styles.dim.Render(preview)
 	}
@@ -211,7 +222,10 @@ func indentLine(line string) string {
 // header; an expanded sender's threads (navThread with indent set)
 // render with the existing two-line row design, shifted right by
 // indentWidth cells.
-func buildRowUnits(rows []navRow, localSelected, width int, glyphs map[core.Channel]string, counts map[core.Channel]map[string]int, styles rowStyles, now time.Time) []rowUnit {
+//
+// folderOf names a thread row's mail folder (Model.folderTag); nil shows
+// none.
+func buildRowUnits(rows []navRow, localSelected, width int, glyphs map[core.Channel]string, counts map[core.Channel]map[string]int, styles rowStyles, now time.Time, folderOf func(core.Item) string) []rowUnit {
 	rowUnits := make([]rowUnit, len(rows))
 	for i, row := range rows {
 		selected := i == localSelected
@@ -227,7 +241,11 @@ func buildRowUnits(rows []navRow, localSelected, width int, glyphs map[core.Chan
 				rowWidth = 1
 			}
 		}
-		line1, line2 := buildRow(row.thread, selected, rowWidth, glyphs, counts, styles, now)
+		folder := ""
+		if folderOf != nil && len(row.thread.items) > 0 {
+			folder = folderOf(row.thread.items[0])
+		}
+		line1, line2 := buildRow(row.thread, selected, rowWidth, glyphs, counts, styles, now, folder)
 		if row.indent {
 			line1 = indentLine(line1)
 			if line2 != "" {
