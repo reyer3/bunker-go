@@ -347,11 +347,11 @@ func (s *Server) call(ctx context.Context, req Request) (any, error) {
 		return contactsResult{Contacts: contacts}, nil
 
 	case MethodHealth:
-		adapters, err := s.svc.Health(ctx)
+		report, err := s.svc.HealthReport(ctx)
 		if err != nil {
 			return nil, err
 		}
-		return healthResult{Adapters: adapters}, nil
+		return healthResult{Adapters: report.Adapters, UpdateAvailable: report.Update.Available, LatestVersion: report.Update.Latest}, nil
 	case MethodBackfill:
 		var p backfillParams
 		if err := json.Unmarshal(req.Params, &p); err != nil {

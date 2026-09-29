@@ -352,7 +352,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		var notifyCmd tea.Cmd
 		m, notifyCmd = m.maybeNotify(wasLoaded, oldGroups, msg.items)
-		return m, tea.Batch(nextPoll(m.pollToken), notifyCmd, m.reportUnread())
+		var updateCmd tea.Cmd
+		m, updateCmd = m.noteUpdate(msg.update)
+		return m, tea.Batch(nextPoll(m.pollToken), notifyCmd, updateCmd, m.reportUnread())
 	case pollTickMsg:
 		if msg.token != m.pollToken || m.polling || m.client == nil {
 			return m, nil

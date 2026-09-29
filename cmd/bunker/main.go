@@ -181,6 +181,12 @@ func runCommandLine(args []string, stdin *os.File, stdout, stderr io.Writer) int
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, topLevelUsage)
 		return 0
+	case "version", "--version":
+		return cmdVersion(args[1:], stdout, stderr)
+	case "update":
+		ctx, cancel := context.WithTimeout(context.Background(), updateTimeout)
+		defer cancel()
+		return cmdUpdate(ctx, args[1:], stdin, stdout, stderr, defaultUpdateDeps(stdin))
 	case "daemon":
 		return cmdDaemonMain(args[1:], stdout, stderr)
 	case "render":

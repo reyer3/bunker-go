@@ -28,6 +28,7 @@ type Config struct {
 	Tui      Tui
 	App      App
 	Herdr    Herdr
+	Update   Update
 }
 
 // Render holds optional status-line presentation settings.
@@ -54,6 +55,14 @@ type Herdr struct {
 	Notify bool
 }
 
+// Update holds the release check's settings (issue #105).
+type Update struct {
+	// Check makes the daemon ask GitHub for the latest release shortly
+	// after it starts and once a day. On by default; "check = false"
+	// turns it off entirely.
+	Check bool
+}
+
 // App holds the settings of "bunker app", the TUI in its own window.
 type App struct {
 	// Command replaces the terminal command line that opens the window.
@@ -76,6 +85,9 @@ type rawConfig struct {
 	Herdr struct {
 		Notify bool `toml:"notify"`
 	} `toml:"herdr"`
+	Update struct {
+		Check *bool `toml:"check"`
+	} `toml:"update"`
 }
 
 // Load parses the TOML file at path into a Config.
@@ -91,6 +103,7 @@ func Load(path string) (*Config, error) {
 		Tui:      Tui{Notify: raw.Tui.Notify},
 		App:      App{Command: raw.App.Command},
 		Herdr:    Herdr{Notify: raw.Herdr.Notify},
+		Update:   Update{Check: raw.Update.Check == nil || *raw.Update.Check},
 	}
 	for _, entry := range raw.Account {
 		acc := Account{Options: make(map[string]interface{})}

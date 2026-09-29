@@ -317,8 +317,14 @@ type typingParams struct {
 
 // healthResult is MethodHealth's result: every adapter's current
 // core.AdapterHealth (R4), in the order core.Service.Health returns it.
+//
+// UpdateAvailable and LatestVersion (issue #105) were added later as
+// top-level siblings of adapters: an older client decodes only adapters
+// and ignores them, and an older daemon's answer decodes as "no update".
 type healthResult struct {
-	Adapters []core.AdapterHealth `json:"adapters"`
+	Adapters        []core.AdapterHealth `json:"adapters"`
+	UpdateAvailable bool                 `json:"update_available"`
+	LatestVersion   string               `json:"latest_version,omitempty"`
 }
 
 // DefaultSocketPath returns BUNKER_SOCKET if set, else

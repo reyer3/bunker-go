@@ -58,6 +58,13 @@ Run without a command in a terminal to open the interactive UI.
 
 Commands:
   daemon [--fake]                                          run the daemon
+  version [--json]                                         this binary's version
+                                                             (also --version)
+  update [--dry-run] [--yes] [--json]                      install the latest
+                                                             release after
+                                                             checking its sha256
+                                                             and restart the
+                                                             daemon's service
   list [--channel c] [--account a] [--unread] [--label l]  list items, newest
        [-q text] [--query q] [--cursor c] [--limit n]        first; --query takes
        [--json]                                              the query language,

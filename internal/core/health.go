@@ -111,6 +111,29 @@ func (t *HealthTracker) entry(channel Channel, account string) AdapterHealth {
 	return h
 }
 
+// UpdateStatus is the daemon's cached answer to "is there a newer bunker
+// release?" (issue #105). The zero value, no update, is also what a dev
+// build or "[update] check = false" reports.
+type UpdateStatus struct {
+	Available bool `json:"update_available"`
+	// Latest is the newer release's version, without a "v" prefix; empty
+	// when Available is false.
+	Latest string `json:"latest_version,omitempty"`
+}
+
+// UpdateSource is where Service reads UpdateStatus from: the daemon's
+// periodic release check.
+type UpdateSource interface {
+	Status() UpdateStatus
+}
+
+// HealthReport is everything the health RPC answers: every adapter's
+// health plus the update status.
+type HealthReport struct {
+	Adapters []AdapterHealth `json:"adapters"`
+	Update   UpdateStatus    `json:"update"`
+}
+
 func errString(err error) string {
 	if err == nil {
 		return ""

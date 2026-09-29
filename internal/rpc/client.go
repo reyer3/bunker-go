@@ -367,11 +367,24 @@ func (c *Client) Typing(ctx context.Context, channel, account, thread string, co
 // account, connection state, since when, its last error (if any) and how
 // many times it has been restarted.
 func (c *Client) Health(ctx context.Context) ([]core.AdapterHealth, error) {
-	var res healthResult
-	if err := c.call(ctx, MethodHealth, nil, &res); err != nil {
+	report, err := c.HealthReport(ctx)
+	if err != nil {
 		return nil, err
 	}
-	return res.Adapters, nil
+	return report.Adapters, nil
+}
+
+// HealthReport is Health plus the daemon's cached update status, from
+// the same call.
+func (c *Client) HealthReport(ctx context.Context) (core.HealthReport, error) {
+	var res healthResult
+	if err := c.call(ctx, MethodHealth, nil, &res); err != nil {
+		return core.HealthReport{}, err
+	}
+	return core.HealthReport{
+		Adapters: res.Adapters,
+		Update:   core.UpdateStatus{Available: res.UpdateAvailable, Latest: res.LatestVersion},
+	}, nil
 }
 
 // Backfill runs a server-side history search on (channel, account) since
