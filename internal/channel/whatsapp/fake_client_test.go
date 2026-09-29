@@ -41,6 +41,10 @@ type fakeWAClient struct {
 	profilePicCalls   []types.JID
 	profilePicPreview []bool
 
+	// presenceUnavailableHang blocks SendPresence(unavailable) until ctx
+	// is done, like a stalled connection that never acknowledges it.
+	presenceUnavailableHang bool
+
 	// altJIDs maps a JID string to its configured LID/PN counterpart, for
 	// tests exercising read-receipt thread resolution (R2). A JID absent
 	// from the map resolves to types.EmptyJID, nil (no known counterpart).
@@ -188,10 +192,16 @@ func (f *fakeWAClient) MarkRead(_ context.Context, ids []types.MessageID, _ time
 	return nil
 }
 
-func (f *fakeWAClient) SendPresence(_ context.Context, state types.Presence) error {
+func (f *fakeWAClient) SendPresence(ctx context.Context, state types.Presence) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "presence:"+string(state))
+	if f.presenceUnavailableHang && state == types.PresenceUnavailable {
+		f.mu.Unlock()
+		<-ctx.Done()
+		f.mu.Lock()
+		return ctx.Err()
+	}
 	return nil
 }
 
