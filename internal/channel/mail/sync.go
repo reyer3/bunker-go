@@ -442,6 +442,7 @@ func (a *Adapter) fetchAndUpsertRange(ctx context.Context, client *imapclient.Cl
 			Peek:         true,
 		}},
 	}
+	a.addBodyTextSections(fetchOptions)
 	messages, err := client.Fetch(numSet, fetchOptions).Collect()
 	if err != nil {
 		return highWater, fmt.Errorf("mail: fetch %s for %q: %w", folder, a.cfg.Name, err)
@@ -469,6 +470,7 @@ func (a *Adapter) fetchAndUpsertRange(ctx context.Context, client *imapclient.Cl
 
 	for _, msg := range messages {
 		item := a.buildItem(msg, folders, uidValidity, folder)
+		a.fillBodyText(&item, msg)
 		if labels, ok := gmailLabels[msg.UID]; ok {
 			item.Labels = labels
 		}
@@ -555,6 +557,12 @@ func (a *Adapter) buildItem(msg *imapclient.FetchMessageBuffer, folders *FolderM
 
 	var references []string
 	for _, section := range msg.BodySection {
+		// Only the References-only header section: the same FETCH may
+		// also carry the whole header or body (Fetch, fillBodyText), whose
+		// every "<...>" token would otherwise be read as a reference.
+		if section.Section == nil || len(section.Section.HeaderFields) == 0 {
+			continue
+		}
 		references = parseReferences(section.Bytes)
 	}
 

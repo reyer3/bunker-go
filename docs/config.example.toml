@@ -46,6 +46,13 @@ password_env = "~/.config/bunker-go/cl.password"
 # message at a time via `bunker read`/`download` (H1's server fallback)
 # or in bulk via `bunker backfill mail cl --since 2026-01-01`.
 initial_sync_limit = 200
+# index_body_max_kb caps how many KiB of each message's text sync fetches
+# and stores, so `bunker list -q` finds mail by its body. The fetch uses
+# BODY.PEEK with a byte range: it never marks mail read and never
+# downloads a large attachment whole. HTML-only mail stores its rendered
+# text. Defaults to 64 when unset; 0 disables it (headers only, and a
+# body becomes searchable once the message is read).
+index_body_max_kb = 64
 
 # --- WhatsApp: personal account, linked device ---
 [[account]]

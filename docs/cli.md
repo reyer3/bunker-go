@@ -298,9 +298,12 @@ accents (`jose` finds `José`). Every word must match; the last one also
 matches as a prefix (`factu` finds `factura`). Operators and quotes in the
 text are searched for literally. A query with no letters or digits (e.g.
 `%`) falls back to a literal substring match over subject and body.
-Results stay newest first. Mail sync stores headers only today, so mail is
-found by subject, sender, recipients and thread, not yet by body or
-attachment names.
+Results stay newest first. Mail sync stores the first
+`index_body_max_kb` (default 64 KiB) of each message's text, so mail is
+found by its body too; attachment names are indexed once the message has
+been read (`read`/`download` fetch it whole and keep its body and
+attachments in the store). With `index_body_max_kb = 0` sync stores
+headers only and a mail's body becomes searchable only after it is read.
 
 ```json
 {"items": [ <core.Item as JSON, see below> ]}
@@ -938,7 +941,8 @@ Non-JSON output is a single line: `3 item(s) marked read`.
 
 Recovers mail history a bounded initial sync never reached: it runs `UID
 SEARCH SINCE <date>` on `--folder` (default `INBOX`), then batch-FETCHes
-headers/flags (the exact same item-building path `Run`'s own sync uses)
+headers/flags and the bounded body text (the exact same item-building
+path `Run`'s own sync uses)
 for whatever UIDs the store doesn't already have, and upserts them. Only
 `mail` is a supported channel today (the first positional names it
 explicitly, so a future channel's own backfill support slots in the same
@@ -967,7 +971,8 @@ nothing found since <date>` when the search matched nothing.
 ## `bunker search mail <account> [--from x] [--subject y] [--since D] [--before D] [--folder INBOX] [--limit 50] [--json]`
 
 Runs an IMAP `UID SEARCH` for the given criteria and upserts every match
-into the store (headers only, read-only — it never marks anything read),
+into the store (headers and bounded body text, like sync; read-only — it
+never marks anything read),
 printing them exactly like `list` does (same line format, same
 `{"items": [...]}` JSON shape) — this is the escape hatch for not
 knowing an item's id at all, only roughly what it should contain. Only

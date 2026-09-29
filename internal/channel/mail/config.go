@@ -79,6 +79,15 @@ type AccountConfig struct {
 	// defaultInitialSyncLimit (200) when the option is absent; must be
 	// > 0 when set.
 	InitialSyncLimit int
+
+	// IndexBodyMaxKB caps how many KiB of each message's text sync
+	// fetches and stores so full-text search finds mail by its body
+	// (#91), configured as index_body_max_kb. ParseAccountConfig
+	// defaults it to defaultIndexBodyMaxKB (64); 0 disables it, leaving
+	// synced mail with an empty body until it is read. Unlike
+	// InitialSyncLimit, the zero value here means off, so hand-built test
+	// configs keep the header-only sync they were written against.
+	IndexBodyMaxKB int
 }
 
 // ParseAccountConfig decodes acc.Options into an AccountConfig, applying
@@ -151,6 +160,14 @@ func ParseAccountConfig(acc config.Account) (AccountConfig, error) {
 			return AccountConfig{}, fmt.Errorf("mail: account %q: initial_sync_limit must be > 0: %w", acc.Name, ErrInvalidConfig)
 		}
 		cfg.InitialSyncLimit = limit
+	}
+
+	cfg.IndexBodyMaxKB = defaultIndexBodyMaxKB
+	if kb, ok := intOption(acc.Options, "index_body_max_kb"); ok {
+		if kb < 0 {
+			return AccountConfig{}, fmt.Errorf("mail: account %q: index_body_max_kb must be >= 0: %w", acc.Name, ErrInvalidConfig)
+		}
+		cfg.IndexBodyMaxKB = kb
 	}
 
 	return cfg, nil
