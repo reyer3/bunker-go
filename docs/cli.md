@@ -1741,17 +1741,23 @@ synced from the Sent folder — see `thread` above). It drives the chat
 view's right-aligned bubbles and is independent of `Unread` (mail's IMAP
 `\Seen` flag toggles on its own).
 
-`Edited`, `Deleted` and `Reactions` are S2's channel-agnostic WhatsApp
-edit/revoke/reaction model (Matrix can adopt the same shape later, not
-yet in scope). `Edited` is `true` once a channel-observed edit replaced
-`Body`. `Deleted` is `true` after a revoke; the row is kept (its place in
-`list`/`thread` pagination is preserved) but `Body` is cleared, and the
-TUI renders "mensaje eliminado" in its place. `Reactions` lists at most
-one entry per `Sender` — a newer reaction from the same sender replaces
-the previous one, and an empty `Emoji` removes it — rendered as a line of
-emoji under the message in the chat/thread view. Both fields are absent
-of any effect for a plain, never-edited/revoked/reacted-to item
-(`Edited`/`Deleted` `false`, `Reactions` empty).
+`Edited`, `Deleted` and `Reactions` are the channel-agnostic
+edit/revoke/reaction model shared by WhatsApp and Matrix. `Edited` is
+`true` once a channel-observed edit replaced `Body` (on Matrix, an
+`m.replace` edit by the original sender; edits by anyone else are
+ignored). `Deleted` is `true` after a revoke (on Matrix, a redaction of
+the message); the row is kept (its place in `list`/`thread` pagination
+is preserved) but `Body` is cleared, and the TUI renders "mensaje
+eliminado" in its place. `Reactions` lists at most one entry per
+`Sender` — a newer reaction from the same sender replaces the previous
+one, and an empty `Emoji` removes it — rendered as a line of emoji under
+the message in the chat/thread view. Matrix lets one user add several
+reactions to the same message: the newest is shown, and redacting it
+falls back to that user's previous one if it was seen since the daemon
+started (otherwise the user's reaction is simply removed). Edits,
+reactions and redactions never appear as items of their own. Both fields
+are absent of any effect for a plain, never-edited/revoked/reacted-to
+item (`Edited`/`Deleted` `false`, `Reactions` empty).
 
 ## Adapter registration hook
 
