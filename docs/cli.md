@@ -148,11 +148,43 @@ and how to get help always stay.
 
 `?` (or `F1`, which also works in a chat, where `?` is text) opens the
 help overlay on the section for the current view: inbox, chat, mail
-thread, mail editor or contact picker. It scrolls with `j`/`k`, the
-arrows, `PgUp`/`PgDn` or the wheel. `Esc`, `?` or `F1` close it. At
+thread, mail editor, contact picker or command palette. It scrolls
+with `j`/`k`, the arrows, `PgUp`/`PgDn` or the wheel. `Esc`, `?` or `F1`
+close it. At
 terminal widths under ~30 columns the two-line row
 collapses to one line (no preview). Setting `NO_COLOR` disables all
 color, same as everywhere else in bunker.
+
+**Command palette.** `Ctrl+K` opens a list of what the current view can
+do, each command with its key on the right; `F2` opens it too, and is
+the only way from a chat, where the composer always has focus and
+`Ctrl+K` deletes to the end of the line (the reply composer, the mail
+editor, the `/` filter and the contact picker never open it).
+- **Picking:** typing filters by prefix, word, substring or letters in
+  order, ignoring case and accents (`leido` finds "Marcar leído").
+  `↑`/`↓` (or `Ctrl+P`/`Ctrl+N`) move, `Enter` runs, `Esc` (or `Ctrl+K`/
+  `F2` again) closes.
+- **Commands:** only the current view's: in the inbox and the sidebar
+  "Nuevo mensaje", "Buscar / filtrar", "Refrescar", "Ir a
+  Todo/Mail/WhatsApp/Matrix", "Marcar leído", "Deshacer leído",
+  "Responder", "Ayuda", "Salir"; in a mail thread "Responder", "Responder
+  a todos", "Reenviar", "Descargar adjunto"; in a chat "Editar", "Borrar"
+  and "Reaccionar al último mensaje" and "Descargar último adjunto"; and
+  "Preguntar a Claude" only inside herdr. One that cannot run right now
+  is dimmed with the reason (`Deshacer leído · nada que deshacer`) and
+  `Enter` ignores it.
+- **Same path as the key:** running a command presses its key, so every
+  send, mark-read, edit, delete or reaction still goes through its
+  dry-run preview and explicit confirm.
+- **Recent conversations:** listed under "Recientes" (the loaded inbox,
+  newest first, up to 8, filtered by the same text); `Enter` opens one
+  as `Enter` on its inbox row does, leaving the conversation on screen
+  first.
+- **`@` contacts:** a query starting with `@` lists contacts instead (the
+  same `bunker contacts` lookup as `n`); `Enter` starts a new message to
+  one, exactly like picking it with `n`.
+- A `bunker open` pane lists no recent conversations or contacts: it
+  exists for its one conversation.
 
 **Mail sender groups.** The Mail section groups its conversations under
 one collapsible row per sender, so a sender with many mails takes one
@@ -1597,8 +1629,9 @@ running daemon (else the same "cannot reach bunker daemon" hint, exit 1).
   on a Mail sender row), name and unread badge, the name truncated so the
   badge always shows; then a one-line key hint.
 - **Keys:** `j`/`k` and the arrows move, `Tab`/`⇧Tab` or `1`/`2`/`3`/`0`
-  switch channel, `/` filters, `g` refreshes, `?` or `F1` shows help, `q`
-  quits. The other inbox keys work as in the full TUI.
+  switch channel, `/` filters, `g` refreshes, `Ctrl+K` or `F2` opens the
+  command palette, `?` or `F1` shows help, `q` quits. The other inbox
+  keys work as in the full TUI.
 - **Enter:** inside herdr (`HERDR_ENV=1`) it opens the conversation in a
   new herdr pane to the right and focuses it, and the list stays where it
   was:

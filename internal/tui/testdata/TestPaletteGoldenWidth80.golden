@@ -1,0 +1,19 @@
+[1mComandos[0m
+> ▏
+────────────────────────────────────────────────────────────────
+[1;38;2;245;245;245;48;2;27;42;60m▸ Nuevo mensaje                                                n[0m
+  Buscar / filtrar                                             /
+  Refrescar                                                    g
+  Ir a Mail                                                    1
+  Ir a WhatsApp                                                2
+  Ir a Matrix                                                  3
+  Marcar leído                                                 m
+  Responder                                                    r
+  Ayuda                                                        ?
+  Salir                                                        q
+[38;2;163;160;158m  Ir a Todo · ya estás aquí                                    0[0m
+[38;2;163;160;158m  Deshacer leído · nada que deshacer                           u[0m
+[38;2;163;160;158mRecientes[0m
+  󰖣 Equipo de producto y diseño
+  󰘨 Soporte
+[38;2;163;160;158m↵ ejecutar · ↑/↓ elegir · @ contacto · Esc cerrar[0m
