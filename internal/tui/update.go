@@ -112,7 +112,13 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = m.rememberRead(m.unreadOnOpen)
 			m.unreadOnOpen = ""
 		}
-		return m, tea.Batch(nextChatKeepalive(m.chatToken), nextChatTypingIdleTick(m.chatToken))
+		return m, tea.Batch(nextChatKeepalive(m.chatToken), nextChatTypingIdleTick(m.chatToken), nextChatRefresh(m.chatToken))
+	case chatRefreshTickMsg:
+		return m.handleChatRefreshTick(msg)
+	case chatRefreshedMsg:
+		return m.handleChatRefreshed(msg)
+	case chatRefreshReadMsg:
+		return m.handleChatRefreshRead(msg)
 	case chatKeepaliveTickMsg:
 		if msg.token != m.chatToken || !m.chatMode {
 			return m, nil
