@@ -147,7 +147,7 @@ func TestEndToEndCLIAgainstFakeDaemon(t *testing.T) {
 	var replyResp struct {
 		DryRun  bool `json:"dryRun"`
 		Receipt struct {
-			ID string `json:"ID"`
+			ID string `json:"id"`
 		} `json:"receipt"`
 	}
 	if err := json.Unmarshal([]byte(out), &replyResp); err != nil {

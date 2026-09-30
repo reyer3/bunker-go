@@ -604,3 +604,23 @@ func dialUntilReady(t *testing.T, socket string) *rpc.Client {
 	t.Fatal("server never became reachable")
 	return nil
 }
+
+// TestClientReplyPlanAndReceiptSurviveTheWire covers the snake_case
+// Plan/Receipt tags (issue #68): the daemon and the client are the same
+// binary, but every field must still round-trip through the socket.
+func TestClientReplyPlanAndReceiptSurviveTheWire(t *testing.T) {
+	client, _, _ := startTestServer(t)
+	plan, receipt, err := client.Reply(context.Background(), "mail:cl:1", "reply body", []string{"cc@x.cl"}, nil, false)
+	if err != nil {
+		t.Fatalf("Reply: %v", err)
+	}
+	if plan.Action != "reply" || plan.Channel != core.ChannelMail || plan.Account != "cl" || plan.Preview != "reply body" {
+		t.Fatalf("plan = %+v, want reply/mail/cl/reply body", plan)
+	}
+	if len(plan.Cc) != 1 || plan.Cc[0] != "cc@x.cl" || len(plan.Recipients) == 0 || plan.Target == "" {
+		t.Fatalf("plan = %+v, want Cc, Recipients and Target to survive", plan)
+	}
+	if receipt.ID == "" || receipt.Channel != core.ChannelMail || receipt.At.IsZero() {
+		t.Fatalf("receipt = %+v, want id, channel and at", receipt)
+	}
+}

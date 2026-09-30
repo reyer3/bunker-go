@@ -75,9 +75,9 @@ Commands:
                                                              is: has: in: channel:
                                                              account: label:
                                                              before: after: "..." -x
-  read <id> [--no-receipt] [--json]                        fetch full body
-       (marks it read on WhatsApp/Matrix unless --no-receipt; mail is
-       always PEEK-only, unaffected)
+  read <id> [--mark-read] [--json]                         fetch full body
+       (no side effect; --mark-read also marks it read on
+       WhatsApp/Matrix and locally; mail is always PEEK-only)
   reply <id> <text|-> [--cc addr]... [--attach path]...
        [--dry-run] [--json]                                 reply to an item
   send <channel> <account> <to> <text|->
@@ -163,7 +163,8 @@ Commands:
                                                              Matrix SSO login,
                                                              optionally importing
                                                              the recovery key
-  import-keys matrix <account> <file> [--passphrase-stdin]  import an Element
+  import-keys matrix <account> <file> [--passphrase-stdin] [--json]
+                                                             import an Element
                                                              megolm key export
 `
 
@@ -412,17 +413,26 @@ func printPage(ctx context.Context, backend Backend, flags listFlags, query stri
 func cmdRead(ctx context.Context, backend Backend, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("read", stderr)
 	jsonOut := fs.Bool("json", false, "emit JSON")
-	noReceipt := fs.Bool("no-receipt", false, "fetch without marking the item read (WhatsApp/Matrix)")
+	markRead := fs.Bool("mark-read", false, "also mark the item read on the channel (WhatsApp/Matrix) and in the local store")
+	// --no-receipt was read's opt-out while marking was the default. The
+	// default is now no side effect, so it is a no-op kept only so
+	// existing scripts keep working; combining it with --mark-read is a
+	// contradiction and fails rather than guessing.
+	noReceipt := fs.Bool("no-receipt", false, "deprecated no-op: read marks nothing unless --mark-read is given")
 	positionals, err := parseInterspersed(fs, args)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
 	if len(positionals) < 1 {
-		fmt.Fprintln(stderr, "usage: bunker read <id> [--no-receipt] [--json]")
+		fmt.Fprintln(stderr, "usage: bunker read <id> [--mark-read] [--json]")
 		return 2
 	}
-	item, err := backend.Read(ctx, positionals[0], !*noReceipt)
+	if *markRead && *noReceipt {
+		fmt.Fprintln(stderr, "error: --mark-read and --no-receipt contradict each other")
+		return 2
+	}
+	item, err := backend.Read(ctx, positionals[0], *markRead)
 	if err != nil {
 		return fail(*jsonOut, stdout, stderr, err)
 	}

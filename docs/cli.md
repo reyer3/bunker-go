@@ -2,9 +2,22 @@
 
 `bunker` is one binary: a daemon that talks to channel adapters and stores
 their items, and a set of client subcommands that drive it over a unix
-socket. Every command accepts `--json`, which is the stable, documented
-contract Claude Code parses; without it, output is compact plain text for
-a human at a terminal.
+socket. Every command that produces data accepts `--json`, which is the
+stable, documented contract Claude Code parses; without it, output is
+compact plain text for a human at a terminal.
+
+## `--json` coverage
+
+| Command | `--json` |
+|---|---|
+| `list`, `find`, `read`, `thread`, `search`, `counts`, `health`, `contacts`, `calls`, `avatar`, `download` | yes: data |
+| `reply`, `send`, `edit`, `delete`, `react`, `organize`, `status post`, `call`, `call answer\|reject\|hangup`, `backfill` | yes: `{"dryRun", "plan", ...}` with the [`core.Plan`/`core.Receipt` shape](#coreplan-and-corereceipt-json-shape) |
+| `unread`, `read-thread` | yes: the result of the change |
+| `version`, `update`, `render`, `herdr toggle` | yes |
+| `import-keys matrix` | yes: `{"new", "already_known", "failed", "total"}` |
+| `daemon`, `mcp`, `bunker` (no arguments), `sidebar`, `open`, `app`, `link`, `help` | exempt: interactive, long-running or setup commands with no data result |
+
+Every JSON error is `{"error": "..."}` (see [Errors](#errors)).
 
 The daemon must be running for every command except `render`, which falls
 back to reading the store directly, and `daemon` itself.
@@ -490,13 +503,17 @@ takes the same flags as `list` and prints the same output, but
 store only; `bunker search` is the different command that asks the mail
 server.
 
-## `bunker read <id> [--no-receipt] [--json]`
+## `bunker read <id> [--mark-read] [--json]`
 
 Fetches the full item, using the adapter's `Fetcher` capability if it has
-one, falling back to the stored copy otherwise.
+one, falling back to the stored copy otherwise. **By default it has no
+side effect**: nothing is marked read, locally or on the channel (this
+changed in the release that introduced `--mark-read`; before it, `read`
+marked the item read unless `--no-receipt` was given). Reading is safe to
+script and to hand to an agent.
 
-Unless `--no-receipt` is given, it also marks the item read on the
-channel itself when the adapter implements `core.ReadMarker`:
+With `--mark-read` it also marks the item read on the channel itself when
+the adapter implements `core.ReadMarker`, and in the local store:
 
 - **WhatsApp**: presence `available` (so the linked device does not
   suppress the phone's own push notification while it looks "active"),
@@ -504,10 +521,14 @@ channel itself when the adapter implements `core.ReadMarker`:
 - **Matrix**: an `m.read` receipt and the fully-read marker for the same
   event, in one call. No presence — Matrix has no equivalent concept.
 - **Mail**: never marked. Mail has no `ReadMarker`; `Fetch` always uses
-  IMAP `BODY.PEEK`, so reading a mail item is unaffected by `--no-receipt`
+  IMAP `BODY.PEEK`, so reading a mail item is unaffected by `--mark-read`
   either way.
 
-`--no-receipt` fetches without marking anything, on every channel.
+`--no-receipt` is a deprecated no-op kept so old scripts keep working
+(`read` no longer marks anything by default); combining it with
+`--mark-read` is a usage error (exit 2). The MCP `read` tool and the
+TUI's item fetches never mark anything read; the TUI marks through its
+own explicit actions (opening a conversation, `read-thread`).
 
 ```json
 {"item": { <core.Item> }}
@@ -546,7 +567,7 @@ on the first image only.
 {"dryRun": false, "plan": { <core.Plan> }, "receipt": { <core.Receipt> }}
 ```
 
-`receipt` is the zero value (`{"ID":"","Channel":"","At":"0001-01-01T00:00:00Z"}`)
+`receipt` is the zero value (`{"id":"","channel":"","at":"0001-01-01T00:00:00Z"}`)
 when `dryRun` is `true`.
 
 ## `bunker send <channel> <account> <to> <text|-> [--cc addr]... [--subject s] [--attach path]... [--media path]... [--idempotency-key k] [--dry-run] [--json]`
@@ -569,11 +590,8 @@ adds Cc recipients. Per-channel support:
   or any `--cc` fails with an unsupported-capability error instead of
   silently sending to the first and dropping the rest.
 
-`plan.Cc` (alongside the existing `plan.Target`, which already lists
-`<to>`) carries the Cc list; it is additive and does not change any
-existing JSON field, so an existing consumer that ignores unknown fields
-is unaffected. It is present (`null` or an empty list) even with no `--cc`
-given.
+`plan.cc` (alongside `plan.target`, which lists `<to>`) carries the Cc
+list; it is omitted when there is no `--cc`.
 
 `plan.Recipients` lists every `<to>` address a send/reply reaches, one
 entry each, whether the channel addressed everyone in one native call
@@ -653,17 +671,14 @@ Validation is split across two layers:
   never a full read or an upload.
 
 ```json
-{"dryRun": false, "plan": { <core.Plan>, "Media": ["/path/to/pic.png"], "Attachments": [{"Name": "pic.png", "MIME": "image/png", "Size": 2048}] }, "receipt": { <core.Receipt> }}
+{"dryRun": false, "plan": { <core.Plan>, "media": ["/path/to/pic.png"], "attachments": [{"name": "pic.png", "mime": "image/png", "size": 2048}] }, "receipt": { <core.Receipt> }}
 ```
 
-`plan.Media` (paths, kept for compatibility) and `plan.Attachments`
-(name/MIME/size, computed and validated as above) are the only new
-fields added by this flag — everything else matches the existing
-`reply`/`send`/`status post` shape. Both are present (as `null` or an
-empty list) even for a plain send/reply with no attachments, since this
-codebase does not use `omitempty` json tags elsewhere either; existing
-consumers that decode into a typed struct are unaffected by an added
-field.
+`plan.media` (paths, kept for compatibility) and `plan.attachments`
+(name/mime/size, computed and validated as above) are the only fields
+added by this flag — everything else matches the `reply`/`send`/`status
+post` shape. Both are omitted for a plain send/reply with no
+attachments.
 
 The human (non-JSON) output of a send/reply with attachments lists each
 one on its own line as `name (mime, size)`, e.g.:
@@ -693,25 +708,26 @@ Limits and pacing are configured per WhatsApp account (see
   configurable).
 
 One recipient's failure never stops the rest and is never hidden: every
-outcome is reported. `receipt.recipients` lists `{"To", "Receipt",
-"Error"}` per recipient (`Error` is empty on success); the top-level
-`receipt.ID`/`Channel`/`At` mirror the *first successful* recipient, so a
+outcome is reported. `receipt.recipients` lists `{"to", "receipt",
+"error"}` per recipient (`error` is omitted on success); the top-level
+`receipt.id`/`channel`/`at` mirror the *first successful* recipient, so a
 JSON consumer that only reads those top-level fields keeps working
 unchanged for a single-recipient send. The CLI process exits `1` if any
 recipient failed, `0` only when every one succeeded.
 
 ```json
 {"dryRun": false, "plan": { <core.Plan> }, "receipt": {
-  "ID": "...", "Channel": "whatsapp", "At": "...",
+  "id": "...", "channel": "whatsapp", "at": "...",
   "recipients": [
-    {"To": "+51111", "Receipt": {"ID": "...", "Channel": "whatsapp", "At": "..."}, "error": ""},
-    {"To": "+51222", "Receipt": {}, "error": "whatsapp: send: +51222 is not on WhatsApp"}
+    {"to": "+51111", "receipt": {"id": "...", "channel": "whatsapp", "at": "..."}},
+    {"to": "+51222", "receipt": {"id": "", "channel": "", "at": "0001-01-01T00:00:00Z"}, "error": "whatsapp: send: +51222 is not on WhatsApp"}
   ]
 }}
 ```
 
 `--dry-run` on a fan-out shows the full per-recipient plan and an
-estimated pause budget (`plan.FanoutPauseMin`/`FanoutPauseMax`: the
+estimated pause budget (`plan.fanout_pause_min`/`fanout_pause_max`, in
+nanoseconds in JSON: the
 `(N-1)` inter-recipient pauses at the resolved policy's bounds — this
 does *not* include each adapter's own composing/typing time, which
 `core.Service` has no visibility into) without sending or sleeping
@@ -1916,7 +1932,7 @@ sessions from the key backup`.
 - The two flags are mutually exclusive.
 - Errors from this step never include the key itself.
 
-## `bunker import-keys matrix <account> <file> [--passphrase-stdin]`
+## `bunker import-keys matrix <account> <file> [--passphrase-stdin] [--json]`
 
 Imports an Element-style megolm key export (a file starting with
 `-----BEGIN MEGOLM SESSION DATA-----`) into an already-logged-in
@@ -1925,7 +1941,9 @@ account's existing session and crypto store
 own `OlmMachine.ImportKeys`). Prints `imported N new, M already known
 (T in export) from <file>`, adding `, F failed` before the total when the
 export contained sessions the machine rejected outright (bad algorithm,
-mismatched session ID).
+mismatched session ID). With `--json` it prints
+`{"new": 3, "already_known": 7, "failed": 0, "total": 10}` (errors use the
+usual `{"error": ...}`).
 
 mautrix's own `ImportKeys` counts a session as "imported" whenever
 storing it succeeds, even when the store already had that exact session
@@ -1949,8 +1967,9 @@ matrix adapter's `RetryUndecryptable` step — which runs once at every
 daemon startup — re-fetches and decrypts items it had previously stored
 undecryptable, now that the newly imported keys may cover them.
 
-Neither `link` nor `import-keys` accepts `--json`: they are interactive,
-one-shot setup steps, not scriptable data commands.
+`link` does not accept `--json`: it is an interactive, one-shot setup step
+(a QR code or SSO URL for a person), not a scriptable data command.
+`import-keys` does, so a script can drive it with `--passphrase-stdin`.
 
 ## Errors
 
@@ -1964,6 +1983,41 @@ Exit codes: `0` success, `1` an error occurred while handling the command
 (unknown id, unsupported capability, an invalid flag combination such as
 `--seen --unseen` together, I/O failure), `2` bad usage caught before the
 command ran (missing argument, unknown flag, unknown command).
+
+## `core.Plan` and `core.Receipt` JSON shape
+
+Every outbound command returns a `plan` (what was, or with `--dry-run`
+would be, done) and a `receipt` (what the channel confirmed; the zero
+value on a dry run). Keys are lower snake_case, like the rest of the API;
+before this release they were the Go field names (`Action`, `Recipients`,
+`ID`, ...).
+
+```json
+{
+  "plan": {
+    "action": "send", "channel": "mail", "account": "cl",
+    "target": "alice@x.cl", "cc": ["carol@example.org"],
+    "subject": "hi", "preview": "hi there",
+    "media": ["/path/a.pdf"],
+    "attachments": [{"name": "a.pdf", "mime": "application/pdf", "size": 2048}],
+    "recipients": ["alice@x.cl"],
+    "fanout_pause_min": 3000000000, "fanout_pause_max": 8000000000
+  },
+  "receipt": {
+    "id": "...", "channel": "mail", "at": "2026-09-30T12:00:00Z",
+    "recipients": [{"to": "alice@x.cl", "receipt": {"id": "...", "channel": "mail", "at": "..."}, "error": "..."}],
+    "replayed": false
+  }
+}
+```
+
+`plan.action`, `channel`, `account`, `target` and `preview`, and
+`receipt.id`, `channel` and `at`, are always present. The rest is omitted
+when empty: `cc`, `subject`, `media`, `attachments`, `recipients`, the
+two `fanout_pause_*` fields (integer nanoseconds), `receipt.recipients`
+(fan-out only), `receipt.replayed` (true for an idempotent replay) and a
+recipient's `error`. The envelope keys (`dryRun`, `call`, `result`) are
+unchanged.
 
 ## `core.Item` JSON shape
 

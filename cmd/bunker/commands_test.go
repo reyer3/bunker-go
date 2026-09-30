@@ -88,10 +88,9 @@ func TestCmdReadJSON(t *testing.T) {
 	}
 }
 
-// TestCmdReadMarksReceiptByDefault covers T13(c): `bunker read <id>`
-// marks the item read (backend.Read's markReceipt=true) unless told
-// otherwise.
-func TestCmdReadMarksReceiptByDefault(t *testing.T) {
+// TestCmdReadDoesNotMarkByDefault covers issue #68: `bunker read <id>`
+// is a pure read (backend.Read's markReceipt=false).
+func TestCmdReadDoesNotMarkByDefault(t *testing.T) {
 	backend := newFakeBackend()
 	backend.items["whatsapp:wa:1"] = core.Item{ID: "whatsapp:wa:1", Body: "hola"}
 
@@ -100,17 +99,30 @@ func TestCmdReadMarksReceiptByDefault(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr=%s", code, stderr.String())
 	}
-	if len(backend.readCalls) != 1 {
-		t.Fatalf("readCalls = %+v, want 1", backend.readCalls)
-	}
-	if backend.readCalls[0].ID != "whatsapp:wa:1" || !backend.readCalls[0].MarkReceipt {
-		t.Fatalf("readCalls[0] = %+v, want ID=whatsapp:wa:1 MarkReceipt=true", backend.readCalls[0])
+	if len(backend.readCalls) != 1 || backend.readCalls[0].MarkReceipt {
+		t.Fatalf("readCalls = %+v, want 1 entry with MarkReceipt=false", backend.readCalls)
 	}
 }
 
-// TestCmdReadNoReceiptSkipsMarking covers --no-receipt: fetch without
-// marking read (WhatsApp/Matrix).
-func TestCmdReadNoReceiptSkipsMarking(t *testing.T) {
+// TestCmdReadMarkReadOptsIn covers --mark-read: the only way read marks
+// the item read (WhatsApp/Matrix).
+func TestCmdReadMarkReadOptsIn(t *testing.T) {
+	backend := newFakeBackend()
+	backend.items["whatsapp:wa:1"] = core.Item{ID: "whatsapp:wa:1", Body: "hola"}
+
+	var stdout, stderr bytes.Buffer
+	code := runWithBackend(context.Background(), backend, []string{"read", "whatsapp:wa:1", "--mark-read"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr=%s", code, stderr.String())
+	}
+	if len(backend.readCalls) != 1 || backend.readCalls[0].ID != "whatsapp:wa:1" || !backend.readCalls[0].MarkReceipt {
+		t.Fatalf("readCalls = %+v, want 1 entry with MarkReceipt=true", backend.readCalls)
+	}
+}
+
+// TestCmdReadNoReceiptIsDeprecatedNoOp: the old opt-out still parses and
+// still does not mark, but cannot be combined with --mark-read.
+func TestCmdReadNoReceiptIsDeprecatedNoOp(t *testing.T) {
 	backend := newFakeBackend()
 	backend.items["whatsapp:wa:1"] = core.Item{ID: "whatsapp:wa:1", Body: "hola"}
 
@@ -121,6 +133,13 @@ func TestCmdReadNoReceiptSkipsMarking(t *testing.T) {
 	}
 	if len(backend.readCalls) != 1 || backend.readCalls[0].MarkReceipt {
 		t.Fatalf("readCalls = %+v, want 1 entry with MarkReceipt=false", backend.readCalls)
+	}
+
+	backend = newFakeBackend()
+	stderr.Reset()
+	code = runWithBackend(context.Background(), backend, []string{"read", "whatsapp:wa:1", "--no-receipt", "--mark-read"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 2 || len(backend.readCalls) != 0 {
+		t.Fatalf("code = %d readCalls = %+v, want usage error and no read", code, backend.readCalls)
 	}
 }
 
@@ -1101,3 +1120,38 @@ var errTest = &testError{"boom"}
 type testError struct{ msg string }
 
 func (e *testError) Error() string { return e.msg }
+
+// TestCmdSendJSONUsesSnakeCasePlanAndReceipt covers issue #68: the plan
+// and receipt a --json send prints use snake_case keys, never the Go
+// field names.
+func TestCmdSendJSONUsesSnakeCasePlanAndReceipt(t *testing.T) {
+	backend := newFakeBackend()
+	backend.sendPlan = core.Plan{Action: "send", Channel: core.ChannelMail, Account: "cl", Target: "a@b.cl", Recipients: []string{"a@b.cl"}, Preview: "hola"}
+	backend.receipt = core.Receipt{ID: "R1", Channel: core.ChannelMail}
+
+	var stdout, stderr bytes.Buffer
+	code := runWithBackend(context.Background(), backend, []string{"send", "mail", "cl", "a@b.cl", "hola", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr=%s", code, stderr.String())
+	}
+	var got struct {
+		Plan    map[string]any `json:"plan"`
+		Receipt map[string]any `json:"receipt"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal %q: %v", stdout.String(), err)
+	}
+	if got.Plan["action"] != "send" || got.Plan["target"] != "a@b.cl" || got.Plan["preview"] != "hola" {
+		t.Errorf("plan = %v, want snake_case action/target/preview", got.Plan)
+	}
+	if got.Receipt["id"] != "R1" || got.Receipt["channel"] != "mail" {
+		t.Errorf("receipt = %v, want snake_case id/channel", got.Receipt)
+	}
+	for section, m := range map[string]map[string]any{"plan": got.Plan, "receipt": got.Receipt} {
+		for key := range m {
+			if key != strings.ToLower(key) {
+				t.Errorf("%s key %q is not lower case", section, key)
+			}
+		}
+	}
+}
