@@ -22,8 +22,16 @@ import "context"
 // never appends, so a channel that later DOES echo the same message id
 // back through its normal ingest path just refreshes this same row
 // instead of creating a duplicate.
+//
+// The echo can also win the race: a Matrix sync running concurrently may
+// upsert it before Send returns here. That row is the richer one (room
+// name, sender, server timestamp, attachment refs), so an existing row
+// is kept rather than overwritten with this optimistic sketch.
 func (s *Service) storeSentItem(ctx context.Context, channel Channel, account, thread, to, subject, body string, attachments []AttachmentInfo, receipt Receipt) {
 	if channel == ChannelMail || receipt.ID == "" {
+		return
+	}
+	if _, err := s.store.Get(ctx, receipt.ID); err == nil {
 		return
 	}
 	item := Item{

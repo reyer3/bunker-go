@@ -74,3 +74,30 @@ func TestServiceSendLogsStoreSentItemErrorWithChannelAccountAttrs(t *testing.T) 
 		t.Fatalf("store.items = %+v, want none stored when Upsert fails", store.items)
 	}
 }
+
+// TestServiceSendKeepsEchoThatArrivedFirst covers the other order of the
+// sent-item/echo race (issue #114): the channel's sync already upserted
+// the echo under the receipt's id before Send returned, so the richer
+// synced row stays instead of being overwritten by the optimistic one.
+func TestServiceSendKeepsEchoThatArrivedFirst(t *testing.T) {
+	echo := core.Item{
+		ID: "sent-1", Channel: core.ChannelWhatsApp, Account: "personal",
+		Thread: "5511999", ThreadName: "Sala", From: core.Address{ID: "me", Name: "Yo"},
+		Body: "hola", FromMe: true,
+	}
+	store := newMemStore(echo)
+	reg := core.NewRegistry()
+	reg.Register(&spyAdapter{channel: core.ChannelWhatsApp, account: "personal"})
+	svc := core.NewService(store, reg)
+
+	out := core.Outgoing{Channel: core.ChannelWhatsApp, Account: "personal", To: []string{"5511999"}, Body: "hola"}
+	if _, _, err := svc.Send(context.Background(), out, false); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if len(store.items) != 1 {
+		t.Fatalf("store has %d items, want the one echo", len(store.items))
+	}
+	if got := store.items["sent-1"]; got.ThreadName != "Sala" || got.From.Name != "Yo" {
+		t.Errorf("stored item = %+v, want the synced echo kept", got)
+	}
+}

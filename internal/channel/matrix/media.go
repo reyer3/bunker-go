@@ -181,7 +181,7 @@ func (a *Adapter) SendMedia(ctx context.Context, out core.Outgoing) (core.Receip
 		if err != nil {
 			return core.Receipt{}, fmt.Errorf("matrix: send media to %s: %w", roomID, err)
 		}
-		receipt = core.Receipt{ID: resp.EventID.String(), Channel: core.ChannelMatrix, At: time.Now()}
+		receipt = a.sentReceipt(roomID, resp.EventID)
 	}
 
 	if out.Body != "" {
@@ -192,7 +192,7 @@ func (a *Adapter) SendMedia(ctx context.Context, out core.Outgoing) (core.Receip
 		if err != nil {
 			return core.Receipt{}, fmt.Errorf("matrix: send media text to %s: %w", roomID, err)
 		}
-		receipt = core.Receipt{ID: resp.EventID.String(), Channel: core.ChannelMatrix, At: time.Now()}
+		receipt = a.sentReceipt(roomID, resp.EventID)
 	}
 
 	return receipt, nil
