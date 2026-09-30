@@ -112,16 +112,15 @@ func TestAdapterRunAppliesGmailLabelsOnStartupReconciliation(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- adapter.Run(ctx, sink) }()
 
-	deadline := time.Now().Add(5 * time.Second)
 	var refreshed core.Item
-	for time.Now().Before(deadline) {
+	pollUntil(5*time.Second, func() bool {
 		it, err := sink.getItem(id)
 		if err == nil && len(it.Labels) == 1 && it.Labels[0] == "bunker-test" {
 			refreshed = it
-			break
+			return true
 		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		return false
+	})
 	if refreshed.ID == "" {
 		final, _ := sink.getItem(id)
 		t.Fatalf("stored item's Labels were never refreshed from the raw X-GM-LABELS fetch, last seen = %v", final.Labels)

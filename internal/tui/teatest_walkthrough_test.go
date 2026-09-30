@@ -60,6 +60,8 @@ func (s *sessionRecorder) waitForText(t *testing.T, text string, timeout time.Du
 		if time.Now().After(deadline) {
 			t.Fatalf("waitForText %q: timed out; new output so far:\n%s", text, s.buf.Bytes()[start:])
 		}
+		// The program renders on its own goroutine and offers no event to
+		// block on, so poll with the deadline above.
 		time.Sleep(25 * time.Millisecond)
 	}
 }
@@ -88,6 +90,8 @@ func (s *sessionRecorder) typeSettled(tm *teatest.TestModel, text string) {
 		} else {
 			quiet = 0
 		}
+		// Quiescence of a real tea program has no event either; the
+		// sleep is the settle window itself.
 		time.Sleep(20 * time.Millisecond)
 	}
 }

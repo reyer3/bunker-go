@@ -102,15 +102,8 @@ func TestReceiptTypeReadDoesNotMarkOurItemsRead(t *testing.T) {
 		Type:          types.ReceiptTypeRead,
 	})
 
-	// There is no positive event to wait for, so give handleEvent a
-	// generous window to (wrongly) act before asserting it did not.
-	deadline := time.Now().Add(200 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if len(sink.markedRead) != 0 || len(sink.threadReadUpToCalls()) != 0 {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	// fakeWAClient.emit runs the handler synchronously, so handleEvent
+	// has already returned: nothing to wait for before asserting.
 	if len(sink.markedRead) != 0 {
 		t.Errorf("MarkRead calls = %+v, want none for ReceiptTypeRead", sink.markedRead)
 	}
@@ -264,13 +257,7 @@ func TestMarkChatAsReadActionReadFalseIsNoOp(t *testing.T) {
 		Action:    &waSyncAction.MarkChatAsReadAction{Read: &read},
 	})
 
-	deadline := time.Now().Add(200 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if len(sink.threadReadUpToCalls()) != 0 {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	// emit is synchronous: handleEvent has already returned.
 	if calls := sink.threadReadUpToCalls(); len(calls) != 0 {
 		t.Errorf("MarkThreadReadUpTo calls = %+v, want none for Action.Read == false", calls)
 	}
@@ -409,12 +396,8 @@ func TestRunDropsNonContentMessages(t *testing.T) {
 				Message: tc.message,
 			})
 
-			// Give the handler a moment to (not) upsert, then settle on
-			// the final count instead of racing a fixed sleep.
-			deadline := time.Now().Add(200 * time.Millisecond)
-			for time.Now().Before(deadline) {
-				time.Sleep(10 * time.Millisecond)
-			}
+			// emit is synchronous: handleEvent has already returned, so
+			// the count is final.
 			got := len(sink.items())
 			if tc.wantOne && got != 1 {
 				t.Fatalf("sink items = %d, want 1 (content message must be upserted)", got)
@@ -462,10 +445,7 @@ func TestRunDropsStatusBroadcastMessages(t *testing.T) {
 		Message: &waE2E.Message{Conversation: strPtr("mi estado de hoy")},
 	})
 
-	deadline := time.Now().Add(200 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
+	// emit is synchronous: handleEvent has already returned.
 	if got := len(sink.items()); got != 0 {
 		t.Fatalf("sink items = %d, want 0 (status@broadcast must be dropped)", got)
 	}
@@ -495,10 +475,7 @@ func TestRunDropsNewsletterMessages(t *testing.T) {
 		Message: &waE2E.Message{Conversation: strPtr("novedades de la semana")},
 	})
 
-	deadline := time.Now().Add(200 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
+	// emit is synchronous: handleEvent has already returned.
 	if got := len(sink.items()); got != 0 {
 		t.Fatalf("sink items = %d, want 0 (newsletter posts must be dropped)", got)
 	}

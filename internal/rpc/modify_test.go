@@ -44,16 +44,9 @@ func startChatServer(t *testing.T) (*rpc.Client, *fake.Adapter, *store.Store) {
 		cancel()
 		<-serveErr
 	})
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if c, err := rpc.Dial(socket); err == nil {
-			t.Cleanup(func() { c.Close() })
-			return c, adapter, st
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatal("server never became reachable")
-	return nil, nil, nil
+	c := dialUntilReady(t, socket)
+	t.Cleanup(func() { c.Close() })
+	return c, adapter, st
 }
 
 func TestClientEditDeleteReactRoundTrip(t *testing.T) {

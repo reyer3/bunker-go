@@ -169,15 +169,25 @@ func runAdapter(t *testing.T, adapter *Adapter, sink core.Sink) {
 	})
 }
 
-// waitUntil polls cond until it holds or timeout passes.
-func waitUntil(t *testing.T, timeout time.Duration, what string, cond func() bool) {
-	t.Helper()
+// pollUntil polls cond until it holds (true) or timeout passes (false).
+// The adapter under test runs on its own goroutines and connections, so
+// there is no event to block on; the poll interval only bounds latency.
+func pollUntil(timeout time.Duration, cond func() bool) bool {
 	deadline := time.Now().Add(timeout)
 	for !cond() {
 		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
+			return false
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+	return true
+}
+
+// waitUntil polls cond until it holds or timeout passes.
+func waitUntil(t *testing.T, timeout time.Duration, what string, cond func() bool) {
+	t.Helper()
+	if !pollUntil(timeout, cond) {
+		t.Fatalf("timed out waiting for %s", what)
 	}
 }
 
@@ -220,6 +230,45 @@ func fastPollAdapter(s *profileServer, cfg AccountConfig) *Adapter {
 	return adapter
 }
 
+// pollCounter counts completed folder poll passes of an adapter.
+type pollCounter struct{ passes chan struct{} }
+
+// countPolls hooks adapter so every completed folder poll pass is
+// recorded; pair it with waitPolls.
+func countPolls(adapter *Adapter) *pollCounter {
+	pc := &pollCounter{passes: make(chan struct{}, 1024)}
+	adapter.onFolderPoll = func() {
+		select {
+		case pc.passes <- struct{}{}:
+		default:
+		}
+	}
+	return pc
+}
+
+// waitPolls waits for n more completed poll passes, ignoring passes
+// finished before the call. A pass already in flight when called may
+// complete first, so n=2 guarantees one full pass that started after the
+// call: enough to assert that something the poll would sync was never
+// synced.
+func (pc *pollCounter) waitPolls(t *testing.T, n int) {
+	t.Helper()
+	for drained := false; !drained; {
+		select {
+		case <-pc.passes:
+		default:
+			drained = true
+		}
+	}
+	for i := 0; i < n; i++ {
+		select {
+		case <-pc.passes:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for folder poll pass %d of %d", i+1, n)
+		}
+	}
+}
+
 // TestAdapterRunSyncsDovecotFolders covers #52 on a generic server: mail
 // in an archive and a nested user folder shows up, under ids naming its
 // mailbox and with the folder in Meta, and Trash/Junk stay out.
@@ -233,7 +282,9 @@ func TestAdapterRunSyncsDovecotFolders(t *testing.T) {
 	s.Seed(t, "INBOX.Drafts", seedMessage{MessageID: "<draft@example.com>"})
 
 	sink := newFakeSink()
-	runAdapter(t, fastPollAdapter(s, s.Config("cl")), sink)
+	adapter := fastPollAdapter(s, s.Config("cl"))
+	polls := countPolls(adapter)
+	runAdapter(t, adapter, sink)
 
 	waitStoredIn(t, sink, "<inbox@example.com>", "INBOX")
 	item := waitStoredIn(t, sink, "<archived@example.com>", "INBOX.Archive")
@@ -246,8 +297,8 @@ func TestAdapterRunSyncsDovecotFolders(t *testing.T) {
 		t.Errorf("archived subject = %q", item.Subject)
 	}
 
-	// Give a few more polls the chance to (wrongly) pick them up.
-	time.Sleep(300 * time.Millisecond)
+	// Let a full poll pass run, which would (wrongly) pick them up.
+	polls.waitPolls(t, 2)
 	for _, id := range []string{"<trash@example.com>", "<junk@example.com>", "<draft@example.com>"} {
 		if got := sink.storedByMessageID(id); len(got) != 0 {
 			t.Errorf("%s stored as %v, want Trash/Junk/Drafts never synced", id, got[0].ID)
@@ -275,10 +326,12 @@ func TestAdapterRunHonorsExcludeAndSyncFolders(t *testing.T) {
 			cfg.ExcludeFolders = tc.exclude
 
 			sink := newFakeSink()
-			runAdapter(t, fastPollAdapter(s, cfg), sink)
+			adapter := fastPollAdapter(s, cfg)
+			polls := countPolls(adapter)
+			runAdapter(t, adapter, sink)
 
 			waitStoredIn(t, sink, "<"+tc.want+"@example.com>", tc.want)
-			time.Sleep(300 * time.Millisecond)
+			polls.waitPolls(t, 2)
 			if got := sink.storedByMessageID("<" + tc.notWant + "@example.com>"); len(got) != 0 {
 				t.Errorf("%s synced as %s, want it left out", tc.notWant, got[0].ID)
 			}
@@ -314,7 +367,9 @@ func TestAdapterRunSyncsGmailAllMail(t *testing.T) {
 	s.Seed(t, "[Gmail]/Trash", seedMessage{MessageID: "<trash@example.com>"})
 
 	sink := newFakeSink()
-	runAdapter(t, fastPollAdapter(s, s.Config("cl")), sink)
+	adapter := fastPollAdapter(s, s.Config("cl"))
+	polls := countPolls(adapter)
+	runAdapter(t, adapter, sink)
 
 	item := waitStoredIn(t, sink, "<archived@example.com>", "[Gmail]/All Mail")
 	if want := itemID("cl", "[Gmail]/All Mail", archived.UIDValidity, archived.UID); item.ID != want {
@@ -322,7 +377,7 @@ func TestAdapterRunSyncsGmailAllMail(t *testing.T) {
 	}
 	waitStoredIn(t, sink, "<both@example.com>", "INBOX")
 
-	time.Sleep(300 * time.Millisecond)
+	polls.waitPolls(t, 2)
 	if got := sink.storedByMessageID("<both@example.com>"); len(got) != 1 || got[0].Meta["folder"] != "INBOX" {
 		t.Errorf("message in INBOX and All Mail stored as %v, want once, from INBOX", ids(got))
 	}

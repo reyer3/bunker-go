@@ -192,6 +192,14 @@ var _ core.Store = (*memSink)(nil)
 
 // fakeState records what a fakeHomeserver observed.
 type fakeState struct {
+	// secondSync is closed when the homeserver receives its second /sync
+	// request. mautrix processes one /sync response completely (timeline,
+	// ephemeral, account data) before issuing the next request, so this
+	// is a barrier meaning "the first response was fully handled". Tests
+	// use it instead of sleeping to assert that something did NOT happen.
+	secondSync     chan struct{}
+	secondSyncOnce sync.Once
+
 	mu          sync.Mutex
 	filterBody  []byte
 	sentEvents  []sentEvent
@@ -240,7 +248,7 @@ type typingCall struct {
 // filter upload, /sync, sending events and read markers.
 func newFakeHomeserver(t *testing.T, syncSeq []*mautrix.RespSync) (*httptest.Server, *fakeState) {
 	t.Helper()
-	state := &fakeState{}
+	state := &fakeState{secondSync: make(chan struct{})}
 	var mu sync.Mutex
 	idx := 0
 
@@ -265,6 +273,9 @@ func newFakeHomeserver(t *testing.T, syncSeq []*mautrix.RespSync) (*httptest.Ser
 			resp = &mautrix.RespSync{NextBatch: fmt.Sprintf("tail-%d", idx)}
 		}
 		idx++
+		if idx == 2 {
+			state.secondSyncOnce.Do(func() { close(state.secondSync) })
+		}
 		mu.Unlock()
 		json.NewEncoder(w).Encode(resp)
 	})
@@ -748,11 +759,10 @@ func waitForItemUnread(t *testing.T, sink *memSink, id string, want bool) core.I
 // runWithSeedAndEphemeral starts adapter.Run against a single sync
 // response carrying one timeline message (so the store has something to
 // mark read) plus whatever ephemeral/account-data events the test wants
-// to exercise, and returns once the timeline message has been upserted
-// (guaranteeing the ephemeral/account-data events from the very same
-// /sync response have already been processed too, since DefaultSyncer
-// processes timeline, then ephemeral, then account data, synchronously,
-// for one response before ever issuing the next /sync request).
+// to exercise, and returns once the first /sync response has been fully
+// processed: the timeline message upserted, and the second /sync request
+// received (DefaultSyncer handles timeline, then ephemeral, then account
+// data, synchronously, for one response before issuing the next request).
 func runWithSeedAndEphemeral(t *testing.T, room id.RoomID, msgEvt *event.Event, ephemeral, accountData []*event.Event) (*memSink, func()) {
 	t.Helper()
 	firstSync := &mautrix.RespSync{
@@ -768,7 +778,7 @@ func runWithSeedAndEphemeral(t *testing.T, room id.RoomID, msgEvt *event.Event, 
 			},
 		},
 	}
-	srv, _ := newFakeHomeserver(t, []*mautrix.RespSync{firstSync})
+	srv, state := newFakeHomeserver(t, []*mautrix.RespSync{firstSync})
 	adapter := newTestAdapter(t, srv, nil)
 	sink := newMemSink()
 
@@ -780,6 +790,12 @@ func runWithSeedAndEphemeral(t *testing.T, room id.RoomID, msgEvt *event.Event, 
 	case <-time.After(5 * time.Second):
 		cancel()
 		t.Fatal("timed out waiting for the seed message to be upserted")
+	}
+	select {
+	case <-state.secondSync:
+	case <-time.After(5 * time.Second):
+		cancel()
+		t.Fatal("timed out waiting for the first /sync response to be fully processed")
 	}
 	return sink, cancel
 }
@@ -857,17 +873,9 @@ func TestReceiptHandlerIgnoresOtherUsersReceipts(t *testing.T) {
 	defer cancel()
 
 	wantID := itemID("work", room, "$evt1")
-	// There is no positive event to wait for, so give the (wrongly
-	// acting) handler a generous window before asserting it did not.
-	deadline := time.Now().Add(200 * time.Millisecond)
-	var item core.Item
-	for time.Now().Before(deadline) {
-		item, _ = sink.Get(context.Background(), wantID)
-		if !item.Unread {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	// runWithSeedAndEphemeral returned only after the whole first /sync
+	// response was handled, so a (wrong) mark-read has already happened.
+	item, _ := sink.Get(context.Background(), wantID)
 	if !item.Unread {
 		t.Fatalf("item %s Unread = false, want still true: another user's receipt must not affect our unread state", wantID)
 	}
@@ -921,7 +929,7 @@ func TestReceiptHandlerPrefersReferencedEventTimestamp(t *testing.T) {
 			},
 		},
 	}
-	srv, _ := newFakeHomeserver(t, []*mautrix.RespSync{firstSync})
+	srv, state := newFakeHomeserver(t, []*mautrix.RespSync{firstSync})
 	adapter := newTestAdapter(t, srv, nil)
 	sink := newMemSink()
 
@@ -945,9 +953,13 @@ func TestReceiptHandlerPrefersReferencedEventTimestamp(t *testing.T) {
 	laterID := itemID("work", room, "$evtB")
 	waitForItemUnread(t, sink, referencedID, false)
 
-	// Give the (potentially wrong) handler a window to also mark evtB
-	// read before asserting it did not.
-	time.Sleep(150 * time.Millisecond)
+	// The second /sync request means the receipt was fully handled, so a
+	// (wrong) mark-read of evtB has already happened.
+	select {
+	case <-state.secondSync:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the first /sync response to be fully processed")
+	}
 	item, err := sink.Get(context.Background(), laterID)
 	if err != nil {
 		t.Fatalf("Get %s: %v", laterID, err)

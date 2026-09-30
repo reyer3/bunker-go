@@ -112,13 +112,10 @@ func TestAdapterRunReconcilesStaleSentItemOnStartup(t *testing.T) {
 
 	waitForUpsert(t, sink, 5*time.Second) // "Keep" from the Sent sync
 
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := sink.getItem(staleID); err != nil {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	pollUntil(5*time.Second, func() bool {
+		_, err := sink.getItem(staleID)
+		return err != nil
+	})
 	if _, err := sink.getItem(staleID); err == nil {
 		t.Errorf("stale Sent item %s is still stored after Run started", staleID)
 	}

@@ -47,6 +47,8 @@ func (s *slowSendAdapter) Channel() core.Channel                         { retur
 func (s *slowSendAdapter) Account() string                               { return s.account }
 func (s *slowSendAdapter) Run(ctx context.Context, sink core.Sink) error { return nil }
 func (s *slowSendAdapter) Send(ctx context.Context, out core.Outgoing) (core.Receipt, error) {
+	// The slow peer is the thing under test: the send must outlast the
+	// caller deadline, so a real delay is the fixture.
 	time.Sleep(s.delay)
 	return core.Receipt{ID: "slow-1", Channel: s.channel, At: time.Now()}, nil
 }
@@ -74,14 +76,7 @@ func TestRunSendDoesNotTimeOutOnASlowServer(t *testing.T) {
 	go func() { serveErr <- srv.Serve(ctx, socket) }()
 	t.Cleanup(func() { cancel(); <-serveErr })
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if c, dialErr := rpc.Dial(socket); dialErr == nil {
-			c.Close()
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	dialUntilReady(t, socket).Close()
 	t.Setenv("BUNKER_SOCKET", socket)
 
 	stdoutR, stdoutW, err := os.Pipe()

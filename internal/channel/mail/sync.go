@@ -382,6 +382,9 @@ func (a *Adapter) pollAndResolve(ctx context.Context, sink core.Sink, poll bool,
 		return pending
 	}
 	plan := a.planSyncFolders(folders)
+	if poll && a.onFolderPoll != nil {
+		defer a.onFolderPoll()
+	}
 	if poll {
 		pending = append(pending, a.pollFolders(ctx, client, sink, folders, plan)...)
 	}

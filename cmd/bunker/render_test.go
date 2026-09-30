@@ -110,14 +110,7 @@ func TestRenderUsesLiveDaemonWhenReachable(t *testing.T) {
 	go func() { serveErr <- srv.Serve(ctx, socket) }()
 	t.Cleanup(func() { cancel(); <-serveErr })
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if c, err := rpc.Dial(socket); err == nil {
-			c.Close()
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	dialUntilReady(t, socket).Close()
 
 	t.Setenv("BUNKER_SOCKET", socket)
 
@@ -165,14 +158,7 @@ func startRenderTestDaemon(t *testing.T, item core.Item, health *core.HealthTrac
 	go func() { serveErr <- srv.Serve(ctx, socket) }()
 	t.Cleanup(func() { cancel(); <-serveErr })
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if c, err := rpc.Dial(socket); err == nil {
-			c.Close()
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	dialUntilReady(t, socket).Close()
 	t.Setenv("BUNKER_SOCKET", socket)
 }
 

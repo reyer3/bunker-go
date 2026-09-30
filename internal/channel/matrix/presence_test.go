@@ -10,8 +10,6 @@ import (
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
-
-	"github.com/reyer3/bunker-go/internal/core"
 )
 
 // TestAdapterRunTracksTypingFromMTyping covers K3's "Matrix typing
@@ -35,25 +33,23 @@ func TestAdapterRunTracksTypingFromMTyping(t *testing.T) {
 		},
 	}
 
-	srv, _ := newFakeHomeserver(t, []*mautrix.RespSync{firstSync})
+	srv, state := newFakeHomeserver(t, []*mautrix.RespSync{firstSync})
 	adapter := newTestAdapter(t, srv, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- adapter.Run(ctx, newMemSink()) }()
 
-	deadline := time.Now().Add(5 * time.Second)
-	var got core.Presence
-	for time.Now().Before(deadline) {
-		p, err := adapter.Presence(context.Background(), string(room))
-		if err != nil {
-			t.Fatalf("Presence: %v", err)
-		}
-		if p.State == "typing" {
-			got = p
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
+	// The second /sync request means the first response (with the typing
+	// event) was fully handled.
+	select {
+	case <-state.secondSync:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the first /sync response to be processed")
+	}
+	got, err := adapter.Presence(context.Background(), string(room))
+	if err != nil {
+		t.Fatalf("Presence: %v", err)
 	}
 	cancel()
 	if err := <-done; !errors.Is(err, context.Canceled) {

@@ -54,17 +54,13 @@ func TestSyncStoresSearchableBodyWithoutSeen(t *testing.T) {
 	go func() { done <- adapter.Run(ctx, st) }()
 
 	var found []core.Item
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	pollUntil(5*time.Second, func() bool {
 		found, err = st.List(context.Background(), core.Filter{Query: "factura septiembre"})
 		if err != nil {
 			t.Fatalf("List: %v", err)
 		}
-		if len(found) > 0 {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		return len(found) > 0
+	})
 	cancel()
 	<-done
 
