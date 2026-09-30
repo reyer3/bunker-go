@@ -16,7 +16,8 @@ import (
 const importKeysUsage = `bunker import-keys <channel> <account> <file> [flags]
 
 Channels:
-  matrix <account> <file> [--passphrase-stdin]   import an Element megolm
+  matrix <account> <file> [--passphrase-stdin] [--json]
+                                                  import an Element megolm
                                                   key export; prompts for
                                                   the passphrase on the
                                                   terminal (no echo)
@@ -48,20 +49,19 @@ func cmdImportKeys(ctx context.Context, cfg *config.Config, args []string, stdin
 func cmdImportKeysMatrix(ctx context.Context, cfg *config.Config, accountName, file string, flagArgs []string, stdin *os.File, stdout, stderr io.Writer) int {
 	fs := newFlagSet("import-keys matrix", stderr)
 	passphraseStdin := fs.Bool("passphrase-stdin", false, "read the export passphrase from stdin instead of prompting on the terminal")
+	jsonOut := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(flagArgs); err != nil {
 		return 2
 	}
 
 	acc, ok := findAccount(cfg, "matrix", accountName)
 	if !ok {
-		fmt.Fprintf(stderr, "error: no %q account named %q in config\n", "matrix", accountName)
-		return 1
+		return fail(*jsonOut, stdout, stderr, fmt.Errorf("no %q account named %q in config", "matrix", accountName))
 	}
 
 	data, err := os.ReadFile(file)
 	if err != nil {
-		fmt.Fprintln(stderr, "error: read key export file:", err)
-		return 1
+		return fail(*jsonOut, stdout, stderr, fmt.Errorf("read key export file: %w", err))
 	}
 
 	var passphrase string
@@ -71,14 +71,16 @@ func cmdImportKeysMatrix(ctx context.Context, cfg *config.Config, accountName, f
 		passphrase, err = readPassphraseFromTerminal(stdin, stderr, "Export passphrase: ")
 	}
 	if err != nil {
-		fmt.Fprintln(stderr, "error: read passphrase:", err)
-		return 1
+		return fail(*jsonOut, stdout, stderr, fmt.Errorf("read passphrase: %w", err))
 	}
 
 	result, err := matrixImportKeyExportFunc(ctx, acc, passphrase, data)
 	if err != nil {
-		fmt.Fprintln(stderr, "error:", err)
-		return 1
+		return fail(*jsonOut, stdout, stderr, err)
+	}
+	if *jsonOut {
+		writeJSON(stdout, map[string]any{"new": result.New, "already_known": result.AlreadyKnown, "failed": result.Failed, "total": result.Total})
+		return 0
 	}
 	fmt.Fprintf(stdout, "imported %d new, %d already known", result.New, result.AlreadyKnown)
 	if result.Failed > 0 {

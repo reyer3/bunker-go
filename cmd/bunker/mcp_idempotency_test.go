@@ -109,13 +109,13 @@ func TestMCPSendRetryAfterTimeoutSendsOnce(t *testing.T) {
 		t.Fatalf("retry: %v %s", out, toolText(res))
 	}
 	receipt, _ := out["receipt"].(map[string]any)
-	if receipt["ID"] != "R1" || receipt["replayed"] != true {
+	if receipt["id"] != "R1" || receipt["replayed"] != true {
 		t.Fatalf("retry receipt = %v, want the first send's, replayed", receipt)
 	}
 
 	// And once more after it finished.
 	_, out = callTool(t, s, "send", args)
-	if receipt, _ := out["receipt"].(map[string]any); receipt["ID"] != "R1" {
+	if receipt, _ := out["receipt"].(map[string]any); receipt["id"] != "R1" {
 		t.Fatalf("third call receipt = %v", receipt)
 	}
 	if n := adapter.calls.Load(); n != 1 {

@@ -111,7 +111,7 @@ type searchParams struct {
 }
 
 // readParams is MethodRead's params: fetch item ID's full body and,
-// unless MarkReceipt is false (the CLI's --no-receipt), mark it read on
+// only when MarkReceipt is true (the CLI's --mark-read), mark it read on
 // the channel itself when the adapter supports it (T13c).
 type readParams struct {
 	ID          string `json:"id"`

@@ -164,9 +164,9 @@ type Outgoing struct {
 
 // Receipt confirms a write op actually reached the channel.
 type Receipt struct {
-	ID      string
-	Channel Channel
-	At      time.Time
+	ID      string    `json:"id"`
+	Channel Channel   `json:"channel"`
+	At      time.Time `json:"at"`
 	// Recipients lists this send/reply's outcome for every fan-out
 	// recipient (see MultiRecipientSender and Service.Send/Reply): one
 	// entry per Outgoing.To address when the adapter needed N sequential
@@ -184,9 +184,9 @@ type Receipt struct {
 // Error is the message text, not an error value, so it survives the JSON
 // boundary; it is empty on success.
 type RecipientResult struct {
-	To      string
-	Receipt Receipt
-	Error   string `json:"error,omitempty"`
+	To      string  `json:"to"`
+	Receipt Receipt `json:"receipt"`
+	Error   string  `json:"error,omitempty"`
 }
 
 // Sender is an optional capability: adapters that can send/reply implement
@@ -255,9 +255,9 @@ type ThreadReader interface {
 // sniffing is inconclusive) and size in bytes. It never carries the
 // file's bytes.
 type AttachmentInfo struct {
-	Name string
-	MIME string
-	Size int64
+	Name string `json:"name"`
+	MIME string `json:"mime"`
+	Size int64  `json:"size"`
 }
 
 // AttachmentPolicy is what a MediaSender declares it accepts. MaxBytes
@@ -480,36 +480,36 @@ type PageLister interface {
 // Plan describes what a write op would do (or did). dryRun calls return it
 // alone; real calls return it alongside the Receipt.
 type Plan struct {
-	Action  string
-	Channel Channel
-	Account string
-	Target  string
+	Action  string  `json:"action"`
+	Channel Channel `json:"channel"`
+	Account string  `json:"account"`
+	Target  string  `json:"target"`
 	// Cc lists the Cc recipients of a send/reply, kept separate from
 	// Target (which lists To) so a JSON consumer that only reads Target
 	// keeps working unchanged. Empty for actions that carry no Cc.
-	Cc []string
+	Cc []string `json:"cc,omitempty"`
 	// Subject is the message subject shown for operator/approval
 	// visibility: for send, out.Subject as given (empty when none); for
 	// reply, the original item's subject with a "Re: " prefix computed by
 	// Service (empty when the original item carries no subject, e.g.
 	// WhatsApp/Matrix). It never changes what an adapter actually
 	// transmits.
-	Subject string
-	Preview string
+	Subject string `json:"subject,omitempty"`
+	Preview string `json:"preview"`
 	// Media lists the local attachment paths a send/reply would deliver
 	// (or did). Empty for actions that carry no attachment. Kept
 	// alongside Attachments for compatibility.
-	Media []string
+	Media []string `json:"media,omitempty"`
 	// Attachments lists name/MIME/size for each attachment in Media,
 	// computed and validated against the adapter's AttachmentPolicy
 	// before any upload. Empty for actions with no attachments.
-	Attachments []AttachmentInfo
+	Attachments []AttachmentInfo `json:"attachments,omitempty"`
 	// Recipients lists every To address this send/reply reaches, in
 	// order — one entry whether the adapter addressed everyone with a
 	// single native call (mail) or Service fanned out N sequential
 	// single-recipient calls (WhatsApp, Matrix). The CLI's human output
 	// iterates this instead of Target for "to [...]" display (T13g).
-	Recipients []string
+	Recipients []string `json:"recipients,omitempty"`
 	// FanoutPauseMin/Max is the total inter-recipient pause budget for a
 	// fan-out send (len(Recipients) > 1 on an adapter without
 	// MultiRecipientSender): (len(Recipients)-1) pauses, each within the
@@ -517,8 +517,10 @@ type Plan struct {
 	// default). Zero for a native multi-recipient or single-recipient
 	// send. It does not include each adapter's own per-message
 	// composing/typing time, which core has no visibility into.
-	FanoutPauseMin time.Duration
-	FanoutPauseMax time.Duration
+	//
+	// Both serialize as integer nanoseconds (time.Duration's JSON form).
+	FanoutPauseMin time.Duration `json:"fanout_pause_min,omitempty"`
+	FanoutPauseMax time.Duration `json:"fanout_pause_max,omitempty"`
 }
 
 // Store is the read/write persistence port the Service depends on. It

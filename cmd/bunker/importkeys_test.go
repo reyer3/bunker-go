@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -127,5 +129,37 @@ func TestCmdImportKeysUnknownAccountErrors(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "ghost") {
 		t.Fatalf("stderr = %q, want it to name the missing account", stderr.String())
+	}
+}
+
+func TestCmdImportKeysMatrixJSON(t *testing.T) {
+	origImport := matrixImportKeyExportFunc
+	defer func() { matrixImportKeyExportFunc = origImport }()
+	matrixImportKeyExportFunc = func(context.Context, config.Account, string, []byte) (matrix.ImportKeyResult, error) {
+		return matrix.ImportKeyResult{New: 3, AlreadyKnown: 7, Failed: 1, Total: 11}, nil
+	}
+	file := filepath.Join(t.TempDir(), "export.txt")
+	if err := os.WriteFile(file, []byte("fake"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := cmdImportKeys(context.Background(), testConfig(), []string{"matrix", "work", file, "--passphrase-stdin", "--json"}, pipedStdin(t, "pw\n"), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var got map[string]int
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal %q: %v", stdout.String(), err)
+	}
+	want := map[string]int{"new": 3, "already_known": 7, "failed": 1, "total": 11}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("json = %v, want %v", got, want)
+	}
+
+	stdout.Reset()
+	code = cmdImportKeys(context.Background(), testConfig(), []string{"matrix", "work", filepath.Join(t.TempDir(), "missing"), "--passphrase-stdin", "--json"}, pipedStdin(t, "pw\n"), &stdout, &stderr)
+	if code != 1 || !strings.Contains(stdout.String(), `"error"`) {
+		t.Fatalf("code = %d stdout = %q, want exit 1 with a JSON error", code, stdout.String())
 	}
 }
