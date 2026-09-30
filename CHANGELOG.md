@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.13.0](https://github.com/reyer3/bunker-go/compare/v0.12.0...v0.13.0) (2026-09-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* **cli:** `bunker read` no longer marks the item read unless --mark-read is passed. Plan/Receipt JSON keys are now snake_case (id, recipients, fanout_pause_min, ...) and empty optional fields are omitted.
+
+### Features
+
+* **cli:** consistent JSON output and read without side effects ([#121](https://github.com/reyer3/bunker-go/issues/121)) ([e5e5394](https://github.com/reyer3/bunker-go/commit/e5e539479d2137660ed4e28b858fb67428afa720))
+* **tui:** command palette with Ctrl+K ([#117](https://github.com/reyer3/bunker-go/issues/117)) ([87e0776](https://github.com/reyer3/bunker-go/commit/87e0776b2cb01e05f3068c961f662c24189928bc))
+* **tui:** voice calls — place, answer, reject, hang up ([#118](https://github.com/reyer3/bunker-go/issues/118)) ([e84aca4](https://github.com/reyer3/bunker-go/commit/e84aca491fcc76186208461c8c8780658903996c))
+
+
+### Bug Fixes
+
+* **matrix:** Send returns the item id, so sent messages can be edited at once ([#115](https://github.com/reyer3/bunker-go/issues/115)) ([13e8e64](https://github.com/reyer3/bunker-go/commit/13e8e64001c282d339036c43144c4a714cfeb231))
+* **tui:** refresh an open chat so incoming messages show up ([#119](https://github.com/reyer3/bunker-go/issues/119)) ([c1bd51d](https://github.com/reyer3/bunker-go/commit/c1bd51d875e80724b2322de42dcbb3cf1dd217b9))
+
 ## [0.12.0](https://github.com/reyer3/bunker-go/compare/v0.11.0...v0.12.0) (2026-09-29)
 
 
