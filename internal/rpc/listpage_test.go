@@ -35,16 +35,9 @@ func startListPageServer(t *testing.T, items ...core.Item) *rpc.Client {
 	go func() { serveErr <- rpc.NewServer(svc).Serve(ctx, socket) }()
 	t.Cleanup(func() { cancel(); <-serveErr })
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if c, err := rpc.Dial(socket); err == nil {
-			t.Cleanup(func() { c.Close() })
-			return c
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatal("server never became reachable")
-	return nil
+	c := dialUntilReady(t, socket)
+	t.Cleanup(func() { c.Close() })
+	return c
 }
 
 // TestClientListPageOverSocket drives the query language and cursor

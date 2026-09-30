@@ -64,6 +64,9 @@ func (c *replyClient) Send(ctx context.Context, out core.Outgoing, dryRun bool) 
 		<-c.block
 	}
 	if c.delay > 0 {
+		// A slow daemon is the thing under test (in-flight state,
+		// deadlines), so a real delay is the fixture; same for the
+		// other delay sleeps below.
 		time.Sleep(c.delay)
 	}
 	if dryRun {

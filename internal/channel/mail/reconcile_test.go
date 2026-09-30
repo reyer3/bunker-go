@@ -169,16 +169,15 @@ func TestAdapterRunObservesKeywordChangeFromAnotherClient(t *testing.T) {
 		t.Fatalf("store keyword on second client: %v", err)
 	}
 
-	deadline := time.Now().Add(5 * time.Second)
 	var got core.Item
-	for time.Now().Before(deadline) {
+	pollUntil(5*time.Second, func() bool {
 		it, err := sink.getItem(seed.ID)
 		if err == nil && len(it.Labels) == 1 && it.Labels[0] == "bunker-test" {
 			got = it
-			break
+			return true
 		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		return false
+	})
 	if got.ID == "" {
 		final, _ := sink.getItem(seed.ID)
 		t.Fatalf("stored item's Labels never picked up the external keyword, last seen = %v", final.Labels)

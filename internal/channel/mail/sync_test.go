@@ -855,16 +855,13 @@ func TestAdapterRunPeriodicSeenReconcileAppliesChangeMadeElsewhere(t *testing.T)
 	markSeenElsewhere(t, addr, "INBOX", uid)
 	_ = uidValidity
 
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		item, err := sink.getItem(seed.ID)
-		if err == nil && !item.Unread {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for the periodic reconcile to clear %s (last item=%+v, err=%v)", seed.ID, item, err)
-		}
-		time.Sleep(5 * time.Millisecond)
+	var item core.Item
+	var getErr error
+	if !pollUntil(5*time.Second, func() bool {
+		item, getErr = sink.getItem(seed.ID)
+		return getErr == nil && !item.Unread
+	}) {
+		t.Fatalf("timed out waiting for the periodic reconcile to clear %s (last item=%+v, err=%v)", seed.ID, item, getErr)
 	}
 
 	cancel()

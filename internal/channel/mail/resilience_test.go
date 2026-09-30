@@ -78,10 +78,7 @@ func TestAdapterRunResetsBackoffAfterHealthySession(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- adapter.Run(ctx, sink) }()
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && len(attemptsMu.seen()) < 3 {
-		time.Sleep(time.Millisecond)
-	}
+	pollUntil(2*time.Second, func() bool { return len(attemptsMu.seen()) >= 3 })
 	cancel()
 	select {
 	case <-done:
@@ -137,10 +134,7 @@ func TestAdapterRunLogsRunOnceErrorWithChannelAccountAttrs(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- adapter.Run(ctx, sink) }()
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && !strings.Contains(logBuf.String(), "boom-dial") {
-		time.Sleep(time.Millisecond)
-	}
+	pollUntil(2*time.Second, func() bool { return strings.Contains(logBuf.String(), "boom-dial") })
 	cancel()
 	<-done
 

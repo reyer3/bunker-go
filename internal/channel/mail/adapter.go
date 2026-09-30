@@ -47,6 +47,10 @@ type Adapter struct {
 	// folderPollInterval is how often Run polls the synced folders other
 	// than INBOX (#52); defaultFolderPollInterval, shortened by tests.
 	folderPollInterval time.Duration
+	// onFolderPoll, when set, runs after each completed folder poll pass.
+	// Tests use it to know a pass ended, so they can assert that a
+	// message was NOT synced without sleeping for "a few polls".
+	onFolderPoll func()
 
 	// logger receives Run's lifecycle logging (R2): a runOnce failure,
 	// previously discarded, is logged at error level with channel/

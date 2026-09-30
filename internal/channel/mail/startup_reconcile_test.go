@@ -62,13 +62,10 @@ func TestAdapterRunDropsStaleStoredItemOnStartup(t *testing.T) {
 
 	waitForUpsert(t, sink, 5*time.Second) // "Keep" from the initial sync
 
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := sink.getItem(staleID); err != nil {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	pollUntil(5*time.Second, func() bool {
+		_, err := sink.getItem(staleID)
+		return err != nil
+	})
 	if _, err := sink.getItem(staleID); err == nil {
 		t.Errorf("stale item %s is still stored after Run started", staleID)
 	}
@@ -111,16 +108,15 @@ func TestAdapterRunRefreshesSeenForRemainingStoredItems(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- adapter.Run(ctx, sink) }()
 
-	deadline := time.Now().Add(5 * time.Second)
 	var refreshed core.Item
-	for time.Now().Before(deadline) {
+	pollUntil(5*time.Second, func() bool {
 		it, err := sink.getItem(id)
 		if err == nil && !it.Unread {
 			refreshed = it
-			break
+			return true
 		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		return false
+	})
 	if refreshed.ID == "" {
 		t.Fatal("stored item's Unread was never refreshed to false")
 	}
@@ -160,13 +156,10 @@ func TestAdapterRunDropsEveryStoredItemOnUIDValidityChange(t *testing.T) {
 
 	waitForUpsert(t, sink, 5*time.Second) // "Keep" from the initial sync
 
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := sink.getItem(staleID); err != nil {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	pollUntil(5*time.Second, func() bool {
+		_, err := sink.getItem(staleID)
+		return err != nil
+	})
 	if _, err := sink.getItem(staleID); err == nil {
 		t.Errorf("stored item %s with a stale UIDVALIDITY is still present", staleID)
 	}
@@ -206,16 +199,15 @@ func TestAdapterRunRefreshesLabelsForRemainingStoredItemsOnStartup(t *testing.T)
 	done := make(chan error, 1)
 	go func() { done <- adapter.Run(ctx, sink) }()
 
-	deadline := time.Now().Add(5 * time.Second)
 	var refreshed core.Item
-	for time.Now().Before(deadline) {
+	pollUntil(5*time.Second, func() bool {
 		it, err := sink.getItem(id)
 		if err == nil && len(it.Labels) == 1 && it.Labels[0] == "bunker-test" {
 			refreshed = it
-			break
+			return true
 		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		return false
+	})
 	if refreshed.ID == "" {
 		final, _ := sink.getItem(id)
 		t.Fatalf("stored item's Labels were never refreshed from the server keyword, last seen = %v", final.Labels)

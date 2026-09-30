@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/reyer3/bunker-go/internal/core"
 	"github.com/reyer3/bunker-go/internal/rpc"
@@ -38,14 +37,7 @@ func TestRunDialsRealDaemonOverSocket(t *testing.T) {
 	go func() { serveErr <- srv.Serve(ctx, socket) }()
 	t.Cleanup(func() { cancel(); <-serveErr })
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if c, dialErr := rpc.Dial(socket); dialErr == nil {
-			c.Close()
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	dialUntilReady(t, socket).Close()
 	t.Setenv("BUNKER_SOCKET", socket)
 
 	stdoutR, stdoutW, err := os.Pipe()

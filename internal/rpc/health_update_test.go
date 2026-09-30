@@ -38,16 +38,8 @@ func serveHealth(t *testing.T, updates core.UpdateSource) string {
 	done := make(chan struct{})
 	go func() { rpc.NewServer(svc).Serve(ctx, socket); close(done) }()
 	t.Cleanup(func() { cancel(); <-done })
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if c, err := rpc.Dial(socket); err == nil {
-			c.Close()
-			return socket
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatal("server never became reachable")
-	return ""
+	dialUntilReady(t, socket).Close()
+	return socket
 }
 
 func TestHealthReportCarriesUpdateStatus(t *testing.T) {

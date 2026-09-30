@@ -60,7 +60,7 @@ func TestHistorySyncSkipsConversationWithNoUnread(t *testing.T) {
 
 	emitHistorySync(cli, syntheticConversation("1234@s.whatsapp.net", 0, false, "a", "b", "c"))
 
-	settle(t)
+	// emit is synchronous: the handler has already returned.
 	if got := len(sink.items()); got != 0 {
 		t.Fatalf("items imported = %d, want 0 for unreadCount=0", got)
 	}
@@ -137,7 +137,7 @@ func TestHistorySyncSkipsArchivedConversation(t *testing.T) {
 
 	emitHistorySync(cli, syntheticConversation("1234@s.whatsapp.net", 3, true, "a", "b", "c"))
 
-	settle(t)
+	// emit is synchronous: the handler has already returned.
 	if got := len(sink.items()); got != 0 {
 		t.Fatalf("items imported = %d, want 0 for an archived conversation", got)
 	}
@@ -156,18 +156,10 @@ func TestHistorySyncSkipsStatusBroadcast(t *testing.T) {
 
 	emitHistorySync(cli, syntheticConversation("status@broadcast", 5, false, "a", "b", "c"))
 
-	settle(t)
+	// emit is synchronous: the handler has already returned.
 	if got := len(sink.items()); got != 0 {
 		t.Fatalf("items imported = %d, want 0 for status@broadcast", got)
 	}
-}
-
-// settle gives an async handler a moment to (not) act, for asserting a
-// negative outcome without a fixed race-prone sleep elsewhere in the
-// call path to check against.
-func settle(t *testing.T) {
-	t.Helper()
-	time.Sleep(150 * time.Millisecond)
 }
 
 func TestHistorySyncSkipsNewsletterConversation(t *testing.T) {
@@ -183,7 +175,7 @@ func TestHistorySyncSkipsNewsletterConversation(t *testing.T) {
 
 	emitHistorySync(cli, syntheticConversation("120363000000000001@newsletter", 3, false, "a", "b", "c"))
 
-	settle(t)
+	// emit is synchronous: the handler has already returned.
 	if got := len(sink.items()); got != 0 {
 		t.Fatalf("items imported = %d, want 0 for a newsletter conversation", got)
 	}

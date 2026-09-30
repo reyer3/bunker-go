@@ -8,9 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/reyer3/bunker-go/internal/rpc"
 )
 
 // runCLI drives the real run() entry point (env-resolved socket -> rpc.Dial
@@ -69,14 +66,7 @@ func TestEndToEndCLIAgainstFakeDaemon(t *testing.T) {
 		}
 	})
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if c, err := rpc.Dial(socket); err == nil {
-			c.Close()
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	dialUntilReady(t, socket).Close()
 
 	// list --json: --fake seeds one demo item per channel, pushed
 	// asynchronously by each adapter's Run loop, so poll until all three
@@ -88,8 +78,7 @@ func TestEndToEndCLIAgainstFakeDaemon(t *testing.T) {
 	}
 	var out string
 	var code int
-	deadline = time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
+	pollUntil(daemonStartBudget, func() bool {
 		code, out = runCLI(t, []string{"list", "--json"})
 		if code != 0 {
 			t.Fatalf("list --json exit code = %d", code)
@@ -97,11 +86,8 @@ func TestEndToEndCLIAgainstFakeDaemon(t *testing.T) {
 		if err := json.Unmarshal([]byte(out), &listResp); err != nil {
 			t.Fatalf("unmarshal list output %q: %v", out, err)
 		}
-		if len(listResp.Items) == 3 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+		return len(listResp.Items) == 3
+	})
 	if len(listResp.Items) != 3 {
 		t.Fatalf("list --json returned %d items, want 3 (one per demo channel): %s", len(listResp.Items), out)
 	}

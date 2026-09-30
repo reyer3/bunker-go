@@ -60,17 +60,9 @@ func startTestServer(t *testing.T) (*rpc.Client, *fake.Adapter, string) {
 		<-serveErr
 	})
 
-	// Wait for the socket file to appear instead of a fixed sleep.
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if c, err := rpc.Dial(socket); err == nil {
-			t.Cleanup(func() { c.Close() })
-			return c, adapter, socket
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatal("server never became reachable")
-	return nil, nil, ""
+	c := dialUntilReady(t, socket)
+	t.Cleanup(func() { c.Close() })
+	return c, adapter, socket
 }
 
 func TestClientListAndGet(t *testing.T) {
@@ -250,18 +242,7 @@ func TestClientDownloadWritesFileViaDaemon(t *testing.T) {
 	defer cancel()
 	go srv.Serve(ctx, socket)
 
-	var client *rpc.Client
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if c, err := rpc.Dial(socket); err == nil {
-			client = c
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	if client == nil {
-		t.Fatal("server never became reachable")
-	}
+	client := dialUntilReady(t, socket)
 	defer client.Close()
 
 	dest := filepath.Join(dir, "out.txt")
@@ -302,18 +283,7 @@ func TestClientReplyUnsupportedCapabilityReturnsErrUnsupported(t *testing.T) {
 	defer cancel()
 	go srv.Serve(ctx, socket)
 
-	var client *rpc.Client
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if c, err := rpc.Dial(socket); err == nil {
-			client = c
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	if client == nil {
-		t.Fatal("server never became reachable")
-	}
+	client := dialUntilReady(t, socket)
 	defer client.Close()
 
 	_, _, err = client.Reply(context.Background(), item.ID, "x", nil, nil, true)
@@ -345,18 +315,7 @@ func TestClientAvatarWritesGeneratedFallbackViaDaemon(t *testing.T) {
 	defer cancel()
 	go srv.Serve(ctx, socket)
 
-	var client *rpc.Client
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if c, err := rpc.Dial(socket); err == nil {
-			client = c
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	if client == nil {
-		t.Fatal("server never became reachable")
-	}
+	client := dialUntilReady(t, socket)
 	defer client.Close()
 
 	res, err := client.Avatar(context.Background(), core.ChannelMail, "cl", "thread-1")
@@ -563,18 +522,7 @@ func TestClientPresenceTypingAndKeepaliveOverSocket(t *testing.T) {
 	defer cancel()
 	go srv.Serve(ctx, socket)
 
-	var client *rpc.Client
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if c, err := rpc.Dial(socket); err == nil {
-			client = c
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	if client == nil {
-		t.Fatal("server never became reachable")
-	}
+	client := dialUntilReady(t, socket)
 	defer client.Close()
 
 	thread := "5511999999999@s.whatsapp.net"
@@ -628,18 +576,7 @@ func TestClientHealthReturnsTrackerSnapshotOverSocket(t *testing.T) {
 	defer cancel()
 	go srv.Serve(ctx, socket)
 
-	var client *rpc.Client
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if c, err := rpc.Dial(socket); err == nil {
-			client = c
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	if client == nil {
-		t.Fatal("server never became reachable")
-	}
+	client := dialUntilReady(t, socket)
 	defer client.Close()
 
 	adapters, err := client.Health(context.Background())
@@ -649,4 +586,21 @@ func TestClientHealthReturnsTrackerSnapshotOverSocket(t *testing.T) {
 	if len(adapters) != 1 || adapters[0].Channel != core.ChannelMail || adapters[0].Account != "cl" || adapters[0].State != core.AdapterConnected {
 		t.Fatalf("Health() = %+v, want one connected mail/cl entry", adapters)
 	}
+}
+
+// dialUntilReady polls until the server at socket accepts a connection.
+// Serve gives no readiness signal, so polling is the only option; the
+// budget is generous because the pure-Go SQLite store opens slowly under
+// -race on a busy CI runner, and a timeout fails loudly.
+func dialUntilReady(t *testing.T, socket string) *rpc.Client {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if c, err := rpc.Dial(socket); err == nil {
+			return c
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("server never became reachable")
+	return nil
 }

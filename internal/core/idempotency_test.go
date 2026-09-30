@@ -19,6 +19,9 @@ type gatedSender struct {
 	calls atomic.Int32
 	gate  chan struct{} // nil: never blocks
 	fail  atomic.Bool
+	// entered, when non-nil, gets a signal for every call that reaches
+	// Send, so a test can wait for a send to be in flight without polling.
+	entered chan struct{}
 }
 
 func (g *gatedSender) Channel() core.Channel                      { return core.ChannelWhatsApp }
@@ -27,6 +30,12 @@ func (g *gatedSender) Run(ctx context.Context, _ core.Sink) error { return nil }
 
 func (g *gatedSender) Send(ctx context.Context, out core.Outgoing) (core.Receipt, error) {
 	n := g.calls.Add(1)
+	if g.entered != nil {
+		select {
+		case g.entered <- struct{}{}:
+		default:
+		}
+	}
 	if g.gate != nil {
 		<-g.gate
 	}
@@ -99,7 +108,7 @@ func TestIdempotencyKeyReusedForDifferentMessageFails(t *testing.T) {
 }
 
 func TestIdempotencyConcurrentDuplicatesSendOnce(t *testing.T) {
-	sender := &gatedSender{gate: make(chan struct{})}
+	sender := &gatedSender{gate: make(chan struct{}), entered: make(chan struct{}, 1)}
 	svc := idempotencyService(t, sender)
 	ctx := core.WithIdempotencyKey(context.Background(), "k1")
 
@@ -116,9 +125,10 @@ func TestIdempotencyConcurrentDuplicatesSendOnce(t *testing.T) {
 	}
 	// Let the first send reach the adapter before releasing it, so the
 	// others find it in flight.
-	for sender.calls.Load() == 0 {
-		time.Sleep(time.Millisecond)
-	}
+	<-sender.entered
+	// Waiting for the other callers to block on the in-flight send is not
+	// observable from outside, so give them a moment; correctness does
+	// not depend on it (a late caller replays the finished receipt).
 	time.Sleep(20 * time.Millisecond)
 	close(sender.gate)
 	wg.Wait()
@@ -144,7 +154,7 @@ func TestIdempotencyConcurrentDuplicatesSendOnce(t *testing.T) {
 }
 
 func TestIdempotencyWaiterGivesUpWithItsContext(t *testing.T) {
-	sender := &gatedSender{gate: make(chan struct{})}
+	sender := &gatedSender{gate: make(chan struct{}), entered: make(chan struct{}, 1)}
 	svc := idempotencyService(t, sender)
 	ctx := core.WithIdempotencyKey(context.Background(), "k1")
 
@@ -153,9 +163,7 @@ func TestIdempotencyWaiterGivesUpWithItsContext(t *testing.T) {
 		_, _, err := svc.Send(ctx, hola(), false)
 		done <- err
 	}()
-	for sender.calls.Load() == 0 {
-		time.Sleep(time.Millisecond)
-	}
+	<-sender.entered
 	short, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
 	defer cancel()
 	if _, _, err := svc.Send(short, hola(), false); !errors.Is(err, context.DeadlineExceeded) {

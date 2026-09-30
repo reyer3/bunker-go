@@ -21,15 +21,32 @@ const daemonStartBudget = 15 * time.Second
 // budget runs out, so tests never sleep a fixed guess.
 func dialUntilReady(t *testing.T, socket string) *rpc.Client {
 	t.Helper()
-	deadline := time.Now().Add(daemonStartBudget)
-	for time.Now().Before(deadline) {
-		if c, err := rpc.Dial(socket); err == nil {
-			return c
+	var client *rpc.Client
+	if !pollUntil(daemonStartBudget, func() bool {
+		c, err := rpc.Dial(socket)
+		client = c
+		return err == nil
+	}) {
+		t.Fatal("daemon never became reachable")
+	}
+	return client
+}
+
+// pollUntil polls cond until it holds (true) or timeout passes (false).
+// The code under test runs on its own goroutines and gives no event to
+// block on, so polling with a deadline is the synchronization; the short
+// interval only bounds latency.
+func pollUntil(timeout time.Duration, cond func() bool) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if cond() {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return false
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatal("daemon never became reachable")
-	return nil
 }
 
 func TestRunDaemonFakeSeedsDemoItemsAndServesRPC(t *testing.T) {
@@ -48,18 +65,14 @@ func TestRunDaemonFakeSeedsDemoItemsAndServesRPC(t *testing.T) {
 	// socket accepting connections does not by itself mean every seed has
 	// landed yet: poll Counts until all three demo items show up.
 	var counts map[core.Channel]map[string]int
-	deadline := time.Now().Add(daemonStartBudget)
-	for time.Now().Before(deadline) {
+	pollUntil(daemonStartBudget, func() bool {
 		var err error
 		counts, err = client.Counts(context.Background())
 		if err != nil {
 			t.Fatalf("Counts: %v", err)
 		}
-		if counts["mail"]["demo"] == 1 && counts["whatsapp"]["demo"] == 1 && counts["matrix"]["demo"] == 1 {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+		return counts["mail"]["demo"] == 1 && counts["whatsapp"]["demo"] == 1 && counts["matrix"]["demo"] == 1
+	})
 	if counts["mail"]["demo"] != 1 || counts["whatsapp"]["demo"] != 1 || counts["matrix"]["demo"] != 1 {
 		t.Fatalf("counts = %+v, want 1 unread demo item per channel", counts)
 	}

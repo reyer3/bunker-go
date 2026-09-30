@@ -98,6 +98,9 @@ func TestMCPSendRetryAfterTimeoutSendsOnce(t *testing.T) {
 	// retry waits for it and gets its receipt instead of sending again.
 	mcpSendTimeout = 5 * time.Second
 	go func() {
+		// The retry blocking on the in-flight send is not observable, so
+		// give it a moment; the outcome holds either way (a retry that
+		// arrives after the release replays the finished receipt).
 		time.Sleep(20 * time.Millisecond)
 		close(adapter.release)
 	}()

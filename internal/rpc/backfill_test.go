@@ -67,16 +67,9 @@ func startBackfillSearchTestServer(t *testing.T) (*rpc.Client, *backfillSearchAd
 		<-serveErr
 	})
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if c, err := rpc.Dial(socket); err == nil {
-			t.Cleanup(func() { c.Close() })
-			return c, adapter
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatal("server never became reachable")
-	return nil, nil
+	c := dialUntilReady(t, socket)
+	t.Cleanup(func() { c.Close() })
+	return c, adapter
 }
 
 func TestClientBackfillOverSocket(t *testing.T) {

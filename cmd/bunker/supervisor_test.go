@@ -94,12 +94,8 @@ var _ core.Adapter = (*scriptedAdapter)(nil)
 
 func waitForRunCalls(t *testing.T, a *scriptedAdapter, want int) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if a.runCalls() >= want {
-			return
-		}
-		time.Sleep(time.Millisecond)
+	if pollUntil(2*time.Second, func() bool { return a.runCalls() >= want }) {
+		return
 	}
 	t.Fatalf("runCalls = %d, want at least %d", a.runCalls(), want)
 }
@@ -244,13 +240,23 @@ func TestAdapterSupervisorLogsRestartWithChannelAccountAttrs(t *testing.T) {
 func TestAdapterSupervisorTracksHealthTransitions(t *testing.T) {
 	a := &scriptedAdapter{channel: core.ChannelWhatsApp, account: "demo", errs: []error{errors.New("boom")}}
 	health := core.NewHealthTracker()
+	// The backoff wait is held open until the test has seen the backoff
+	// state, so polling cannot miss a state that would otherwise last
+	// only a few milliseconds.
+	backoffGate := make(chan time.Time)
+	const grace = 100 * time.Millisecond
 	sup := &adapterSupervisor{
-		now:          time.Now,
-		after:        time.After,
+		now: time.Now,
+		after: func(d time.Duration) <-chan time.Time {
+			if d == grace {
+				return time.After(d)
+			}
+			return backoffGate
+		},
 		backoff:      func(int) time.Duration { return 5 * time.Millisecond },
 		logger:       slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)),
 		health:       health,
-		connectGrace: 100 * time.Millisecond,
+		connectGrace: grace,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -265,6 +271,8 @@ func TestAdapterSupervisorTracksHealthTransitions(t *testing.T) {
 	if len(snap) != 1 || snap[0].LastError == "" || snap[0].Restarts != 1 {
 		t.Fatalf("health after first failure = %+v, want one backoff entry with Restarts=1 and a LastError", snap)
 	}
+
+	close(backoffGate)
 
 	waitForHealthState(t, health, core.AdapterConnected)
 	snap = health.Snapshot()
@@ -284,13 +292,11 @@ func TestAdapterSupervisorTracksHealthTransitions(t *testing.T) {
 
 func waitForHealthState(t *testing.T, health *core.HealthTracker, want core.AdapterState) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
+	if pollUntil(2*time.Second, func() bool {
 		snap := health.Snapshot()
-		if len(snap) == 1 && snap[0].State == want {
-			return
-		}
-		time.Sleep(2 * time.Millisecond)
+		return len(snap) == 1 && snap[0].State == want
+	}) {
+		return
 	}
 	t.Fatalf("health never reached state %q, snapshot = %+v", want, health.Snapshot())
 }
