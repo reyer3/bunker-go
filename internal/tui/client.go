@@ -43,4 +43,5 @@ type Client interface {
 var (
 	_ Client        = (*rpc.Client)(nil)
 	_ MessageClient = (*rpc.Client)(nil)
+	_ CallClient    = (*rpc.Client)(nil)
 )

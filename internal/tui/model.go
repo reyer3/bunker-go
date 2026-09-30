@@ -327,6 +327,14 @@ type Model struct {
 	lastMessageNotifyAt  time.Time
 	pendingMessageNotify int
 
+	// Voice calls (issue #27, calls.go): the live calls the last poll saw,
+	// whether polling has started, which ringing calls were already
+	// announced, and whether a control request is in flight.
+	calls        []core.Call
+	callsStarted bool
+	callNotified map[string]bool
+	callBusy     bool
+
 	// updateNotice is the "nueva versión" line (issue #105, see
 	// update_notice.go), shown from updateNoticeAt for
 	// updateNoticeDuration; updateNoticed keeps it to once per session.

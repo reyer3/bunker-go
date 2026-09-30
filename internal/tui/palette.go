@@ -142,7 +142,9 @@ func (m Model) paletteCommands() []paletteEntry {
 			return
 		}
 		reason := ""
-		if m.asking {
+		if m.ringingCall() != nil {
+			reason = "suena una llamada: " + key + " la contesta"
+		} else if m.asking {
 			reason = "ya hay una pregunta en curso"
 		} else if id, ok := m.askItemID(); !ok || id == "" {
 			reason = "nada seleccionado"
@@ -216,6 +218,9 @@ func (m Model) paletteCommands() []paletteEntry {
 			}
 		}
 		add("Editar último mensaje", "Alt+E", paletteAlt('e'), edit)
+		if del == "" && m.ringingCall() != nil {
+			del = "suena una llamada: Alt+X la rechaza"
+		}
 		add("Borrar último mensaje", "Alt+X", paletteAlt('x'), del)
 		add("Reaccionar al último mensaje", "Alt++", paletteAlt('+'), react)
 		download := ""
@@ -223,9 +228,33 @@ func (m Model) paletteCommands() []paletteEntry {
 			download = "no hay adjuntos"
 		}
 		add("Descargar último adjunto", "Ctrl+D", tea.KeyMsg{Type: tea.KeyCtrlD}, download)
+		reason := ""
+		if err := m.chatCallBlocked(); err != nil {
+			reason = err.Error()
+		}
+		add("Llamar", "Alt+C", paletteAlt('c'), reason)
 		ask("Alt+A", paletteAlt('a'))
 		add(back, "Esc", esc, "")
 		add("Ayuda", "F1", tea.KeyMsg{Type: tea.KeyF1}, "")
+	}
+	// Answering, rejecting and hanging up replay the same keys the call
+	// banner shows, and are listed only while they apply.
+	// The palette itself is open now, but they run once it is closed.
+	base := m
+	base.palette = nil
+	answer, reject, hangup := base.callKeyNames()
+	replay := func(key string) tea.KeyMsg {
+		if base.callKeysNeedAlt() {
+			return paletteAlt([]rune(key)[0])
+		}
+		return paletteRune([]rune(key)[0])
+	}
+	if m.ringingCall() != nil {
+		add("Contestar llamada", answer, replay(callAnswerKey), "")
+		add("Rechazar llamada", reject, replay(callRejectKey), "")
+	}
+	if m.liveCall() != nil {
+		add("Colgar llamada", hangup, replay(callHangupKey), "")
 	}
 	return out
 }

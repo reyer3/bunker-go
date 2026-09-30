@@ -8,6 +8,10 @@ import (
 )
 
 func (m Model) View() string {
+	return m.withCallBanner(m.baseView())
+}
+
+func (m Model) baseView() string {
 	if m.helpOpen {
 		return m.helpView()
 	}

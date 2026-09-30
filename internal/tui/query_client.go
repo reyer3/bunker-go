@@ -355,6 +355,48 @@ func (c *queryClient) messageAction(ctx context.Context, do func(MessageClient) 
 	return do(mc)
 }
 
+// Calls, PlaceCall and ControlCall are forwarded at most once, like the
+// other writes (a poll simply asks again): placing or answering a call
+// must never be repeated behind the caller's back. A connection without
+// the capability reports core.ErrUnsupported.
+func (c *queryClient) Calls(ctx context.Context) ([]core.Call, error) {
+	var calls []core.Call
+	_, _, err := c.callAction(ctx, func(cc CallClient) (core.Plan, core.Call, error) {
+		var err error
+		calls, err = cc.Calls(ctx)
+		return core.Plan{}, core.Call{}, err
+	})
+	return calls, err
+}
+
+func (c *queryClient) PlaceCall(ctx context.Context, channel core.Channel, account, to string, dryRun bool) (core.Plan, core.Call, error) {
+	return c.callAction(ctx, func(cc CallClient) (core.Plan, core.Call, error) {
+		return cc.PlaceCall(ctx, channel, account, to, dryRun)
+	})
+}
+
+func (c *queryClient) ControlCall(ctx context.Context, id string, action core.CallAction, dryRun bool) (core.Plan, core.Call, error) {
+	return c.callAction(ctx, func(cc CallClient) (core.Plan, core.Call, error) {
+		return cc.ControlCall(ctx, id, action, dryRun)
+	})
+}
+
+func (c *queryClient) callAction(ctx context.Context, do func(CallClient) (core.Plan, core.Call, error)) (core.Plan, core.Call, error) {
+	if err := c.acquire(ctx); err != nil {
+		return core.Plan{}, core.Call{}, err
+	}
+	defer c.release()
+	client, err := c.activeClient()
+	if err != nil {
+		return core.Plan{}, core.Call{}, err
+	}
+	cc, ok := client.(CallClient)
+	if !ok {
+		return core.Plan{}, core.Call{}, fmt.Errorf("tui: calls: %w", core.ErrUnsupported)
+	}
+	return do(cc)
+}
+
 func (c *queryClient) Close() error {
 	c.mu.Lock()
 	if c.closed {
@@ -373,4 +415,5 @@ var (
 	_ Client        = (*queryClient)(nil)
 	_ PageClient    = (*queryClient)(nil)
 	_ MessageClient = (*queryClient)(nil)
+	_ CallClient    = (*queryClient)(nil)
 )

@@ -900,6 +900,36 @@ none). A connected call also shows how long it has been connected:
 ```
  `--json` returns `{"calls": [...]}` with the shape above.
 
+### Voice calls in the TUI
+
+The side panel drives the same calls (`calls`, `call`, `call answer|reject|hangup`
+over the socket), still opt-in per account with `calls = true`. It polls
+`calls` every 3 s (every second while one is live, so the duration counts),
+and only when the daemon connection supports them. Video calls and screen
+sharing are not part of it. Audio still runs on the daemon's machine.
+
+- **Place:** `Alt+C` in a WhatsApp chat (a chat's composer takes every plain
+  key, hence Alt, like `Alt+E`/`Alt+X`). It asks the daemon for a dry-run plan,
+  shows `¿Llamar a «Nombre»? ↵ llamar · Esc cancelar`, and places the call only
+  after `↵`. A group, a non-WhatsApp chat, a call already live or an account
+  without `calls = true` is an error on the chat's last line
+  (`las llamadas no están activadas en esta cuenta · añade calls = true …`),
+  never a silent no-op.
+- **Incoming:** a banner replaces the last line of every view:
+  `📞 Llamada entrante de Ana · a contestar · x rechazar`. `a` answers and `x`
+  rejects. A desktop notification (`Llamada entrante de Ana`) fires once per
+  call, through the same path as new messages (herdr's notifier when present,
+  else OSC 777), without the focus and rate limits messages have.
+- **Active:** the banner becomes `📞 En llamada con Ana · 1:35 · h colgar`
+  (`Llamando a…` / `Conectando con…` before media flows). `h` hangs up.
+- **Keys where you type:** in a chat, the reply/mail editors, the filter and
+  the palette plain keys are text, so the banner shows `Alt+A`, `Alt+X` and
+  `Alt+H` there. The keys act only while they apply: `a`/`x` (and `Alt+A`/`Alt+X`)
+  during a ringing call take precedence over "preguntar a Claude" and, in a
+  chat, "eliminar último mensaje"; `h` does nothing without a live call.
+- **Palette:** `Llamar` (in a chat) and, while they apply, `Contestar llamada`,
+  `Rechazar llamada` and `Colgar llamada`.
+
 ## `bunker unread <id> [--json]`
 
 Puts an item back in the unread inbox.

@@ -41,6 +41,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.chatTempFiles = append(m.chatTempFiles, msg.path)
 		return m.addChatAttachments(msg.path), nil
+	case callsLoadedMsg:
+		return m.handleCallsLoaded(msg)
+	case callTickMsg:
+		return m.handleCallTick()
+	case callControlDoneMsg:
+		return m.handleCallControlDone(msg)
+	case callNotifiedMsg:
+		return m.handleCallNotified(msg)
 	case chatActionPlanMsg:
 		return m.handleChatActionPlan(msg)
 	case chatActionDoneMsg:
@@ -356,7 +364,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m, notifyCmd = m.maybeNotify(wasLoaded, oldGroups, msg.items)
 		var updateCmd tea.Cmd
 		m, updateCmd = m.noteUpdate(msg.update)
-		return m, tea.Batch(nextPoll(m.pollToken), notifyCmd, updateCmd, m.reportUnread())
+		var callsCmd tea.Cmd
+		m, callsCmd = m.startCalls()
+		return m, tea.Batch(nextPoll(m.pollToken), notifyCmd, updateCmd, m.reportUnread(), callsCmd)
 	case pollTickMsg:
 		if msg.token != m.pollToken || m.polling || m.client == nil {
 			return m, nil
@@ -368,6 +378,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.String() == "f1" {
 			return m.openHelp(), nil
+		}
+		if next, cmd, ok := m.callKey(msg.String()); ok {
+			return next, cmd
 		}
 		if m.palette != nil {
 			return m.updatePalette(msg)
@@ -540,7 +553,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.undoRead()
 			}
 		case "a":
+			if next, cmd, ok := m.plainCallKey("a"); ok {
+				return next, cmd
+			}
 			return m.askAgent()
+		case "x", "h":
+			return m.plainCallKeyOrNothing(msg.String())
 		case "m":
 			if id, ok := m.selectedItemID(); ok && m.client != nil {
 				m.marking = true

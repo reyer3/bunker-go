@@ -66,7 +66,10 @@ func (m Model) handleOpenItemLoaded(msg openItemLoadedMsg) (tea.Model, tea.Cmd) 
 		m.openErr = fmt.Errorf("tui: open %s: %w", msg.id, core.ErrNotFound)
 		return m, nil
 	}
-	return m.openConversation(msg.item)
+	next, cmd := m.openConversation(msg.item)
+	// This pane never polls the inbox, so calls start here.
+	next, callsCmd := next.startCalls()
+	return next, tea.Batch(cmd, callsCmd)
 }
 
 // openPending reports whether this is a "bunker open" pane still waiting
