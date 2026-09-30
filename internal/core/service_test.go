@@ -721,8 +721,9 @@ func TestServiceSendDryRunNeverStoresSentItem(t *testing.T) {
 }
 
 // TestServiceSendUpsertIsIdempotentOnRepeatedReceiptID: the channel may
-// later echo the same message id back through its own ingest path; a
-// second store write for the same id must overwrite, never duplicate.
+// echo the same message id back through its own ingest path; a second
+// store write for the same id must never duplicate. The row already there
+// is kept (see storeSentItem: it may be the richer synced echo).
 func TestServiceSendUpsertIsIdempotentOnRepeatedReceiptID(t *testing.T) {
 	store := newMemStore()
 	reg := core.NewRegistry()
@@ -741,8 +742,8 @@ func TestServiceSendUpsertIsIdempotentOnRepeatedReceiptID(t *testing.T) {
 	if len(store.items) != 1 {
 		t.Fatalf("store has %d items, want exactly 1 (idempotent upsert by receipt.ID): %+v", len(store.items), store.items)
 	}
-	if store.items["sent-1"].Body != "hola de nuevo" {
-		t.Fatalf("stored body = %q, want the second call's body (last write wins)", store.items["sent-1"].Body)
+	if store.items["sent-1"].Body != "hola" {
+		t.Fatalf("stored body = %q, want the first row kept", store.items["sent-1"].Body)
 	}
 }
 

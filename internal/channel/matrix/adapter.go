@@ -604,7 +604,16 @@ func (a *Adapter) Send(ctx context.Context, out core.Outgoing) (core.Receipt, er
 	if err != nil {
 		return core.Receipt{}, fmt.Errorf("matrix: send to %s: %w", roomID, err)
 	}
-	return core.Receipt{ID: resp.EventID.String(), Channel: core.ChannelMatrix, At: time.Now()}, nil
+	return a.sentReceipt(roomID, resp.EventID), nil
+}
+
+// sentReceipt names a message we just sent by the same item id its sync
+// echo gets from toItem, so the optimistic item core.Service stores under
+// Receipt.ID and the echo are one row, and the returned id can be edited,
+// deleted or reacted to at once (issue #114). roomID must be the resolved
+// room, never an alias: the echo always carries the room id.
+func (a *Adapter) sentReceipt(roomID id.RoomID, eventID id.EventID) core.Receipt {
+	return core.Receipt{ID: itemID(a.account, roomID, eventID), Channel: core.ChannelMatrix, At: time.Now()}
 }
 
 func (a *Adapter) resolveRoom(ctx context.Context, out core.Outgoing) (id.RoomID, error) {
