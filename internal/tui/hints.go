@@ -59,6 +59,7 @@ var inboxHints = []keyHint{
 	{"u", "deshacer", false},
 	{"g", "refrescar", false},
 	{"1/2/3", "secciones", false},
+	{"Ctrl+K", "comandos", false},
 	{"?", "ayuda", true},
 }
 
@@ -70,6 +71,7 @@ var sidebarHints = []keyHint{
 	{"/", "filtrar", false},
 	{"Tab", "canal", false},
 	{"g", "refrescar", false},
+	{"Ctrl+K", "comandos", false},
 	{"?", "ayuda", true},
 }
 
@@ -81,6 +83,7 @@ var chatHints = []keyHint{
 	{"Alt+E", "editar", false},
 	{"Alt+X", "eliminar", false},
 	{"Alt++", "reaccionar", false},
+	{"F2", "comandos", false},
 	{"Esc", "volver", true},
 	{"F1", "ayuda", true},
 }
@@ -114,6 +117,7 @@ var threadHints = []keyHint{
 	{"R", "a todos", false},
 	{"f", "reenviar", false},
 	{"d", "descargar", false},
+	{"Ctrl+K", "comandos", false},
 	{"Esc", "volver", true},
 	{"?", "ayuda", true},
 }
@@ -121,6 +125,7 @@ var threadHints = []keyHint{
 var detailHints = []keyHint{
 	{"Esc", "volver", true},
 	{"q", "salir", true},
+	{"Ctrl+K", "comandos", false},
 	{"?", "ayuda", true},
 }
 
@@ -144,6 +149,7 @@ var helpSections = []helpSection{
 		{"1/2/3", "enfocar Mail/WhatsApp/Matrix"},
 		{"0", "volver a la vista general"},
 		{"Tab/⇧Tab", "siguiente/anterior sección"},
+		{"Ctrl+K o F2", "paleta de comandos"},
 		{"q", "salir"},
 	}},
 	{"query", "Consultas (/)", [][2]string{
@@ -173,6 +179,7 @@ var helpSections = []helpSection{
 		{"/", "filtrar (Esc quita el filtro)"},
 		{"g", "refrescar"},
 		{"? o F1", "esta ayuda"},
+		{"Ctrl+K o F2", "paleta de comandos"},
 		{"q", "salir"},
 	}},
 	{"chat", "En un chat", [][2]string{
@@ -191,6 +198,7 @@ var helpSections = []helpSection{
 		{"Alt++", "reaccionar al último mensaje recibido (0 quita)"},
 		{"", "sin selección de mensajes: actúan sobre el último"},
 		{"F1", "esta ayuda (? se escribe en el mensaje)"},
+		{"F2", "paleta de comandos (Ctrl+K borra hasta el final de la línea)"},
 		{"Esc", "volver a la bandeja"},
 	}},
 	{"thread", "Hilo de correo", [][2]string{
@@ -200,6 +208,7 @@ var helpSections = []helpSection{
 		{"f", "reenviar"},
 		{"d", "descargar adjunto"},
 		{"PgUp/PgDn", "desplazar"},
+		{"Ctrl+K o F2", "paleta de comandos"},
 		{"Esc", "volver"},
 	}},
 	{"editor", "Redactar (correo o respuesta)", [][2]string{
@@ -215,6 +224,16 @@ var helpSections = []helpSection{
 		{"↵ o clic", "abrir"},
 		{"Esc", "cancelar"},
 	}},
+	{"palette", "Paleta de comandos (Ctrl+K)", [][2]string{
+		{"Ctrl+K o F2", "abrir desde la bandeja, un hilo o el panel lateral"},
+		{"F2", "abrir desde un chat (allí Ctrl+K borra la línea)"},
+		{"escribir", "filtrar comandos y conversaciones (sin acentos)"},
+		{"↑/↓", "elegir (también Ctrl+P/Ctrl+N)"},
+		{"↵", "ejecutar, como su tecla, o abrir la conversación"},
+		{"@", "buscar un contacto para un mensaje nuevo"},
+		{"atenuado", "no disponible aquí; dice por qué"},
+		{"Esc", "cerrar"},
+	}},
 }
 
 // helpKeyColumn is the width of the help overlay's key column.
@@ -223,6 +242,8 @@ const helpKeyColumn = 12
 // helpContext names the help section for what is on screen.
 func (m Model) helpContext() string {
 	switch {
+	case m.palette != nil:
+		return "palette"
 	case m.chatMode:
 		return "chat"
 	case m.mailComposing, m.composing, m.previewing:

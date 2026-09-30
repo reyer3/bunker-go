@@ -163,6 +163,8 @@ type Model struct {
 	chatNewTo string
 	// picker is the "n" contact picker, nil when closed.
 	picker *contactPicker
+	// palette is the Ctrl+K command palette (palette.go), nil when closed.
+	palette *commandPalette
 	// chatName is the header's contact/group display name (K7), resolved
 	// once at open time the same way an inbox row's title is (rowTitle):
 	// ThreadName, then Subject, then the opening item's sender — never a

@@ -11,6 +11,9 @@ func (m Model) View() string {
 	if m.helpOpen {
 		return m.helpView()
 	}
+	if m.palette != nil {
+		return m.paletteView()
+	}
 	if m.openPending() {
 		return m.openPendingView()
 	}

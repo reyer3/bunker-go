@@ -27,10 +27,18 @@ func (m Model) openItem(index int) (Model, tea.Cmd) {
 	if row.kind == navSender {
 		return m.setSenderExpanded(row.sender.key, !row.expanded), nil
 	}
-	if m.client == nil || len(row.thread.items) == 0 {
+	if len(row.thread.items) == 0 {
 		return m, nil
 	}
-	item := row.thread.items[0]
+	return m.openInboxItem(row.thread.items[0])
+}
+
+// openInboxItem opens item's conversation the way ↵ on its inbox row
+// does; the command palette's recent conversations go through it too.
+func (m Model) openInboxItem(item core.Item) (Model, tea.Cmd) {
+	if m.client == nil {
+		return m, nil
+	}
 	if m.externalOpen != nil {
 		// The sidebar hands the conversation to its own pane (issue
 		// #81) and stays on the list.
@@ -175,6 +183,9 @@ func (m Model) leaveChat() (Model, tea.Cmd) {
 // wheel scrolls the draft there, but every other mouse action stays a
 // no-op, same as these other overlays.
 func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.palette != nil && !m.helpOpen {
+		return m.updatePaletteMouse(msg)
+	}
 	if m.picker != nil {
 		return m.updatePickerMouse(msg)
 	}

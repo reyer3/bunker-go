@@ -63,6 +63,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleMessageNotified(msg)
 	case contactsLoadedMsg:
 		return m.handleContactsLoaded(msg)
+	case paletteContactsMsg:
+		return m.handlePaletteContacts(msg)
 	case mediaReadyMsg:
 		return m.handleMediaReady(msg)
 	case videoReadyMsg:
@@ -366,6 +368,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.String() == "f1" {
 			return m.openHelp(), nil
+		}
+		if m.palette != nil {
+			return m.updatePalette(msg)
+		}
+		if m.canOpenPalette(msg.String()) {
+			return m.openPalette(), nil
 		}
 		if m.openPending() {
 			return m.updateOpenPending(msg)
