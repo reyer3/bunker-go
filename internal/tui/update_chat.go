@@ -70,6 +70,8 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.askAgent()
 	case chatEditKey:
 		return m.startChatEdit()
+	case callPlaceKey:
+		return m.startChatCall()
 	case chatDeleteKey:
 		return m.startChatDelete()
 	case chatReactKey, chatReactKeyAlt:

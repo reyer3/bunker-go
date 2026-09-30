@@ -48,7 +48,7 @@ const chatActionPreviewWidth = 40
 // emoji (react only), waiting for its plan, waiting for the user's
 // confirm, then sending.
 type chatAction struct {
-	kind    string // "edit", "delete" or "react"
+	kind    string // "edit", "delete", "react" or "call" (calls.go)
 	id      string
 	text    string // the new text, or the emoji ("" removes ours)
 	quoted  string // the target message's text, for the prompt
@@ -67,6 +67,7 @@ type chatActionPlanMsg struct {
 type chatActionDoneMsg struct {
 	token   uint64
 	receipt core.Receipt
+	call    core.Call
 	err     error
 }
 
@@ -210,7 +211,11 @@ func (m Model) planChatAction(a *chatAction) (tea.Model, tea.Cmd) {
 // with the current chatActionToken (callers bump it first).
 func (m Model) chatActionCmd(a *chatAction, dryRun bool) tea.Cmd {
 	client, token, action := m.client, m.chatActionToken, *a
+	channel, account := m.chatChannel, m.chatAccount
 	return func() tea.Msg {
+		if action.kind == "call" {
+			return placeCallAction(client, channel, account, action.id, token, dryRun)
+		}
 		mc, ok := client.(MessageClient)
 		if !ok {
 			if dryRun {
@@ -240,6 +245,31 @@ func (m Model) chatActionCmd(a *chatAction, dryRun bool) tea.Cmd {
 		}
 		return chatActionDoneMsg{token: token, receipt: receipt, err: err}
 	}
+}
+
+// placeCallAction previews (dryRun) or places the call to `to`, as the
+// same plan/done messages the other chat actions use.
+func placeCallAction(client Client, channel core.Channel, account, to string, token uint64, dryRun bool) tea.Msg {
+	cc, ok := client.(CallClient)
+	var plan core.Plan
+	var call core.Call
+	var err error
+	if !ok {
+		err = errNoCalls
+	} else {
+		timeout := sendTimeout
+		if dryRun {
+			timeout = previewTimeout
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		plan, call, err = cc.PlaceCall(ctx, channel, account, to, dryRun)
+		err = callActionError(err)
+	}
+	if dryRun {
+		return chatActionPlanMsg{token: token, plan: plan, err: err}
+	}
+	return chatActionDoneMsg{token: token, call: call, err: err}
 }
 
 func (m Model) handleChatActionPlan(msg chatActionPlanMsg) (tea.Model, tea.Cmd) {
@@ -273,6 +303,10 @@ func (m Model) handleChatActionDone(msg chatActionDoneMsg) (tea.Model, tea.Cmd) 
 	m.chatSendErr = nil
 	var done string
 	switch {
+	case a.kind == "call":
+		// The banner follows at once; the next poll confirms it.
+		m = m.upsertCall(msg.call)
+		return m.withFlash("llamando a " + safeLine(a.quoted)), nil
 	case a.kind == "edit":
 		m = m.cancelChatEdit()
 		done = "mensaje editado"
@@ -310,6 +344,8 @@ func (m Model) chatActionLine() (string, bool) {
 			opts = append(opts, fmt.Sprintf("%d %s", i+1, e))
 		}
 		return fmt.Sprintf("Reaccionar a %s: %s · 0 quitar · Esc cancelar", quoted, strings.Join(opts, " · ")), true
+	case a.kind == "call":
+		return fmt.Sprintf("¿Llamar a %s? ↵ llamar · Esc cancelar", quoted), true
 	case a.kind == "edit":
 		return fmt.Sprintf("¿Guardar la edición «%s»? ↵ confirmar · Esc cancelar", runewidth.Truncate(safeLine(a.text), chatActionPreviewWidth, "…")), true
 	case a.kind == "delete":
