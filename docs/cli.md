@@ -148,7 +148,11 @@ thread name, then the subject, then the sender — never a raw Matrix room
 id or bare WhatsApp JID, which are shortened and dimmed instead) with its
 relative time (`HH:MM` today, "ayer" yesterday, else `dd-mmm`) and an
 unread badge on the right, and a dim "Sender: body" preview of the newest
-message underneath. The selected row gets a full-width highlight and a
+message underneath. A message with no text previews as a short label
+instead: `🎤 Nota de voz 0:12`, `📷 Foto`, `🎥 Video`, `Sticker`, `🎵 Audio`,
+`📎 <nombre>` for other files, `🚫 Mensaje eliminado` and `📞 Llamada`. A
+collapsed Mail sender previews its newest thread's subject (and the start
+of its body once fetched). The selected row gets a full-width highlight and a
 colored left bar. An empty section still shows its header and one dim
 "sin pendientes" line. The overview shows all three sections at once,
 each getting a fair share of the pane's height; a section with more
@@ -1897,9 +1901,14 @@ running daemon (else the same "cannot reach bunker daemon" hint, exit 1).
 
 - **Layout:** a short channel list (Todo, Mail, WhatsApp, Matrix) with
   each one's unread count, the active one marked `▌`; then the
-  conversations of that channel, one line each: channel glyph (a chevron
+  conversations of that channel, two lines each: channel glyph (a chevron
   on a Mail sender row), name and unread badge, the name truncated so the
-  badge always shows; then a one-line key hint.
+  badge always shows, and under it a dim preview of the last message
+  (`Ana: ...` in a group, `Tú: ...` when it is ours, just the text in a
+  1:1 chat, the newest subject on a collapsed Mail sender; the same labels
+  as the full TUI for voice notes, photos and files), truncated to the
+  pane. In a pane too short for two lines per row (under 4 row lines) the
+  previews are dropped and rows are one line; then a one-line key hint.
 - **Keys:** `j`/`k` and the arrows move, `Tab`/`⇧Tab` or `1`/`2`/`3`/`0`
   switch channel, `/` filters, `@` searches a contact (scoped to the focused
   channel), `c` explains to call with `Alt+C` in the conversation pane,

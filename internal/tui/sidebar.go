@@ -11,7 +11,7 @@ import (
 // The sidebar (issue #81) is the inbox laid out for a pane of about 28-45
 // columns docked beside coding agents in herdr: the four tabs as a short
 // channel list with their unread counts, then the selected tab's
-// conversations one line each. It reuses the inbox's rows, tabs, filter
+// conversations, each with a one-line preview of its last message. It reuses the inbox's rows, tabs, filter
 // and keys; only the rendering differs, so j/k, Tab, 0-3, /, g and ? work
 // as in the full TUI, and Enter goes through openItem (in place, or to
 // the external opener when one is set).
@@ -76,11 +76,15 @@ func (m Model) sidebarTabLine(tab int, styles rowStyles, glyphs map[core.Channel
 	return styles.sectionHeader[channel].Render(marker + " " + glyph + " " + label + count)
 }
 
-// sidebarRowLine renders one navigable row on a single line: marker,
-// the channel glyph (a chevron on a Mail sender row), the name and an
-// unread badge, truncated so the badge always stays in view.
-func sidebarRowLine(row navRow, selected bool, width int, glyphs map[core.Channel]string, styles rowStyles) string {
-	var lead, title string
+// sidebarRowLine renders one navigable row: marker, the channel glyph (a
+// chevron on a Mail sender row), the name and an unread badge, truncated
+// so the badge always stays in view. With previews on it is followed by
+// a second, dim line under the name: the last message ("Ana: hola", "Tú:
+// ok", or just the text in a 1:1 chat), a Mail sender's newest subject, or
+// a label such as "🎤 Nota de voz 0:12". Both lines carry the selection's
+// bar and background.
+func sidebarRowLine(row navRow, selected, previews bool, width int, glyphs map[core.Channel]string, styles rowStyles) (line, preview string) {
+	var lead, title, text string
 	var dimmed bool
 	var channel core.Channel
 	var unread int
@@ -92,12 +96,16 @@ func sidebarRowLine(row navRow, selected bool, width int, glyphs map[core.Channe
 		title = row.sender.name
 		channel = core.ChannelMail
 		unread = row.sender.unreadCount()
+		if !row.expanded {
+			text = senderPreview(row.sender)
+		}
 	} else {
 		item := row.thread.items[0]
 		channel = item.Channel
 		lead = glyphs[channel]
 		title, dimmed = rowTitle(item)
 		unread = row.thread.unreadCount()
+		text = chatPreview(item, title)
 	}
 	title = safeLine(title)
 	indent := ""
@@ -115,9 +123,23 @@ func sidebarRowLine(row navRow, selected bool, width int, glyphs map[core.Channe
 		title = padTo(runewidth.Truncate(title, budget, "…"), budget)
 	}
 	title += " "
+	if previews {
+		// The preview starts under the name, one cell short of the pane
+		// so a wide rune never lands on its last column.
+		pad := strings.Repeat(" ", runewidth.StringWidth(left)-runewidth.StringWidth(marker))
+		budget := 0
+		if width > 0 {
+			budget = max(1, width-runewidth.StringWidth(left)-1)
+		}
+		preview = pad + previewFit(text, budget)
+	}
 	if selected {
 		rest := strings.TrimPrefix(left+title+badge, marker)
-		return styles.selectedBar.Render(marker) + styles.selectedRow.Render(padTo(rest, max(0, width-1)))
+		line = styles.selectedBar.Render(marker) + styles.selectedRow.Render(padTo(rest, max(0, width-1)))
+		if previews {
+			preview = styles.selectedBar.Render(marker) + styles.selectedRow.Render(padTo(preview, max(0, width-1)))
+		}
+		return line, preview
 	}
 	titleStyle := styles.title
 	if row.kind == navThread && row.thread.conversation && row.thread.unread == 0 {
@@ -130,8 +152,17 @@ func sidebarRowLine(row navRow, selected bool, width int, glyphs map[core.Channe
 	if row.kind == navSender {
 		leadStyle = styles.title
 	}
-	return marker + " " + indent + leadStyle.Render(lead) + " " + titleStyle.Render(title) + styles.badge[channel].Render(badge)
+	line = marker + " " + indent + leadStyle.Render(lead) + " " + titleStyle.Render(title) + styles.badge[channel].Render(badge)
+	if previews {
+		preview = " " + styles.dim.Render(preview)
+	}
+	return line, preview
 }
+
+// sidebarPreviewMinBudget is the fewest row lines the list needs before
+// it spends every second one on previews: below it (a pane a few lines
+// tall) rows are single lines, so previews give way before rows do.
+const sidebarPreviewMinBudget = 4
 
 // sidebarLinesAndHits renders the sidebar and, line for line, what a
 // click on each does (the same contract as the full inbox's hits).
@@ -168,13 +199,26 @@ func (m Model) sidebarLinesAndHits() (lines []string, hits []inboxHit) {
 	case len(rows) == 0:
 		add(m.emptySectionLine(styles, width), inboxHit{kind: hitNone})
 	default:
+		// Rows are two lines with previews and one without; the window
+		// is counted in rows so it never splits one and never overflows.
+		previews := budget < 0 || budget >= sidebarPreviewMinBudget
+		per := 1
+		if previews {
+			per = 2
+		}
 		start, end := 0, len(rows)
-		if budget > 0 && len(rows) > budget {
-			start = max(0, min(m.selected-budget+1, len(rows)-budget))
-			end = start + budget
+		if budget > 0 {
+			if visible := max(1, budget/per); len(rows) > visible {
+				start = max(0, min(m.selected-visible+1, len(rows)-visible))
+				end = start + visible
+			}
 		}
 		for i := start; i < end; i++ {
-			add(sidebarRowLine(rows[i], i == m.selected, width, glyphs, styles), inboxHit{kind: hitRow, row: i})
+			line, preview := sidebarRowLine(rows[i], i == m.selected, previews, width, glyphs, styles)
+			add(line, inboxHit{kind: hitRow, row: i})
+			if previews {
+				add(preview, inboxHit{kind: hitRow, row: i})
+			}
 		}
 	}
 

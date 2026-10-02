@@ -13,20 +13,22 @@ import (
 // conversation from a distinct sender (and empty WhatsApp/Matrix
 // sections) in the overview, so every test in this file can rely on the
 // same line layout. Mail wraps every conversation under a collapsible
-// sender row (mail-sender-groups.md), collapsed by default, so a single
-// conversation is exactly one line here (not the old bare two-line row):
+// sender row (mail-sender-groups.md), collapsed by default: a header line
+// plus a dim preview line of its newest subject, both the same click
+// target:
 //
 //	0  Mail (1) header       -> hitFocus tab=1
 //	1  Mail rule             -> hitFocus tab=1
 //	2  sender row (Alice)    -> hitRow row=0
-//	3  WhatsApp (0) header   -> hitFocus tab=2
-//	4  WhatsApp rule         -> hitFocus tab=2
-//	5  sin pendientes        -> none
-//	6  Matrix (0) header     -> hitFocus tab=3
-//	7  Matrix rule           -> hitFocus tab=3
-//	8  sin pendientes        -> none
-//	9  separator             -> none
-//	10 footer                -> none
+//	3  sender preview        -> hitRow row=0
+//	4  WhatsApp (0) header   -> hitFocus tab=2
+//	5  WhatsApp rule         -> hitFocus tab=2
+//	6  sin pendientes        -> none
+//	7  Matrix (0) header     -> hitFocus tab=3
+//	8  Matrix rule           -> hitFocus tab=3
+//	9  sin pendientes        -> none
+//	10 separator             -> none
+//	11 footer                -> none
 func mouseFixtureModel(client Client) Model {
 	m := NewModel(client)
 	m.loaded = true
@@ -59,10 +61,9 @@ func TestMouseClickOnRowSelectsIt(t *testing.T) {
 	if m.selected != 0 {
 		t.Fatalf("selected = %d, want 0", m.selected)
 	}
-	// The second sender row sits right after the first (header, rule,
-	// sender0 = index 2, sender1 = index 3): both are single-line
-	// collapsed rows.
-	updated, cmd := m.Update(tea.MouseMsg{Y: 3, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	// The second sender row follows the first's two lines (header, rule,
+	// sender0 = 2-3, sender1 = 4-5).
+	updated, cmd := m.Update(tea.MouseMsg{Y: 4, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 	got := updated.(Model)
 	if got.selected != 1 {
 		t.Fatalf("selected = %d, want 1 (clicking a non-selected row selects it)", got.selected)
@@ -139,13 +140,13 @@ func TestMouseClickOnNotYetSelectedSenderRowTogglesItImmediately(t *testing.T) {
 		From:   core.Address{ID: "bob@example.com", Name: "Bob"},
 		Unread: true, Timestamp: m.now().Add(-time.Minute),
 	}}})
-	// Rows: header(0), rule(1), sender Alice(2, selected by default),
-	// sender Bob(3, not yet selected).
+	// Rows: header(0), rule(1), sender Alice(2-3, selected by default),
+	// sender Bob(4-5, not yet selected).
 	if m.selected != 0 {
 		t.Fatalf("selected = %d, want 0", m.selected)
 	}
 
-	updated, cmd := m.Update(tea.MouseMsg{Y: 3, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	updated, cmd := m.Update(tea.MouseMsg{Y: 4, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 	got := updated.(Model)
 	if cmd != nil {
 		t.Fatal("toggling a sender row must never return a load command")
@@ -174,7 +175,7 @@ func TestMouseClickNeverSendsOrMarks(t *testing.T) {
 func TestMouseClickOnSectionHeaderFocusesIt(t *testing.T) {
 	client := &inboxClient{}
 	m := mouseFixtureModel(client)
-	updated, _ := m.Update(tea.MouseMsg{Y: 3, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress}) // WhatsApp header
+	updated, _ := m.Update(tea.MouseMsg{Y: 4, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress}) // WhatsApp header
 	got := updated.(Model)
 	if got.activeTab != 2 {
 		t.Fatalf("activeTab = %d, want 2 (WhatsApp)", got.activeTab)

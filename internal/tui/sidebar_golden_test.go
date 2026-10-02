@@ -13,7 +13,7 @@ import (
 
 // TestSidebarViewGolden goldens the compact herdr panel (issue #81) at 32
 // columns: the channel list with unread counts, then every conversation
-// of the overview on one line each, a long name truncated before its
+// of the overview with a dim preview line under it, a long name truncated before its
 // badge, and the short hint line. The clock and color profile are pinned
 // so the golden is deterministic.
 func TestSidebarViewGolden(t *testing.T) {
@@ -33,17 +33,18 @@ func TestSidebarViewGolden(t *testing.T) {
 		}}},
 		{items: []core.Item{
 			{ID: "whatsapp:personal:2", Channel: core.ChannelWhatsApp, Account: "personal", Thread: "g1",
-				ThreadName: "Equipo de producto y diseño", From: core.Address{Name: "Bob"}, Unread: true, Timestamp: at},
+				ThreadName: "Equipo de producto y diseño", From: core.Address{Name: "Bob"}, Body: "¿Revisamos el diseño?\nAhora", Unread: true, Timestamp: at},
 			{ID: "whatsapp:personal:1", Channel: core.ChannelWhatsApp, Account: "personal", Thread: "g1",
 				ThreadName: "Equipo de producto y diseño", From: core.Address{Name: "Carol"}, Unread: true, Timestamp: at.Add(-time.Minute)},
 		}},
 		{items: []core.Item{{
 			ID: "whatsapp:personal:3", Channel: core.ChannelWhatsApp, Account: "personal", Thread: "c1",
 			From: core.Address{Name: "Dana"}, Unread: true, Timestamp: at.Add(-time.Hour),
+			Attachments: []core.Attachment{{Name: "audio", MIME: "audio/ogg", Voice: true, Duration: 12}},
 		}}},
 		{items: []core.Item{{
 			ID: "matrix:home:4", Channel: core.ChannelMatrix, Account: "home", Thread: "!room:example.org",
-			ThreadName: "Soporte", From: core.Address{Name: "Erin"}, Unread: true, Timestamp: at,
+			ThreadName: "Soporte", From: core.Address{Name: "Erin"}, Body: "Ya está resuelto, gracias por esperar", Unread: true, Timestamp: at,
 		}}},
 	}
 	m.counts = map[core.Channel]map[string]int{
