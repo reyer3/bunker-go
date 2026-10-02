@@ -10,7 +10,8 @@ import (
 )
 
 const callUsage = `usage: bunker call <channel> <account> <to> [--dry-run] [--json]
-       bunker call answer|reject|hangup <call-id|latest> [--dry-run] [--json]`
+       bunker call answer|reject|hangup <call-id|latest> [--dry-run] [--json]
+       bunker call audio-test [--account A] [--seconds N] [--json]`
 
 // cmdCall places a voice call, or answers/rejects/hangs up a live one.
 // Audio runs on the machine the daemon runs on (its microphone and
@@ -138,6 +139,9 @@ func formatCall(c core.Call) string {
 	}
 	if c.EndReason != "" {
 		s += " (" + c.EndReason + ")"
+	}
+	if c.AudioError != "" {
+		s += " [sin audio: " + c.AudioError + "]"
 	}
 	return s
 }

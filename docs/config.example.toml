@@ -108,6 +108,13 @@ name = "personal"
 # calls = true
 # call_capture_command = ["parec", "--raw", "--format=s16le", "--rate=16000", "--channels=1", "--latency-msec=60"]
 # call_playback_command = ["pacat", "--playback", "--raw", "--format=s16le", "--rate=16000", "--channels=1", "--latency-msec=60"]
+# With PipeWire's native tools instead (flags vary by version, check
+# `pw-cat --help`; the stream must be raw s16le mono 16 kHz on stdout/stdin):
+# call_capture_command = ["pw-record", "--rate", "16000", "--channels", "1", "--format", "s16", "-"]
+# call_playback_command = ["pw-cat", "--playback", "--rate", "16000", "--channels", "1", "--format", "s16", "-"]
+# A command that is not installed makes calls fail up front (and logs a
+# warning at startup) instead of ringing silently. Check the setup without
+# WhatsApp with `bunker call audio-test`.
 # call_capture_gain / call_playback_gain scale your microphone / what you
 # hear in software (1 = unchanged, 1.5 = +50%, capped at 8); raise them
 # when the call sounds quiet. Too high a gain clips (distorts) the audio.

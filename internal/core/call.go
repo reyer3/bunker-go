@@ -43,6 +43,11 @@ type Call struct {
 	ConnectedAt time.Time
 	EndedAt     time.Time
 	EndReason   string
+	// AudioError says why this call has no (or one-way) sound: the audio
+	// helper is missing or died, or no media ever arrived from the peer.
+	// Empty while audio is fine. It is how a connected but silent call is
+	// told apart from a working one in "bunker calls" and the TUI.
+	AudioError string `json:"audio_error,omitempty"`
 }
 
 // Duration is how long the call has been (or was) connected as of now:

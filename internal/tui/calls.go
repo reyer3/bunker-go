@@ -256,11 +256,20 @@ func (m Model) callBannerLine() (string, bool) {
 	case c.Direction == core.CallIncoming && c.State == core.CallStateRinging:
 		return fmt.Sprintf("📞 Llamada entrante de %s · %s contestar · %s rechazar", name, answer, reject), true
 	case c.State == core.CallStateActive:
-		return fmt.Sprintf("📞 En llamada con %s · %s · %s colgar", name, core.FormatCallDuration(c.Duration(m.clock())), hangup), true
+		return fmt.Sprintf("📞 En llamada con %s · %s%s · %s colgar", name, core.FormatCallDuration(c.Duration(m.clock())), callAudioNote(*c), hangup), true
 	case c.State == core.CallStateConnecting:
-		return fmt.Sprintf("📞 Conectando con %s… · %s colgar", name, hangup), true
+		return fmt.Sprintf("📞 Conectando con %s…%s · %s colgar", name, callAudioNote(*c), hangup), true
 	}
 	return fmt.Sprintf("📞 Llamando a %s… · %s colgar", name, hangup), true
+}
+
+// callAudioNote is the banner's " · sin audio: <why>" suffix, empty when
+// the call's audio is fine.
+func callAudioNote(c core.Call) string {
+	if c.AudioError == "" {
+		return ""
+	}
+	return " · sin audio: " + c.AudioError
 }
 
 // withCallBanner draws the call line over the view's last line (the key
@@ -274,6 +283,8 @@ func (m Model) withCallBanner(view string) string {
 	style := m.renderer().NewStyle().Bold(true)
 	if m.ringingCall() != nil {
 		style = style.Reverse(true)
+	} else if c := m.callBannerCall(); c != nil && c.AudioError != "" {
+		style = style.Foreground(lipgloss.Color("1"))
 	} else {
 		style = style.Foreground(lipgloss.Color("2"))
 	}

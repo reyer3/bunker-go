@@ -24,11 +24,20 @@ type fakeLiveCall struct {
 	src                        meowcaller.AudioSource
 	sink                       meowcaller.AudioSink
 	endOnHangup                bool // fire onEnd synchronously from Hangup/Reject, like a racing engine
+	readyOnAnswer              bool // fire onReady from inside Answer, like media racing the answer
 }
 
 func (c *fakeLiveCall) ID() string      { return c.id }
 func (c *fakeLiveCall) Peer() types.JID { return c.peer }
-func (c *fakeLiveCall) Answer() error   { c.mu.Lock(); c.answered++; c.mu.Unlock(); return nil }
+func (c *fakeLiveCall) Answer() error {
+	c.mu.Lock()
+	c.answered++
+	c.mu.Unlock()
+	if c.readyOnAnswer && c.onReady != nil {
+		c.onReady()
+	}
+	return nil
+}
 func (c *fakeLiveCall) Reject() error {
 	c.mu.Lock()
 	c.rejected++
@@ -82,16 +91,25 @@ func (f *fakeAudioEnd) WriteFrame(frame []float32) error { return nil }
 func (f *fakeAudioEnd) Close() error                     { f.closed++; return nil }
 
 type fakeCallAudio struct {
-	opens int
-	src   *fakeAudioEnd
-	sink  *fakeAudioEnd
+	opens    int
+	src      *fakeAudioEnd
+	sink     *fakeAudioEnd
+	openErr  error
+	checkErr error
+	problem  func(short string, err error)
 }
 
-func (a *fakeCallAudio) Open() (meowcaller.AudioSource, meowcaller.AudioSink, error) {
+func (a *fakeCallAudio) Open(problem func(string, error)) (meowcaller.AudioSource, meowcaller.AudioSink, error) {
 	a.opens++
+	a.problem = problem
+	if a.openErr != nil {
+		return nil, nil, a.openErr
+	}
 	a.src, a.sink = &fakeAudioEnd{}, &fakeAudioEnd{}
 	return a.src, a.sink, nil
 }
+
+func (a *fakeCallAudio) Check() error { return a.checkErr }
 
 var callPeer = types.NewJID("51999888777", types.DefaultUserServer)
 
@@ -282,7 +300,7 @@ func TestCommandAudioPipesPCM(t *testing.T) {
 		capture:  []string{"sh", "-c", "head -c 1920 /dev/zero"},
 		playback: []string{"sh", "-c", "cat >/dev/null"},
 	}
-	src, sink, err := audio.Open()
+	src, sink, err := audio.Open(nil)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -300,7 +318,7 @@ func TestCommandAudioPipesPCM(t *testing.T) {
 }
 
 func TestCommandAudioEmptyDisablesDirection(t *testing.T) {
-	src, sink, err := commandAudio{}.Open()
+	src, sink, err := commandAudio{}.Open(nil)
 	if err != nil || src != nil || sink != nil {
 		t.Fatalf("Open() = %v, %v, %v; want nil, nil, nil", src, sink, err)
 	}

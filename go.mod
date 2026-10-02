@@ -42,6 +42,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/muesli/termenv v0.16.0
 	github.com/purpshell/meowcaller v0.0.0-20260811012811-27a3c6b18657
+	github.com/rs/zerolog v1.35.1
 	go.mau.fi/util v0.10.1
 	go.mau.fi/whatsmeow v0.0.0-20260925162019-b3832c2bd1d1
 	golang.org/x/image v0.46.0
@@ -89,7 +90,6 @@ require (
 	github.com/pion/transport/v5 v5.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
-	github.com/rs/zerolog v1.35.1 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect
 	github.com/tidwall/gjson v1.19.0 // indirect
