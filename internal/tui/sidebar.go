@@ -11,7 +11,8 @@ import (
 // The sidebar (issue #81) is the inbox laid out for a pane of about 28-45
 // columns docked beside coding agents in herdr: the four tabs as a short
 // channel list with their unread counts, then the selected tab's
-// conversations, each with a one-line preview of its last message. It reuses the inbox's rows, tabs, filter
+// conversations, each with a preview of its last message wrapped onto up
+// to sidebarPreviewLines lines. It reuses the inbox's rows, tabs, filter
 // and keys; only the rendering differs, so j/k, Tab, 0-3, /, g and ? work
 // as in the full TUI, and Enter goes through openItem (in place, or to
 // the external opener when one is set).
@@ -79,11 +80,13 @@ func (m Model) sidebarTabLine(tab int, styles rowStyles, glyphs map[core.Channel
 // sidebarRowLine renders one navigable row: marker, the channel glyph (a
 // chevron on a Mail sender row), the name and an unread badge, truncated
 // so the badge always stays in view. With previews on it is followed by
-// a second, dim line under the name: the last message ("Ana: hola", "Tú:
-// ok", or just the text in a 1:1 chat), a Mail sender's newest subject, or
-// a label such as "🎤 Nota de voz 0:12". Both lines carry the selection's
-// bar and background.
-func sidebarRowLine(row navRow, selected, previews bool, width int, glyphs map[core.Channel]string, styles rowStyles) (line, preview string) {
+// sidebarPreviewLines dim lines under the name: the last message ("Ana:
+// hola", "Tú: ok", or just the text in a 1:1 chat), a Mail sender's newest
+// subject, or a label such as "🎤 Nota de voz 0:12", wrapped and
+// ellipsized only at the end of the last line. A short preview leaves the
+// later lines blank so every row has the same height. Every line carries
+// the selection's bar and background.
+func sidebarRowLine(row navRow, selected, previews bool, width int, glyphs map[core.Channel]string, styles rowStyles) (line string, preview []string) {
 	var lead, title, text string
 	var dimmed bool
 	var channel core.Channel
@@ -131,13 +134,21 @@ func sidebarRowLine(row navRow, selected, previews bool, width int, glyphs map[c
 		if width > 0 {
 			budget = max(1, width-runewidth.StringWidth(left)-1)
 		}
-		preview = pad + previewFit(text, budget)
+		wrapped := previewWrap(text, budget, sidebarPreviewLines)
+		preview = make([]string, sidebarPreviewLines)
+		for i := range preview {
+			if i < len(wrapped) {
+				preview[i] = pad + wrapped[i]
+			} else {
+				preview[i] = pad
+			}
+		}
 	}
 	if selected {
 		rest := strings.TrimPrefix(left+title+badge, marker)
 		line = styles.selectedBar.Render(marker) + styles.selectedRow.Render(padTo(rest, max(0, width-1)))
-		if previews {
-			preview = styles.selectedBar.Render(marker) + styles.selectedRow.Render(padTo(preview, max(0, width-1)))
+		for i := range preview {
+			preview[i] = styles.selectedBar.Render(marker) + styles.selectedRow.Render(padTo(preview[i], max(0, width-1)))
 		}
 		return line, preview
 	}
@@ -153,16 +164,21 @@ func sidebarRowLine(row navRow, selected, previews bool, width int, glyphs map[c
 		leadStyle = styles.title
 	}
 	line = marker + " " + indent + leadStyle.Render(lead) + " " + titleStyle.Render(title) + styles.badge[channel].Render(badge)
-	if previews {
-		preview = " " + styles.dim.Render(preview)
+	for i := range preview {
+		preview[i] = " " + styles.dim.Render(preview[i])
 	}
 	return line, preview
 }
 
+// sidebarPreviewLines is how many lines a sidebar row's preview wraps
+// onto under its name.
+const sidebarPreviewLines = 2
+
 // sidebarPreviewMinBudget is the fewest row lines the list needs before
-// it spends every second one on previews: below it (a pane a few lines
-// tall) rows are single lines, so previews give way before rows do.
-const sidebarPreviewMinBudget = 4
+// it spends them on previews (room for two full rows): below it (a pane a
+// few lines tall) rows are single lines, so previews give way before rows
+// do.
+const sidebarPreviewMinBudget = 2 * (1 + sidebarPreviewLines)
 
 // sidebarMeetingListMin is how many lines of the sidebar's row list the
 // meetings section leaves alone.
@@ -213,12 +229,13 @@ func (m Model) sidebarLinesAndHits() (lines []string, hits []inboxHit) {
 	case len(rows) == 0:
 		add(m.emptySectionLine(styles, width), inboxHit{kind: hitNone})
 	default:
-		// Rows are two lines with previews and one without; the window
-		// is counted in rows so it never splits one and never overflows.
+		// Rows are a name plus sidebarPreviewLines preview lines with
+		// previews and one line without; the window is counted in rows so
+		// it never splits one and never overflows.
 		previews := budget < 0 || budget >= sidebarPreviewMinBudget
 		per := 1
 		if previews {
-			per = 2
+			per = 1 + sidebarPreviewLines
 		}
 		start, end := 0, len(rows)
 		if budget > 0 {
@@ -230,8 +247,8 @@ func (m Model) sidebarLinesAndHits() (lines []string, hits []inboxHit) {
 		for i := start; i < end; i++ {
 			line, preview := sidebarRowLine(rows[i], i == m.selected, previews, width, glyphs, styles)
 			add(line, inboxHit{kind: hitRow, row: i})
-			if previews {
-				add(preview, inboxHit{kind: hitRow, row: i})
+			for _, p := range preview {
+				add(p, inboxHit{kind: hitRow, row: i})
 			}
 		}
 	}

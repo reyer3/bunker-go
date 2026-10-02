@@ -127,3 +127,33 @@ func previewFit(plain string, width int) string {
 	}
 	return runewidth.Truncate(plain, width, "…")
 }
+
+// previewWrap wraps plain onto at most maxLines lines of width cells,
+// breaking at the last space that fits (a word wider than a whole line
+// is hard-broken where it starts) and ellipsizing only the last line. A wide rune is never
+// split. width<=0 means unbounded: one line, unchanged.
+func previewWrap(plain string, width, maxLines int) []string {
+	if width <= 0 || maxLines <= 1 {
+		return []string{previewFit(plain, width)}
+	}
+	var lines []string
+	rest := plain
+	for len(lines) < maxLines-1 && runewidth.StringWidth(rest) > width {
+		fit := runewidth.Truncate(rest, width, "")
+		line := fit
+		// Break at the last space that fits, unless the word it would
+		// push down is too long for a line of its own anyway: then it is
+		// hard-broken here rather than leaving this line short.
+		if !strings.HasPrefix(rest[len(fit):], " ") {
+			if i := strings.LastIndexByte(fit, ' '); i > 0 {
+				word, _, _ := strings.Cut(rest[i+1:], " ")
+				if runewidth.StringWidth(word) <= width {
+					line = fit[:i]
+				}
+			}
+		}
+		lines = append(lines, strings.TrimRight(line, " "))
+		rest = strings.TrimLeft(rest[len(line):], " ")
+	}
+	return append(lines, previewFit(rest, width))
+}
