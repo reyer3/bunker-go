@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.14.0](https://github.com/reyer3/bunker-go/compare/v0.13.0...v0.14.0) (2026-10-02)
+
+
+### Features
+
+* **tui:** shortcuts to search a contact (@) and to call (c) ([#126](https://github.com/reyer3/bunker-go/issues/126)) ([209c3ec](https://github.com/reyer3/bunker-go/commit/209c3ec12dfeba212809bfc7d1aa231b9b67d597))
+* **tui:** WhatsApp-style chat list in the WhatsApp and Matrix tabs ([#125](https://github.com/reyer3/bunker-go/issues/125)) ([d8b6794](https://github.com/reyer3/bunker-go/commit/d8b679456e4c18743799eb2cadc91a3df8176f7a))
+
+
+### Bug Fixes
+
+* **herdr:** reuse one conversation pane instead of opening duplicates ([#124](https://github.com/reyer3/bunker-go/issues/124)) ([504a50f](https://github.com/reyer3/bunker-go/commit/504a50f49f15d1fb99685e6c62a874bc5303a18a))
+* **tui:** wrap chat messages to the pane width and resize the composer ([#122](https://github.com/reyer3/bunker-go/issues/122)) ([9291d2c](https://github.com/reyer3/bunker-go/commit/9291d2c5048ce8f7e7685e219984d0f5f1ea3362))
+* **whatsapp:** make silent call audio diagnosable and fail loudly ([#127](https://github.com/reyer3/bunker-go/issues/127)) ([2e418ce](https://github.com/reyer3/bunker-go/commit/2e418cee98603efbd62770e7a3822a811e0cc7df))
+
 ## [0.13.0](https://github.com/reyer3/bunker-go/compare/v0.12.0...v0.13.0) (2026-09-30)
 
 
