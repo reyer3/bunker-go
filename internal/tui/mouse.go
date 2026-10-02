@@ -167,6 +167,7 @@ func (m Model) leaveChat() (Model, tea.Cmd) {
 	m.chatTypingOn = false
 	m.chatPreviewPending = false
 	m.chatOptimistic = nil
+	m = m.cancelVoiceRecording().stopVoicePlay()
 	m = m.clearChatAttachments()
 	return m, leaveChatCmd(m.client, channel, account, thread)
 }
@@ -276,6 +277,9 @@ func (m Model) updateChatMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		lines := strings.Split(m.View(), "\n")
+		if key, ok := m.voiceKeyAtLine(msg.Y); ok {
+			return m.startVoicePlay(key)
+		}
 		if msg.Y >= 0 && msg.Y < len(lines) {
 			if key, ok := m.imageKeyAt(lines[msg.Y]); ok {
 				if _, _, a, found := m.chatAttachment(key); found && isVideoAttachment(a) {

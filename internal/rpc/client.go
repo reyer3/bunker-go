@@ -171,7 +171,7 @@ func (c *Client) Counts(ctx context.Context) (map[core.Channel]map[string]int, e
 // goes on the wire so the daemon sends at most once per key.
 func (c *Client) Reply(ctx context.Context, id, body string, cc, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
 	var res planReceiptResult
-	params := replyParams{ID: id, Body: body, Cc: cc, Attachments: attachments, DryRun: dryRun, IdempotencyKey: core.IdempotencyKey(ctx)}
+	params := replyParams{ID: id, Body: body, Cc: cc, Attachments: attachments, DryRun: dryRun, IdempotencyKey: core.IdempotencyKey(ctx), Voice: core.IsVoice(ctx)}
 	err := c.call(ctx, MethodReply, params, &res)
 	if err != nil {
 		return core.Plan{}, core.Receipt{}, err

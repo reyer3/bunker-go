@@ -177,9 +177,9 @@ type chatSendReloadMsg struct {
 func (m Model) chatSendCmd(body string, dryRun bool) tea.Cmd {
 	if m.chatDraftID != "" || m.chatNewTo == "" {
 		if dryRun {
-			return previewChatReply(m.client, m.chatDraftID, body, m.chatAttachments, m.chatReplyToken)
+			return previewChatReply(m.client, m.chatDraftID, body, m.chatAttachments, m.chatReplyToken, m.chatVoice)
 		}
-		return sendChatReply(m.client, m.chatDraftID, body, m.chatAttachments, m.chatReplyToken)
+		return sendChatReply(m.client, m.chatDraftID, body, m.chatAttachments, m.chatReplyToken, m.chatVoice)
 	}
 	out := core.Outgoing{
 		Channel:     m.chatChannel,
@@ -188,6 +188,7 @@ func (m Model) chatSendCmd(body string, dryRun bool) tea.Cmd {
 		Thread:      m.chatThread,
 		Body:        body,
 		Attachments: append([]string(nil), m.chatAttachments...),
+		Voice:       m.chatVoice,
 	}
 	client, token := m.client, m.chatReplyToken
 	return func() tea.Msg {
@@ -205,19 +206,25 @@ func (m Model) chatSendCmd(body string, dryRun bool) tea.Cmd {
 	}
 }
 
-func previewChatReply(client Client, id, body string, attachments []string, token uint64) tea.Cmd {
+func previewChatReply(client Client, id, body string, attachments []string, token uint64, voice bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), previewTimeout)
 		defer cancel()
+		if voice {
+			ctx = core.WithVoice(ctx)
+		}
 		plan, _, err := client.Reply(ctx, id, body, nil, attachments, true)
 		return chatReplyPreviewMsg{token: token, plan: plan, err: err}
 	}
 }
 
-func sendChatReply(client Client, id, body string, attachments []string, token uint64) tea.Cmd {
+func sendChatReply(client Client, id, body string, attachments []string, token uint64, voice bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), sendTimeout)
 		defer cancel()
+		if voice {
+			ctx = core.WithVoice(ctx)
+		}
 		_, receipt, err := client.Reply(ctx, id, body, nil, attachments, false)
 		return chatReplySentMsg{token: token, receipt: receipt, err: err}
 	}

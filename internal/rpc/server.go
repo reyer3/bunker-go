@@ -146,7 +146,11 @@ func (s *Server) call(ctx context.Context, req Request) (any, error) {
 		if err := json.Unmarshal(req.Params, &p); err != nil {
 			return nil, fmt.Errorf("rpc: bad params: %w", err)
 		}
-		plan, receipt, err := s.svc.Reply(core.WithIdempotencyKey(ctx, p.IdempotencyKey), p.ID, p.Body, p.Cc, p.Attachments, p.DryRun)
+		replyCtx := core.WithIdempotencyKey(ctx, p.IdempotencyKey)
+		if p.Voice {
+			replyCtx = core.WithVoice(replyCtx)
+		}
+		plan, receipt, err := s.svc.Reply(replyCtx, p.ID, p.Body, p.Cc, p.Attachments, p.DryRun)
 		if err != nil {
 			return nil, err
 		}

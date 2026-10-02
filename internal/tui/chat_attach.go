@@ -248,6 +248,8 @@ func (m Model) clearChatAttachments() Model {
 	m.chatAttachments = nil
 	m.chatTempFiles = nil
 	m.chatAttachErr = nil
+	m.chatVoice = false
+	m.chatVoiceDur = 0
 	return m
 }
 
@@ -271,6 +273,10 @@ func (m Model) chatAttachLine() (string, bool) {
 	}
 	if len(m.chatAttachments) == 0 {
 		return "", false
+	}
+	if m.chatVoice {
+		// The temp file's name means nothing to the user.
+		return "🎤 Nota de voz · " + formatVoiceDuration(int((m.chatVoiceDur+500*time.Millisecond)/time.Second)), true
 	}
 	return "📎 " + attachmentChips(m.chatAttachments) + " · Retroceso quita", true
 }

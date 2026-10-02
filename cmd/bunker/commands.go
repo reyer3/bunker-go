@@ -80,12 +80,17 @@ Commands:
        WhatsApp/Matrix and locally; mail is always PEEK-only)
   reply <id> <text|-> [--cc addr]... [--attach path]...
        [--dry-run] [--json]                                 reply to an item
+  reply <id> --voice <file.ogg> [--dry-run] [--json]       reply with a voice note
   send <channel> <account> <to> <text|->
        [--cc addr]... [--subject s]
        [--attach path]... [--media path]...
        [--dry-run] [--json]                                 send a fresh message
                                                              (<to> and each --cc
                                                              may be a comma list)
+  send <channel> <account> <to> --voice <file.ogg>
+       [--dry-run] [--json]                                 send an Ogg Opus file
+                                                             as a voice note
+                                                             (WhatsApp, Matrix)
   edit <id> <text|-> [--dry-run] [--json]                 edit our own message
                                                              (WhatsApp: within
                                                              20 minutes)
@@ -459,6 +464,7 @@ func cmdReply(ctx context.Context, backend Backend, args []string, stdin io.Read
 	var attach, cc stringSliceFlag
 	fs.Var(&attach, "attach", "local file to attach (repeatable)")
 	fs.Var(&cc, "cc", "additional recipient, comma-separated values allowed (repeatable)")
+	voice := fs.String("voice", "", "send this Ogg Opus file as a voice note (no text)")
 	dryRun := fs.Bool("dry-run", false, "plan the reply without sending it")
 	idemKey := fs.String("idempotency-key", "", "send at most once per key: a repeat returns the first receipt")
 	jsonOut := fs.Bool("json", false, "emit JSON")
@@ -467,16 +473,24 @@ func cmdReply(ctx context.Context, backend Backend, args []string, stdin io.Read
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
-	if len(positionals) < 2 {
+	if len(positionals) < 2 && !(*voice != "" && len(positionals) == 1) {
 		fmt.Fprintln(stderr, "usage: bunker reply <id> <text|-> [--cc addr]... [--attach path]... [--idempotency-key k] [--dry-run] [--json]")
+		fmt.Fprintln(stderr, "       bunker reply <id> --voice <file.ogg> [--idempotency-key k] [--dry-run] [--json]")
 		return 2
+	}
+	if *voice != "" {
+		attach = append(stringSliceFlag{*voice}, attach...)
+		ctx = core.WithVoice(ctx)
 	}
 	if err := validateAttachmentPaths(attach); err != nil {
 		return fail(*jsonOut, stdout, stderr, err)
 	}
-	body, err := textOrStdin(positionals[1], stdin)
-	if err != nil {
-		return fail(*jsonOut, stdout, stderr, err)
+	body := ""
+	if len(positionals) > 1 {
+		body, err = textOrStdin(positionals[1], stdin)
+		if err != nil {
+			return fail(*jsonOut, stdout, stderr, err)
+		}
 	}
 	plan, receipt, err := backend.Reply(core.WithIdempotencyKey(ctx, *idemKey), positionals[0], body, collectCc(cc), attach, *dryRun)
 	if err != nil {
@@ -517,6 +531,7 @@ func cmdSend(ctx context.Context, backend Backend, args []string, stdin io.Reade
 	fs.Var(&attach, "attach", "local file to attach (repeatable)")
 	fs.Var(&media, "media", "alias of --attach, kept for compatibility (repeatable)")
 	fs.Var(&cc, "cc", "additional recipient, comma-separated values allowed (repeatable)")
+	voice := fs.String("voice", "", "send this Ogg Opus file as a voice note (no text)")
 	dryRun := fs.Bool("dry-run", false, "plan the send without delivering it")
 	idemKey := fs.String("idempotency-key", "", "send at most once per key: a repeat returns the first receipt")
 	jsonOut := fs.Bool("json", false, "emit JSON")
@@ -525,11 +540,15 @@ func cmdSend(ctx context.Context, backend Backend, args []string, stdin io.Reade
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
-	if len(positionals) < 4 {
+	if len(positionals) < 4 && !(*voice != "" && len(positionals) == 3) {
 		fmt.Fprintln(stderr, "usage: bunker send <channel> <account> <to> <text|-> [--cc addr]... [--subject s] [--attach path]... [--media path]... [--idempotency-key k] [--dry-run] [--json]")
+		fmt.Fprintln(stderr, "       bunker send <channel> <account> <to> --voice <file.ogg> [--idempotency-key k] [--dry-run] [--json]")
 		return 2
 	}
 	attachments := append(append([]string{}, []string(media)...), []string(attach)...)
+	if *voice != "" {
+		attachments = append([]string{*voice}, attachments...)
+	}
 	if err := validateAttachmentPaths(attachments); err != nil {
 		return fail(*jsonOut, stdout, stderr, err)
 	}
@@ -542,9 +561,12 @@ func cmdSend(ctx context.Context, backend Backend, args []string, stdin io.Reade
 			return fail(*jsonOut, stdout, stderr, err)
 		}
 	}
-	body, err := textOrStdin(positionals[3], stdin)
-	if err != nil {
-		return fail(*jsonOut, stdout, stderr, err)
+	body := ""
+	if len(positionals) > 3 {
+		body, err = textOrStdin(positionals[3], stdin)
+		if err != nil {
+			return fail(*jsonOut, stdout, stderr, err)
+		}
 	}
 	out := core.Outgoing{
 		Channel:     core.Channel(positionals[0]),
@@ -554,6 +576,7 @@ func cmdSend(ctx context.Context, backend Backend, args []string, stdin io.Reade
 		Subject:     *subject,
 		Body:        body,
 		Attachments: attachments,
+		Voice:       *voice != "",
 	}
 	plan, receipt, err := backend.Send(core.WithIdempotencyKey(ctx, *idemKey), out, *dryRun)
 	if err != nil {
@@ -845,9 +868,19 @@ func printPlanResult(jsonOut, dryRun bool, plan core.Plan, receipt core.Receipt,
 		}
 	}
 	for _, att := range plan.Attachments {
+		if att.Voice {
+			fmt.Fprintf(stdout, "  voice note %s (%s, %d bytes, %s)\n", att.Name, att.MIME, att.Size, formatVoiceDuration(att.DurationMS))
+			continue
+		}
 		fmt.Fprintf(stdout, "  %s (%s, %d bytes)\n", att.Name, att.MIME, att.Size)
 	}
 	return 0
+}
+
+// formatVoiceDuration renders a voice note's length as m:ss.
+func formatVoiceDuration(ms int64) string {
+	s := (ms + 500) / 1000
+	return fmt.Sprintf("%d:%02d", s/60, s%60)
 }
 
 // printFanoutResult renders a fan-out send (T13a): dry-run shows the full

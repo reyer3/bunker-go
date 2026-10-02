@@ -90,6 +90,7 @@ var (
 	_ core.Fetcher              = (*Adapter)(nil)
 	_ core.Sender               = (*Adapter)(nil)
 	_ core.MediaSender          = (*Adapter)(nil)
+	_ core.VoiceSender          = (*Adapter)(nil)
 	_ core.Organizer            = (*Adapter)(nil)
 	_ core.StatusPublisher      = (*Adapter)(nil)
 	_ core.ReadMarker           = (*Adapter)(nil)

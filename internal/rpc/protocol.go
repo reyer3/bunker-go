@@ -134,6 +134,8 @@ type replyParams struct {
 	Attachments    []string `json:"attachments"`
 	DryRun         bool     `json:"dryRun"`
 	IdempotencyKey string   `json:"idempotency_key,omitempty"`
+	// Voice sends the single attachment as a voice note (core.WithVoice).
+	Voice bool `json:"voice,omitempty"`
 }
 
 type sendParams struct {

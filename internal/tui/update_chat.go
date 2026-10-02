@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"errors"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/reyer3/bunker-go/internal/kittygfx"
@@ -18,6 +20,9 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.chatSending || m.chatPreviewPending {
 		return m, nil
 	}
+	if m.voiceRec != nil {
+		return m.updateVoiceRecording(msg)
+	}
 	if m.chatAction != nil {
 		return m.updateChatAction(msg)
 	}
@@ -25,6 +30,7 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "esc":
 			m.chatConfirm = false
+			m = m.dropChatVoice()
 			return m, nil
 		case "enter", "ctrl+s":
 			draft := m.composer.Value()
@@ -51,6 +57,12 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m.resizeChatComposer(), nil
 			}
 			m.chatOptimistic.attachments = attachmentNames(m.chatAttachments)
+			if m.chatVoice {
+				for i := range m.chatOptimistic.attachments {
+					m.chatOptimistic.attachments[i].Voice = true
+					m.chatOptimistic.attachments[i].Duration = int((m.chatVoiceDur + 500*time.Millisecond) / time.Second)
+				}
+			}
 			return m, m.chatSendCmd(draft, false)
 		}
 		return m, nil
@@ -66,6 +78,15 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	switch msg.String() {
+	case voicePlayKey:
+		key, ok := m.newestVoiceKey()
+		if !ok && m.voicePlay == nil {
+			m.mediaErr = errors.New("no hay notas de voz en este chat")
+			return m, nil
+		}
+		return m.startVoicePlay(key)
+	case voiceRecordKey:
+		return m.startVoiceRecording()
 	case chatAskKey:
 		return m.askAgent()
 	case chatEditKey:
@@ -77,6 +98,9 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case chatReactKey, chatReactKeyAlt:
 		return m.startChatReact()
 	case "esc":
+		if m.voicePlay != nil {
+			return m.stopVoicePlay(), nil
+		}
 		if m.chatEditID != "" {
 			return m.cancelChatEdit(), nil
 		}

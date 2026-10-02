@@ -224,6 +224,17 @@ type Model struct {
 	emojiDismissed  string
 	chatTypingAt    time.Time
 	chatTypingOn    bool
+	// Voice notes (voice.go, voice_record.go): voiceRecordCmds are the
+	// accounts' voice_record_command (keyed "channel/account"), voiceRec
+	// the recording in progress and voicePlay the note being fetched or
+	// played (both nil when idle). chatVoice marks chatAttachments as one
+	// recorded voice note of chatVoiceDur, sent as a voice note instead
+	// of a file.
+	voiceRecordCmds map[string][]string
+	voiceRec        *voiceRecording
+	voicePlay       *voicePlayback
+	chatVoice       bool
+	chatVoiceDur    time.Duration
 	// chatScroll is how many lines the chat body's rendered window is
 	// scrolled up from the bottom (0 = pinned to the newest message,
 	// bottom-aligned just above the composer — the fitInbox-style height
@@ -420,13 +431,16 @@ func Run(client Client, input io.Reader, output io.Writer, opts ...Option) error
 	glyphs := style.Glyphs
 	var notify *bool
 	var folderLayouts map[string]folderLayout
+	var voiceRecordCommands map[string][]string
 	if cfg, err := config.LoadDefault(); err == nil {
+		voiceRecordCommands = voiceRecordCommandsFromConfig(*cfg)
 		glyphs = style.ResolveGlyphs(cfg.Render.Glyphs)
 		notify = cfg.Tui.Notify
 		folderLayouts = folderLayoutsFromConfig(*cfg)
 	}
 	model := NewModel(client, opts...).withGlyphs(glyphs)
 	model.folderLayouts = folderLayouts
+	model.voiceRecordCmds = voiceRecordCommands
 	model.render = lipgloss.NewRenderer(output)
 	output = lockOutput(output)
 	model.notifyEnabled = resolveNotifyEnabled(notify, os.Getenv)
@@ -443,5 +457,7 @@ func Run(client Client, input io.Reader, output io.Writer, opts ...Option) error
 	// redraws from the top instead of diffing against lines the terminal
 	// has already re-wrapped, and quitting restores what was there.
 	_, err := tea.NewProgram(model, tea.WithInput(input), tea.WithOutput(output), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithReportFocus()).Run()
+	// Whichever way the interface ended, no recorder or player outlives it.
+	killVoiceProcs()
 	return err
 }

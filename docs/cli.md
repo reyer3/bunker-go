@@ -568,6 +568,9 @@ own explicit actions (opening a conversation, `read-thread`).
 
 ## `bunker reply <id> <text|-> [--cc addr]... [--attach path]... [--idempotency-key k] [--dry-run] [--json]`
 
+`bunker reply <id> --voice <file.ogg>` replies with a voice note instead
+(no text; see [Voice notes](#voice-notes-notas-de-voz)).
+
 Replies to item `<id>`. `<text>` can be `-` to read the body from stdin.
 `--dry-run` returns the `Plan` alone and never reaches the channel
 adapter.
@@ -603,6 +606,10 @@ on the first image only.
 when `dryRun` is `true`.
 
 ## `bunker send <channel> <account> <to> <text|-> [--cc addr]... [--subject s] [--attach path]... [--media path]... [--idempotency-key k] [--dry-run] [--json]`
+
+`bunker send <channel> <account> <to> --voice <file.ogg>` sends an Ogg
+Opus file as a voice note (no text; see
+[Voice notes](#voice-notes-notas-de-voz)).
 
 Sends a fresh message, not tied to any existing item. Same `--dry-run`,
 `--idempotency-key` and JSON shape as `reply`, plus new
@@ -1586,6 +1593,89 @@ chat shows as a thumbnail inside its bubble, instead of the
 - **Without graphics:** inside tmux or a plain terminal, `Ctrl+O` plays
   the conversation's newest video in `mpv`'s own window.
 
+## Voice notes (notas de voz)
+
+Voice notes work on WhatsApp and Matrix, end to end: they show up as
+voice notes when received, play from the TUI, can be recorded from the
+TUI and can be sent from the CLI. Everything that touches audio is an
+external process; bunker links no audio library.
+
+- **Receiving:** a WhatsApp push-to-talk message and a Matrix `m.audio`
+  event carrying `org.matrix.msc3245.voice` become an attachment with
+  `"voice": true`, its length in `"duration"` (whole seconds, omitted when
+  unknown) and, when the sender's app included one, `"waveform"` (base64 of
+  one 0-100 byte per bar). Older stored messages simply lack those keys. A
+  plain audio file, or any message from before this feature, stays an
+  ordinary attachment.
+- **Showing:** the chat bubble reads `🎤 Nota de voz · 0:12`, with a
+  crude `▁▃▇█` waveform under it when there is one.
+- **Playing in the TUI:** `Alt+P` plays the chat's newest voice note, and
+  a click on a voice bubble plays that one. The note is downloaded once
+  into the media cache and played by `mpv --no-video --really-quiet
+  <file>` in the background (the chat stays usable), with
+  `▶ reproduciendo… · Esc detener` below the composer. `Esc` stops it
+  (and only then leaves the chat), as does `Alt+P` again.
+  `BUNKER_AUDIO_PLAYER="ffplay -nodisp -autoexit"` swaps in another
+  player; the file path is appended as the last argument. A missing
+  player is an error in the chat that names what to install.
+- **Recording in the TUI:** in a WhatsApp or Matrix chat with an empty
+  composer and no attachments, `Alt+V` starts recording and the composer
+  becomes `● Grabando 0:07 · ↵ enviar · Esc cancelar`. `Enter` stops the
+  recorder gracefully (SIGINT, so the Ogg file is finalized), then shows
+  the usual preview, `¿Enviar nota de voz (0:07) a …? ↵ enviar · Esc
+  cancelar`, and `Enter` sends it. `Esc` while recording, or at the
+  preview, discards the note and deletes its temp file (private, 0600,
+  also removed once sent or when you leave the chat). Recordings stop by
+  themselves at 5 minutes and go to the preview. A recorder that is not
+  installed, or that exits early, is reported in the chat with its stderr
+  tail; nothing is silently skipped. `Ctrl+K`/`F2` lists *Grabar nota de
+  voz* and *Reproducir nota de voz*, with why one is unavailable.
+- **The recorder:** by default
+  `ffmpeg -hide_banner -loglevel error -f pulse -i default -ac 1 -ar 48000
+  -c:a libopus -b:a 24k -application voip -t 300 -y {output}` (PulseAudio,
+  also served by PipeWire). Set `voice_record_command` on the account to
+  use another tool (see `docs/config.example.toml`): a list is the exact
+  command, a string runs under `sh -c` (for pipelines such as
+  `pw-record` into `opusenc`), and `{output}` stands for the file, which
+  must end up as Ogg Opus. The recorder runs in its own process group and
+  is stopped with SIGINT sent to the whole group; in a pipeline make the
+  encoder ignore it (`(trap '' INT; exec opusenc ...)`, as the example
+  config does) so it finishes when its input closes.
+
+Sending (CLI):
+
+```
+bunker send whatsapp personal "Ana" --voice nota.ogg [--dry-run] [--json]
+bunker reply whatsapp:personal:3EB0… --voice nota.ogg [--dry-run] [--json]
+```
+
+`--voice` takes one **Ogg Opus** file (`.ogg`/`.opus`) and needs no text:
+a voice note cannot carry a caption, goes to a single recipient, and
+cannot be combined with `--attach`/`--media`. Any other format is
+refused with a hint, for example
+`ffmpeg -i in.wav -c:a libopus -b:a 24k out.ogg`. Other channels (mail)
+answer `ErrUnsupported` rather than sending the file as a plain
+attachment. `--dry-run` never touches the network; the plan has
+`"voice": true` and its attachment `"voice": true, "duration_ms": 12000`
+(human output: `voice note nota.ogg (audio/ogg; codecs=opus, 9120 bytes,
+0:12)`). Length comes from the file itself (the last Ogg page's granule
+position, minus the pre-skip, at 48 kHz).
+
+- **WhatsApp:** an `AudioMessage` with `PTT` set, mimetype
+  `audio/ogg; codecs=opus` and `seconds`; it shows "recording audio" while
+  it waits and follows the usual send pacing. No waveform is sent: it
+  would need an Opus decoder and a made-up one would be a lie, so clients
+  draw a flat placeholder.
+- **Matrix:** an `m.audio` with `org.matrix.msc3245.voice` and
+  `org.matrix.msc1767.audio` `{duration}` in milliseconds, uploaded
+  encrypted in an encrypted room. No waveform either.
+- **MCP:** the `send` and `reply` tools take text only, so voice notes are
+  CLI/TUI only.
+
+Required external tools: `mpv` (or `BUNKER_AUDIO_PLAYER`) to play, and
+`ffmpeg` (or `voice_record_command`) to record. Sending an existing
+Ogg Opus file needs neither.
+
 ## Editing, deleting and reacting in the TUI's chat view
 
 The chat view has no message selection (the composer always has focus
@@ -2174,8 +2264,9 @@ before this release they were the Go field names (`Action`, `Recipients`,
 `plan.action`, `channel`, `account`, `target` and `preview`, and
 `receipt.id`, `channel` and `at`, are always present. The rest is omitted
 when empty: `cc`, `subject`, `media`, `attachments`, `recipients`, the
-two `fanout_pause_*` fields (integer nanoseconds), `receipt.recipients`
-(fan-out only), `receipt.replayed` (true for an idempotent replay) and a
+two `fanout_pause_*` fields (integer nanoseconds), `voice` (true for a
+voice note, whose attachment also carries `"voice": true` and
+`"duration_ms"`), `receipt.recipients` (fan-out only), `receipt.replayed` (true for an idempotent replay) and a
 recipient's `error`. The envelope keys (`dryRun`, `call`, `result`) are
 unchanged.
 
@@ -2228,6 +2319,9 @@ started (otherwise the user's reaction is simply removed). Edits,
 reactions and redactions never appear as items of their own. Both fields
 are absent of any effect for a plain, never-edited/revoked/reacted-to
 item (`Edited`/`Deleted` `false`, `Reactions` empty).
+
+A voice note's attachment also has `voice` (true), `duration` (seconds)
+and `waveform` (base64, one 0-100 byte per bar), each omitted when empty.
 
 An attachment may also carry `Thumbnail`: the small preview image
 (base64 JPEG or PNG, at most 64 KB) a WhatsApp image, video, sticker or

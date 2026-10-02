@@ -99,6 +99,23 @@ name = "personal"
 # seconds/broadcast_pause_max_seconds bound the randomized pause between
 # recipients (default 3/8).
 #
+# Voice notes (notas de voz) are recorded from the TUI (Alt+V in a chat)
+# by an external recorder that must leave Ogg Opus in the file named by
+# {output}. The default is
+#   ["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "pulse", "-i", "default",
+#    "-ac", "1", "-ar", "48000", "-c:a", "libopus", "-b:a", "24k",
+#    "-application", "voip", "-t", "300", "-y", "{output}"]
+# (PulseAudio, also served by PipeWire). A list is the exact command; a
+# string runs under `sh -c` (so it can be a pipeline) with {output} quoted
+# for the shell. The recorder is stopped with SIGINT, so a pipeline ends
+# cleanly. Playing a received note uses mpv, or BUNKER_AUDIO_PLAYER.
+# voice_record_command = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "pulse", "-i", "default", "-ac", "1", "-ar", "48000", "-c:a", "libopus", "-b:a", "24k", "-application", "voip", "-y", "{output}"]
+# With PipeWire's native tools instead (check `pw-record --help` and
+# `opusenc --help` for your versions; pw-record writes a WAV to stdout).
+# Stopping sends SIGINT to the whole pipeline, so the encoder is told to
+# ignore it and to finish when the recorder closes the pipe:
+# voice_record_command = "pw-record --rate 48000 --channels 1 - | (trap '' INT; exec opusenc --bitrate 24 - {output})"
+#
 # Voice calls (bunker call / calls) are opt-in and experimental: they run
 # meowcaller, an unofficial pure-Go implementation of WhatsApp's VoIP
 # stack. Audio uses the daemon machine's microphone and speaker through
@@ -128,3 +145,5 @@ name = "work"
 homeserver = "https://matrix.example.org"
 # state_dir defaults to $BUNKER_STATE_DIR/matrix/<name>; set it only to
 # relocate the session, crypto store and pickle key.
+# voice_record_command works here too (see the WhatsApp account above):
+# voice_record_command = "pw-record --rate 48000 --channels 1 - | opusenc --bitrate 24 - {output}"

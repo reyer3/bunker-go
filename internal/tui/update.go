@@ -79,6 +79,16 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleVideoReady(msg)
 	case videoDoneMsg:
 		return m.handleVideoDone(msg)
+	case voicePlayReadyMsg:
+		return m.handleVoicePlayReady(msg)
+	case voicePlayDoneMsg:
+		return m.handleVoicePlayDone(msg)
+	case voiceTickMsg:
+		return m.handleVoiceTick(msg)
+	case voiceExitedMsg:
+		return m.handleVoiceExited(msg)
+	case voiceStoppedMsg:
+		return m.handleVoiceStopped(msg)
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -164,6 +174,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.chatPreviewPending = false
 		if msg.err != nil {
 			m.chatSendErr = msg.err
+			// A recorded note that cannot be sent is not worth keeping.
+			m = m.dropChatVoice()
 			return m, nil
 		}
 		m.chatConfirm = true

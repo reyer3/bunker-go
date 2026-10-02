@@ -89,6 +89,8 @@ var chatHints = []keyHint{
 	{"Alt++", "reaccionar", false},
 	{"Alt+C", "llamar", false},
 	{"F2", "comandos", false},
+	{"Alt+V", "grabar", false},
+	{"Alt+P", "reproducir", false},
 	{"Esc", "volver", true},
 	{"F1", "ayuda", true},
 }
@@ -206,6 +208,8 @@ var helpSections = []helpSection{
 		{"Alt+X", "eliminar tu último mensaje para todos"},
 		{"Alt++", "reaccionar al último mensaje recibido (0 quita)"},
 		{"Alt+C", "llamar por voz (vista previa y confirmación; requiere calls = true)"},
+		{"Alt+V", "grabar una nota de voz (↵ la envía tras la vista previa, Esc cancela)"},
+		{"Alt+P", "reproducir la última nota de voz (Esc detiene); clic en la nota la reproduce"},
 		{"", "sin selección de mensajes: actúan sobre el último"},
 		{"F1", "esta ayuda (? se escribe en el mensaje)"},
 		{"F2", "paleta de comandos (Ctrl+K borra hasta el final de la línea)"},

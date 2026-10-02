@@ -63,16 +63,22 @@ func composingDuration(bodyLen int, isMedia bool, rand01 float64) time.Duration 
 // then unavailable again afterwards — on every path, including deliver's
 // own error, via defer.
 func (a *Adapter) withHumanEmulation(ctx context.Context, jid types.JID, body string, isMedia bool, deliver func() error) error {
+	return a.withHumanEmulationAs(ctx, jid, body, isMedia, types.ChatPresenceMediaText, deliver)
+}
+
+// withHumanEmulationAs is withHumanEmulation with the composing kind
+// chosen: a voice note shows "recording audio", not "typing".
+func (a *Adapter) withHumanEmulationAs(ctx context.Context, jid types.JID, body string, isMedia bool, media types.ChatPresenceMedia, deliver func() error) error {
 	if err := a.cli.SendPresence(ctx, types.PresenceAvailable); err != nil {
 		return fmt.Errorf("whatsapp: send: presence available: %w", err)
 	}
 	defer a.revokePresence(ctx, "send")
 
-	if err := a.cli.SendChatPresence(ctx, jid, types.ChatPresenceComposing, types.ChatPresenceMediaText); err != nil {
+	if err := a.cli.SendChatPresence(ctx, jid, types.ChatPresenceComposing, media); err != nil {
 		return fmt.Errorf("whatsapp: send: chat presence composing: %w", err)
 	}
 	a.sleep(composingDuration(len(body), isMedia, a.rand01()))
-	if err := a.cli.SendChatPresence(ctx, jid, types.ChatPresencePaused, types.ChatPresenceMediaText); err != nil {
+	if err := a.cli.SendChatPresence(ctx, jid, types.ChatPresencePaused, media); err != nil {
 		return fmt.Errorf("whatsapp: send: chat presence paused: %w", err)
 	}
 
