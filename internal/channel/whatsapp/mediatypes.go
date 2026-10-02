@@ -3,8 +3,6 @@ package whatsapp
 import (
 	"context"
 	"fmt"
-	"mime"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -158,12 +156,7 @@ func (a *Adapter) buildDocumentMessage(ctx context.Context, path, caption string
 	if err != nil {
 		return nil, err
 	}
-	mimeType := http.DetectContentType(data)
-	if mimeType == "application/octet-stream" {
-		if guessed := mime.TypeByExtension(filepath.Ext(path)); guessed != "" {
-			mimeType = guessed
-		}
-	}
+	mimeType := core.AttachmentMIME(path, data)
 	name := filepath.Base(path)
 	up, err := a.cli.Upload(ctx, data, whatsmeow.MediaDocument)
 	if err != nil {

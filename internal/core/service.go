@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
-	"mime"
-	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -519,13 +517,7 @@ func inspectAttachment(path string) (AttachmentInfo, error) {
 	if err != nil && err != io.EOF {
 		return AttachmentInfo{}, fmt.Errorf("core: attachment %q: read: %w", path, err)
 	}
-	mimeType := http.DetectContentType(buf[:n])
-	if mimeType == "application/octet-stream" {
-		if guessed := mime.TypeByExtension(filepath.Ext(path)); guessed != "" {
-			mimeType = guessed
-		}
-	}
-	return AttachmentInfo{Name: filepath.Base(path), MIME: mimeType, Size: info.Size()}, nil
+	return AttachmentInfo{Name: filepath.Base(path), MIME: AttachmentMIME(path, buf[:n]), Size: info.Size()}, nil
 }
 
 // prepareAttachments inspects every path and validates the result against

@@ -186,6 +186,34 @@ func TestSendMediaUnknownTypeBuildsDocumentMessage(t *testing.T) {
 	}
 }
 
+// TestSendMediaSpreadsheetKeepsItsType pins the fix for Excel files that
+// reached the phone as a .zip: an .xlsx is a ZIP container, so content
+// sniffing alone sent it as application/zip.
+func TestSendMediaSpreadsheetKeepsItsType(t *testing.T) {
+	cli := newFakeWAClient()
+	cli.uploadResp = whatsmeow.UploadResponse{URL: "https://example/doc", DirectPath: "/v/doc", FileLength: 14}
+	cli.sendResp = whatsmeow.SendResponse{ID: "SENT-XLSX", Timestamp: time.Unix(7000, 0)}
+	a := NewAdapter("personal", cli, time.Millisecond)
+
+	path := filepath.Join(t.TempDir(), "ventas.xlsx")
+	if err := os.WriteFile(path, []byte("PK\x03\x04\x14\x00\x06\x00\x08\x00\x00\x00!\x00"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.SendMedia(context.Background(), core.Outgoing{To: []string{"1234@s.whatsapp.net"}, Attachments: []string{path}}); err != nil {
+		t.Fatalf("SendMedia() error = %v", err)
+	}
+	doc := cli.sent[0].message.GetDocumentMessage()
+	if doc == nil {
+		t.Fatalf("sent message has no DocumentMessage: %+v", cli.sent[0].message)
+	}
+	if want := "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"; doc.GetMimetype() != want {
+		t.Errorf("Mimetype = %q, want %q", doc.GetMimetype(), want)
+	}
+	if doc.GetFileName() != "ventas.xlsx" {
+		t.Errorf("FileName = %q, want ventas.xlsx", doc.GetFileName())
+	}
+}
+
 func TestSendMediaMixedTypesOnlyFirstIsCaptioned(t *testing.T) {
 	cli := newFakeWAClient()
 	a := NewAdapter("personal", cli, time.Millisecond)
