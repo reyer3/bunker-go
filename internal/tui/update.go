@@ -567,6 +567,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.detail {
 				return m.openPicker()
 			}
+		case "@":
+			if !m.detail {
+				return m.openSearchPicker()
+			}
+		case "c":
+			if !m.detail {
+				return m.callSelectedRow()
+			}
 		case "u":
 			if !m.detail {
 				return m.undoRead()

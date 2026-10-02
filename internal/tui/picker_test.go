@@ -15,10 +15,13 @@ type contactsClient struct {
 	replyClient
 	book    []core.Contact
 	queries []string
+	// channels records the channel scope of every request.
+	channels []core.Channel
 }
 
 func (c *contactsClient) Contacts(_ context.Context, filter core.ContactFilter) ([]core.Contact, error) {
 	c.queries = append(c.queries, filter.Query)
+	c.channels = append(c.channels, filter.Channel)
 	var out []core.Contact
 	for _, ct := range c.book {
 		if strings.Contains(strings.ToLower(ct.Name), strings.ToLower(filter.Query)) {

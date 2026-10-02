@@ -406,13 +406,18 @@ func (m Model) chatCallTarget() string {
 
 // chatCallBlocked says why the open chat cannot be called, or nil.
 func (m Model) chatCallBlocked() error {
+	return m.callBlockedFor(m.chatChannel, m.chatCallTarget())
+}
+
+// callBlockedFor says why target on channel cannot be called now, or nil.
+func (m Model) callBlockedFor(channel core.Channel, target string) error {
 	if _, ok := m.client.(CallClient); !ok {
 		return errNoCalls
 	}
 	switch {
-	case m.chatChannel != core.ChannelWhatsApp:
+	case channel != core.ChannelWhatsApp:
 		return errCallOnlyWA
-	case strings.HasSuffix(m.chatCallTarget(), "@g.us"):
+	case strings.HasSuffix(target, "@g.us"):
 		return errCallGroup
 	case m.liveCall() != nil:
 		return errCallBusy

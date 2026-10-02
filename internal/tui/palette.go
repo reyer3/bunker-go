@@ -155,6 +155,8 @@ func (m Model) paletteCommands() []paletteEntry {
 	switch m.paletteContext() {
 	case "inbox":
 		add("Nuevo mensaje", "n", paletteRune('n'), noClient)
+		add("Buscar contacto", "@", paletteRune('@'), noClient)
+		add("Llamar", "c", paletteRune('c'), m.rowCallReason())
 		add("Buscar / filtrar", "/", paletteRune('/'), "")
 		add("Refrescar", "g", paletteRune('g'), noClient)
 		for tab, name := range []string{"Todo", "Mail", "WhatsApp", "Matrix"} {
@@ -377,7 +379,7 @@ func (m Model) reloadPaletteContacts() (Model, tea.Cmd) {
 	p.contactsLoading = true
 	p.contactsQuery = query
 	m.palette = &p
-	load := loadContactsCmd(m.client, query, p.token)
+	load := loadContactsCmd(m.client, "", query, p.token)
 	return m, func() tea.Msg {
 		msg, _ := load().(contactsLoadedMsg)
 		return paletteContactsMsg{contactsLoadedMsg: msg, query: query}
