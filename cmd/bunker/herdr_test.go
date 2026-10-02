@@ -52,14 +52,13 @@ func TestHerdrToggle(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name:  "open docks left of the focused pane",
+			name:  "open docks right of the focused pane",
 			panes: paneList(herdrPane{PaneID: "w1:p1", TabID: "w1:t1", Focused: true}, herdrPane{PaneID: "w1:p2", TabID: "w1:t1"}),
 			env:   insideHerdr,
 			want: []string{
 				"pane list",
 				"plugin pane open --plugin bunker --entrypoint sidebar --placement split --target-pane w1:p1 --direction right --no-focus",
-				"pane swap --source-pane w1:p5 --target-pane w1:p1",
-				"pane resize --direction left --amount 0.25 --pane w1:p5",
+				"pane resize --direction right --amount 0.25 --pane w1:p5",
 				"pane rename w1:p5 bunker",
 				"plugin pane focus w1:p5",
 			},
@@ -70,7 +69,7 @@ func TestHerdrToggle(t *testing.T) {
 			panes: paneList(herdrPane{PaneID: "w1:p1", TabID: "w1:t1", Focused: true},
 				herdrPane{PaneID: "w1:p9", TabID: "w1:t2", Label: "bunker"}),
 			env:     insideHerdr,
-			want:    []string{"pane list", "plugin pane open --plugin bunker --entrypoint sidebar --placement split --target-pane w1:p1 --direction right --no-focus", "pane swap --source-pane w1:p5 --target-pane w1:p1", "pane resize --direction left --amount 0.25 --pane w1:p5", "pane rename w1:p5 bunker", "plugin pane focus w1:p5"},
+			want:    []string{"pane list", "plugin pane open --plugin bunker --entrypoint sidebar --placement split --target-pane w1:p1 --direction right --no-focus", "pane resize --direction right --amount 0.25 --pane w1:p5", "pane rename w1:p5 bunker", "plugin pane focus w1:p5"},
 			wantOut: "open w1:p5\n",
 		},
 		{
@@ -101,8 +100,7 @@ func TestHerdrToggle(t *testing.T) {
 			dryRun: true,
 			want:   []string{"pane list"},
 			wantOut: "herdr plugin pane open --plugin bunker --entrypoint sidebar --placement split --target-pane w1:p1 --direction right --no-focus\n" +
-				"herdr pane swap --source-pane <new-pane> --target-pane w1:p1\n" +
-				"herdr pane resize --direction left --amount 0.25 --pane <new-pane>\n" +
+				"herdr pane resize --direction right --amount 0.25 --pane <new-pane>\n" +
 				"herdr pane rename <new-pane> bunker\n" +
 				"herdr plugin pane focus <new-pane>\n",
 		},
@@ -139,9 +137,9 @@ func TestHerdrToggle(t *testing.T) {
 			name:    "herdr error JSON propagates",
 			panes:   paneList(herdrPane{PaneID: "w1:p1", TabID: "w1:t1", Focused: true}),
 			env:     insideHerdr,
-			errs:    map[string]error{"pane swap": errors.New("herdr: pane swap: pane not found (pane_not_found)")},
-			want:    []string{"pane list", "plugin pane open --plugin bunker --entrypoint sidebar --placement split --target-pane w1:p1 --direction right --no-focus", "pane swap --source-pane w1:p5 --target-pane w1:p1", "pane close w1:p5"},
-			wantErr: "herdr: pane swap: pane not found (pane_not_found)",
+			errs:    map[string]error{"pane resize": errors.New("herdr: pane resize: pane not found (pane_not_found)")},
+			want:    []string{"pane list", "plugin pane open --plugin bunker --entrypoint sidebar --placement split --target-pane w1:p1 --direction right --no-focus", "pane resize --direction right --amount 0.25 --pane w1:p5", "pane close w1:p5"},
+			wantErr: "herdr: pane resize: pane not found (pane_not_found)",
 		},
 		{
 			name:    "error JSON on stdout propagates",
@@ -254,7 +252,7 @@ func TestHerdrToggleJSON(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Action != "open" || got.Tab != "w1:t1" || got.Anchor != "w1:p1" || !got.DryRun || len(got.Commands) != 5 {
+	if got.Action != "open" || got.Tab != "w1:t1" || got.Anchor != "w1:p1" || !got.DryRun || len(got.Commands) != 4 {
 		t.Fatalf("plan = %+v", got)
 	}
 }

@@ -205,7 +205,7 @@ func TestHerdrItemOpenerReusesOnePane(t *testing.T) {
 		if err := herdrItemOpener(inside, herdr.run)("mail:cl:1"); err != nil {
 			t.Fatal(err)
 		}
-		wantCalls(t, herdr, "pane list", openNew, "pane rename w1:p5 bunker:chat")
+		wantCalls(t, herdr, "pane list", "pane edges --pane w1:p1", openNew, "pane rename w1:p5 bunker:chat")
 	})
 
 	t.Run("same id: focus only", func(t *testing.T) {
@@ -260,7 +260,7 @@ func TestHerdrItemOpenerReusesOnePane(t *testing.T) {
 		if err := open("mail:cl:1"); err != nil {
 			t.Fatal(err)
 		}
-		wantCalls(t, herdr, "pane list", openNew, "pane rename w1:p5 bunker:chat")
+		wantCalls(t, herdr, "pane list", "pane edges --pane w1:p1", openNew, "pane rename w1:p5 bunker:chat")
 	})
 
 	t.Run("the sidebar's own pane is never reused", func(t *testing.T) {
@@ -268,7 +268,7 @@ func TestHerdrItemOpenerReusesOnePane(t *testing.T) {
 		if err := herdrItemOpener(inside, herdr.run)("mail:cl:1"); err != nil {
 			t.Fatal(err)
 		}
-		wantCalls(t, herdr, "pane list", openNew, "pane rename w1:p5 bunker:chat")
+		wantCalls(t, herdr, "pane list", "pane edges --pane w1:p1", openNew, "pane rename w1:p5 bunker:chat")
 	})
 
 	t.Run("a failed open keeps the old pane", func(t *testing.T) {
@@ -286,7 +286,7 @@ func TestHerdrItemOpenerReusesOnePane(t *testing.T) {
 		if err := herdrItemOpener(inside, herdr.run)("mail:cl:1"); err == nil || !strings.Contains(err.Error(), "boom") {
 			t.Fatalf("err = %v, want boom", err)
 		}
-		wantCalls(t, herdr, "pane list", openNew, "pane rename w1:p5 bunker:chat", "pane close w1:p5")
+		wantCalls(t, herdr, "pane list", "pane edges --pane w1:p1", openNew, "pane rename w1:p5 bunker:chat", "pane close w1:p5")
 	})
 
 	t.Run("herdr errors surface", func(t *testing.T) {
@@ -321,5 +321,38 @@ func TestValidItemID(t *testing.T) {
 		if err := validItemID(id); err == nil {
 			t.Errorf("validItemID(%q) = nil, want an error", id)
 		}
+	}
+}
+
+// edgesReply is a "pane edges" reply for a tab laid out as main (w1:p2,
+// 137 columns) | bunker panel (w1:p1, 46 columns), as chatList has them.
+const edgesReply = `{"id":"1","result":{"type":"pane_edges","edges":{"pane_id":"w1:p1","layout":{"panes":[` +
+	`{"pane_id":"w1:p2","rect":{"x":0,"y":0,"width":137,"height":61}},` +
+	`{"pane_id":"w1:p1","rect":{"x":137,"y":0,"width":46,"height":61}}]}}}}`
+
+func TestHerdrItemOpenerSplitsLeftOfPanel(t *testing.T) {
+	inside := herdrEnv(map[string]string{"HERDR_ENV": "1", "HERDR_PANE_ID": "w1:p1"})
+	herdr := &fakeHerdr{replies: map[string]string{"pane list": chatList(), "pane edges": edgesReply, "plugin pane open": openedReply}}
+	if err := herdrItemOpener(inside, herdr.run)("mail:cl:1"); err != nil {
+		t.Fatal(err)
+	}
+	wantCalls(t, herdr, "pane list", "pane edges --pane w1:p1",
+		"plugin pane open --plugin bunker --entrypoint open --placement split --target-pane w1:p2 --direction right --env BUNKER_OPEN_ID=mail:cl:1 --focus",
+		"pane rename w1:p5 bunker:chat")
+}
+
+func TestHerdrItemOpenerFallsBackBesideItself(t *testing.T) {
+	plain := "plugin pane open --plugin bunker --entrypoint open --placement split --direction right --env BUNKER_OPEN_ID=mail:cl:1 --focus"
+	for name, herdr := range map[string]*fakeHerdr{
+		"no pane on its left": {replies: map[string]string{"pane list": chatList(), "plugin pane open": openedReply,
+			"pane edges": `{"id":"1","result":{"type":"pane_edges","edges":{"layout":{"panes":[{"pane_id":"w1:p1","rect":{"x":0,"y":0,"width":46,"height":61}}]}}}}`}},
+		"edges fails": {replies: map[string]string{"pane list": chatList(), "plugin pane open": openedReply},
+			errs: map[string]error{"pane edges": errors.New("herdr: pane edges: boom")}},
+	} {
+		inside := herdrEnv(map[string]string{"HERDR_ENV": "1", "HERDR_PANE_ID": "w1:p1"})
+		if err := herdrItemOpener(inside, herdr.run)("mail:cl:1"); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		wantCalls(t, herdr, "pane list", "pane edges --pane w1:p1", plain, "pane rename w1:p5 bunker:chat")
 	}
 }
