@@ -82,6 +82,18 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		// The composer's width is fixed when it is built, which in a
+		// "bunker open" pane happens before the first size arrives
+		// (composerFallbackWidth): follow every resize instead.
+		// Only a composer in use is resized: the zero textarea panics.
+		switch {
+		case msg.Width <= 0:
+		case m.chatMode:
+			m.composer.SetWidth(chatComposerWidth(msg.Width))
+			m = m.resizeChatComposer()
+		case m.composing || m.mailComposing:
+			m.composer.SetWidth(msg.Width)
+		}
 	case tea.MouseMsg:
 		return m.updateMouse(msg)
 	case tea.FocusMsg:
