@@ -85,6 +85,7 @@ var (
 	_ core.Fetcher              = (*Adapter)(nil)
 	_ core.Sender               = (*Adapter)(nil)
 	_ core.MediaSender          = (*Adapter)(nil)
+	_ core.VoiceSender          = (*Adapter)(nil)
 	_ core.AttachmentDownloader = (*Adapter)(nil)
 	_ core.Organizer            = (*Adapter)(nil)
 	_ core.Retrier              = (*Adapter)(nil)

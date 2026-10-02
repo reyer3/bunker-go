@@ -67,7 +67,43 @@ func attachmentFromContent(content *event.MessageEventContent) (core.Attachment,
 	if content.File != nil {
 		ref = string(content.File.URL)
 	}
-	return core.Attachment{Name: name, MIME: mimeType, Size: size, Ref: ref}, true
+	att := core.Attachment{Name: name, MIME: mimeType, Size: size, Ref: ref}
+	if content.MsgType == event.MsgAudio && content.MSC3245Voice != nil {
+		att.Voice = true
+		if content.MSC1767Audio != nil {
+			att.Duration = (content.MSC1767Audio.Duration + 500) / 1000
+			att.Waveform = waveformFromMSC1767(content.MSC1767Audio.Waveform)
+		}
+		if att.Duration == 0 && content.Info != nil {
+			att.Duration = (content.Info.Duration + 500) / 1000
+		}
+	}
+	return att, true
+}
+
+// maxWaveformBars bounds the waveform kept on an Attachment: Matrix lets a
+// sender put any number of samples there, and every copy rides along in
+// the store row and every listing. Element sends 100.
+const maxWaveformBars = 256
+
+// waveformFromMSC1767 converts Matrix's 0-1024 samples to Attachment's
+// 0-100 bars. A waveform longer than maxWaveformBars is dropped (the note
+// still plays; only the bar graph is lost).
+func waveformFromMSC1767(w []int) []byte {
+	if len(w) == 0 || len(w) > maxWaveformBars {
+		return nil
+	}
+	out := make([]byte, len(w))
+	for i, v := range w {
+		if v < 0 {
+			v = 0
+		}
+		if v > 1024 {
+			v = 1024
+		}
+		out[i] = byte(v * 100 / 1024)
+	}
+	return out
 }
 
 // matrixMediaDescriptor is the download material for one Matrix media

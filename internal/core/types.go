@@ -41,13 +41,25 @@ type Attachment struct {
 	// Empty when the channel sent none or it failed validation; omitted
 	// from JSON then, so rows and listings without one are unchanged.
 	Thumbnail []byte `json:",omitempty"`
+	// Voice marks a voice note (WhatsApp PTT, Matrix MSC3245 voice), as
+	// opposed to an audio file that was merely attached. Rows stored
+	// before the field existed decode with Voice false, which is right:
+	// they were all rendered as plain audio.
+	Voice bool `json:"voice,omitempty"`
+	// Duration is the playing time in whole seconds, when the channel
+	// reported one (voice notes). Zero means unknown.
+	Duration int `json:"duration,omitempty"`
+	// Waveform is the channel's loudness profile of a voice note, one
+	// 0-100 value per bar, as WhatsApp sends it. Empty when absent.
+	Waveform []byte `json:"waveform,omitempty"`
 }
 
 // Equal reports whether a and b describe the same attachment. Thumbnail
 // makes Attachment non-comparable with ==, so callers compare with this.
 func (a Attachment) Equal(b Attachment) bool {
 	return a.Name == b.Name && a.MIME == b.MIME && a.Size == b.Size && a.Ref == b.Ref &&
-		bytes.Equal(a.Thumbnail, b.Thumbnail)
+		a.Voice == b.Voice && a.Duration == b.Duration &&
+		bytes.Equal(a.Thumbnail, b.Thumbnail) && bytes.Equal(a.Waveform, b.Waveform)
 }
 
 // Item is the unified representation of a message, mail thread entry, chat

@@ -197,3 +197,53 @@ func (a *Adapter) SendMedia(ctx context.Context, out core.Outgoing) (core.Receip
 
 	return receipt, nil
 }
+
+// SendVoice delivers out's single Ogg Opus attachment as a voice note
+// (core.VoiceSender): an m.audio event flagged with MSC3245
+// (org.matrix.msc3245.voice) and carrying its length in milliseconds in
+// MSC1767 (org.matrix.msc1767.audio), which is what Element and other
+// clients need to draw the note as a voice message instead of a file. The
+// waveform is omitted: it cannot be computed without decoding the audio,
+// and a made-up one would misrepresent it. The file is uploaded encrypted
+// in an encrypted room, like SendMedia. One note per call.
+func (a *Adapter) SendVoice(ctx context.Context, out core.Outgoing) (core.Receipt, error) {
+	if len(out.Attachments) != 1 {
+		return core.Receipt{}, fmt.Errorf("matrix: send voice note: need exactly one audio file, got %d", len(out.Attachments))
+	}
+	path := out.Attachments[0]
+	d, err := core.OggOpusDuration(path)
+	if err != nil {
+		return core.Receipt{}, fmt.Errorf("matrix: send voice note: %w", err)
+	}
+	roomID, err := a.resolveRoom(ctx, out)
+	if err != nil {
+		return core.Receipt{}, err
+	}
+	encrypted, err := a.client.StateStore.IsEncrypted(ctx, roomID)
+	if err != nil {
+		return core.Receipt{}, fmt.Errorf("matrix: send voice note: check room encryption: %w", err)
+	}
+	content, err := a.buildMediaContent(ctx, path, encrypted)
+	if err != nil {
+		return core.Receipt{}, fmt.Errorf("matrix: send voice note: %w", err)
+	}
+	// The sniffed type of an Ogg file is application/ogg, which would
+	// make it an m.file; a voice note is always m.audio.
+	content.MsgType = event.MsgAudio
+	content.Info.MimeType = "audio/ogg"
+	content.Info.Duration = int(d.Milliseconds())
+	content.MSC3245Voice = &event.MSC3245Voice{}
+	content.MSC1767Audio = &event.MSC1767Audio{Duration: int(d.Milliseconds())}
+	if out.ReplyTo != "" {
+		_, _, replyEventID, err := parseItemID(out.ReplyTo)
+		if err != nil {
+			return core.Receipt{}, fmt.Errorf("matrix: reply target: %w", err)
+		}
+		content.RelatesTo = &event.RelatesTo{InReplyTo: &event.InReplyTo{EventID: replyEventID}}
+	}
+	resp, err := a.client.SendMessageEvent(ctx, roomID, event.EventMessage, content)
+	if err != nil {
+		return core.Receipt{}, fmt.Errorf("matrix: send voice note to %s: %w", roomID, err)
+	}
+	return a.sentReceipt(roomID, resp.EventID), nil
+}

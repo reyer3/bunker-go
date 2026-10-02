@@ -62,7 +62,10 @@ func attachmentsFromInfo(infos []AttachmentInfo) []Attachment {
 	}
 	out := make([]Attachment, len(infos))
 	for i, a := range infos {
-		out[i] = Attachment{Name: a.Name, MIME: a.MIME, Size: a.Size}
+		out[i] = Attachment{Name: a.Name, MIME: a.MIME, Size: a.Size, Voice: a.Voice}
+		if a.Voice {
+			out[i].Duration = int((a.DurationMS + 500) / 1000)
+		}
 	}
 	return out
 }

@@ -608,6 +608,7 @@ func (s *Service) Reply(ctx context.Context, id string, body string, cc []string
 	parts := append([]string{"reply", id, body, "cc"}, cc...)
 	parts = append(parts, "attachments")
 	parts = append(parts, attachments...)
+	parts = append(parts, fmt.Sprint("voice=", IsVoice(ctx)))
 	return s.idempotency.do(ctx, key, requestFingerprint(parts...), func() (Plan, Receipt, error) {
 		return s.reply(ctx, id, body, cc, attachments, false)
 	})
@@ -646,6 +647,11 @@ func (s *Service) reply(ctx context.Context, id string, body string, cc []string
 		Subject:     item.Subject,
 		Body:        body,
 		Attachments: attachments,
+	}
+
+	if IsVoice(ctx) {
+		out.Voice = true
+		return s.deliverVoice(ctx, adapter, plan, out, item.Thread, item.From.ID, "reply", dryRun)
 	}
 
 	if len(attachments) > 0 {
@@ -708,6 +714,7 @@ func (s *Service) Send(ctx context.Context, out Outgoing, dryRun bool) (Plan, Re
 	parts = append(parts, out.Cc...)
 	parts = append(parts, "attachments")
 	parts = append(parts, out.Attachments...)
+	parts = append(parts, fmt.Sprint("voice=", out.Voice))
 	return s.idempotency.do(ctx, key, requestFingerprint(parts...), func() (Plan, Receipt, error) {
 		return s.send(ctx, out, false)
 	})
@@ -729,6 +736,14 @@ func (s *Service) send(ctx context.Context, out Outgoing, dryRun bool) (Plan, Re
 	adapter, err := s.adapterFor(out.Channel, out.Account)
 	if err != nil {
 		return Plan{}, Receipt{}, err
+	}
+
+	if out.Voice {
+		to := ""
+		if len(out.To) > 0 {
+			to = out.To[0]
+		}
+		return s.deliverVoice(ctx, adapter, plan, out, outgoingThread(out.Thread, to), to, "send", dryRun)
 	}
 
 	if _, native := adapter.(MultiRecipientSender); !native && len(out.To) > 1 {

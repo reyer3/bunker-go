@@ -235,6 +235,8 @@ func (m Model) paletteCommands() []paletteEntry {
 			reason = err.Error()
 		}
 		add("Llamar", "Alt+C", paletteAlt('c'), reason)
+		add("Grabar nota de voz", "Alt+V", paletteAlt('v'), m.voiceRecordBlocked())
+		add("Reproducir nota de voz", "Alt+P", paletteAlt('p'), m.voicePlayBlocked())
 		ask("Alt+A", paletteAlt('a'))
 		add(back, "Esc", esc, "")
 		add("Ayuda", "F1", tea.KeyMsg{Type: tea.KeyF1}, "")

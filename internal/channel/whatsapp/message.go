@@ -19,6 +19,10 @@ type mediaMeta struct {
 	// thumb is the preview embedded in the message itself (see
 	// thumbnail.go), unvalidated; nil when the sender attached none.
 	thumb []byte
+	// voice, seconds and waveform describe a push-to-talk audio message.
+	voice    bool
+	seconds  int
+	waveform []byte
 }
 
 // bodyAndMedia extracts the text body and, when present, one media
@@ -51,7 +55,7 @@ func bodyAndMedia(msg *waE2E.Message) (body string, media *mediaMeta, ctx *waE2E
 		return doc.GetCaption(), m, doc.GetContextInfo()
 	}
 	if aud := msg.GetAudioMessage(); aud != nil {
-		m := &mediaMeta{mime: aud.GetMimetype(), size: aud.GetFileLength(), ref: mediaRef(aud.GetDirectPath(), aud.GetURL()), name: "audio"}
+		m := &mediaMeta{mime: aud.GetMimetype(), size: aud.GetFileLength(), ref: mediaRef(aud.GetDirectPath(), aud.GetURL()), name: "audio", voice: aud.GetPTT(), seconds: int(aud.GetSeconds()), waveform: aud.GetWaveform()}
 		return "", m, aud.GetContextInfo()
 	}
 	if sticker := msg.GetStickerMessage(); sticker != nil {
@@ -96,13 +100,21 @@ func toItem(account string, evt *events.Message) core.Item {
 		if err != nil {
 			logf("%v; ignoring the thumbnail of %s", err, item.ID)
 		}
-		item.Attachments = append(item.Attachments, core.Attachment{
+		att := core.Attachment{
 			Name:      media.name,
 			MIME:      media.mime,
 			Size:      int64(media.size),
 			Ref:       media.ref,
 			Thumbnail: thumb,
-		})
+		}
+		if media.voice {
+			att.Voice, att.Duration = true, media.seconds
+			// Waveforms are 64 bytes; anything much larger is not one.
+			if len(media.waveform) <= 256 {
+				att.Waveform = media.waveform
+			}
+		}
+		item.Attachments = append(item.Attachments, att)
 	}
 
 	if ctx != nil && ctx.GetStanzaID() != "" {

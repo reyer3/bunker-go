@@ -7,6 +7,7 @@ import (
 	"github.com/reyer3/bunker-go/internal/channel/fake"
 	"github.com/reyer3/bunker-go/internal/config"
 	"github.com/reyer3/bunker-go/internal/core"
+	"github.com/reyer3/bunker-go/internal/oggfixture"
 )
 
 // adapterConstructor builds a core.Adapter for one configured account.
@@ -80,7 +81,28 @@ func demoAdapter(channel core.Channel, account string) *fake.Adapter {
 			})
 		}
 	}
-	return fake.New(channel, account, seed...)
+	demoVoice := oggfixture.Bytes(12 * time.Second)
+	voiceID := fmt.Sprintf("%s:%s:voice1", channel, account)
+	if channel == core.ChannelWhatsApp || channel == core.ChannelMatrix {
+		// A voice note in the first demo chat, with a valid (silent) file
+		// behind it, so the bubble and its playback can be tried without
+		// real accounts.
+		seed = append(seed, core.Item{
+			ID: voiceID, Channel: channel, Account: account,
+			Thread: "demo-ana", ThreadName: "Demo Ana",
+			From:      core.Address{ID: "demo-ana", Name: "Demo Ana"},
+			Timestamp: now.Add(-30 * time.Minute),
+			Attachments: []core.Attachment{{
+				Name: "audio", MIME: "audio/ogg; codecs=opus", Size: int64(len(demoVoice)), Ref: "demo",
+				Voice: true, Duration: 12, Waveform: []byte{10, 30, 60, 90, 70, 40, 20, 50, 80, 100, 60, 30, 15, 45, 75, 55, 25, 10},
+			}},
+		})
+	}
+	a := fake.New(channel, account, seed...)
+	if channel == core.ChannelWhatsApp || channel == core.ChannelMatrix {
+		a.SetAttachmentData(voiceID, 0, demoVoice)
+	}
+	return a
 }
 
 // demoRegistry wires one fake adapter per channel under the "demo"

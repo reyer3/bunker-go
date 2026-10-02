@@ -51,6 +51,7 @@ var (
 	_ core.StatusPublisher      = (*Adapter)(nil)
 	_ core.Fetcher              = (*Adapter)(nil)
 	_ core.AttachmentDownloader = (*Adapter)(nil)
+	_ core.VoiceSender          = (*Adapter)(nil)
 	_ core.Editor               = (*Adapter)(nil)
 	_ core.Deleter              = (*Adapter)(nil)
 	_ core.Reactor              = (*Adapter)(nil)
@@ -99,6 +100,17 @@ func (a *Adapter) Send(ctx context.Context, out core.Outgoing) (core.Receipt, er
 	a.sent = append(a.sent, out)
 	a.seq++
 	return core.Receipt{ID: fmt.Sprintf("fake-send-%d", a.seq), Channel: a.channel, At: time.Now()}, nil
+}
+
+// SendVoice records out like Send, so a voice note sent against the demo
+// daemon is accepted (core.VoiceSender).
+func (a *Adapter) SendVoice(ctx context.Context, out core.Outgoing) (core.Receipt, error) {
+	return a.Send(ctx, out)
+}
+
+// AttachmentPolicy accepts Ogg Opus voice notes up to 16 MB.
+func (a *Adapter) AttachmentPolicy() core.AttachmentPolicy {
+	return core.AttachmentPolicy{MaxBytes: map[string]int64{"audio/ogg": 16 << 20}}
 }
 
 // SentMessages returns every Outgoing passed to Send, in order.

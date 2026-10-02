@@ -204,17 +204,23 @@ func clampScroll(scroll, total, budget int) int {
 // what is already on screen — both the total length and the desired end
 // index grow together.
 func windowTail(lines []string, scroll, budget int) ([]string, int) {
-	total := len(lines)
+	start, end, scroll := windowBounds(len(lines), scroll, budget)
+	return lines[start:end], scroll
+}
+
+// windowBounds is windowTail's index arithmetic: the [start,end) range of
+// the visible window and the clamped scroll.
+func windowBounds(total, scroll, budget int) (start, end, clamped int) {
 	scroll = clampScroll(scroll, total, budget)
-	end := total - scroll
-	start := end - budget
+	end = total - scroll
+	start = end - budget
 	if start < 0 {
 		start = 0
 	}
 	if start > end {
 		start = end
 	}
-	return lines[start:end], scroll
+	return start, end, scroll
 }
 
 // chatHeaderLines renders the K7 header: the channel glyph + contact/
@@ -255,18 +261,34 @@ func (m Model) chatHeaderLines() []string {
 // rare and stays in context with the messages around it, unlike the
 // always-visible header/tail).
 func (m Model) chatBodyLines() []string {
-	var lines []string
+	lines, _ := m.chatBodyTagged()
+	return lines
+}
+
+// chatBodyTagged is chatBodyLines plus, parallel to it, the media key of
+// the voice note each line shows ("" for every other line), which is how a
+// click on a voice bubble finds the note to play.
+func (m Model) chatBodyTagged() (lines, tags []string) {
 	if m.chatLoadErr != nil {
 		lines = append(lines, "Error: "+humanError(m.chatLoadErr))
+		tags = append(tags, "")
+	}
+	pad := func() {
+		for len(tags) < len(lines) {
+			tags = append(tags, "")
+		}
 	}
 	r := m.renderer()
 	// Issue #39: say what an empty body means, instead of a blank pane.
 	if len(m.chatItems) == 0 && m.chatOptimistic == nil && m.chatLoadErr == nil {
 		dim := r.NewStyle().Foreground(lipgloss.Color(style.ColorDim))
 		if m.chatLoading {
-			return append(lines, dim.Render("cargando mensajes…"))
+			lines = append(lines, dim.Render("cargando mensajes…"))
+		} else {
+			lines = append(lines, dim.Render("sin mensajes todavía · escribe abajo para empezar"))
 		}
-		return append(lines, dim.Render("sin mensajes todavía · escribe abajo para empezar"))
+		pad()
+		return lines, tags
 	}
 	// K10: the optimistic own bubble, if any, renders as one more item
 	// appended after the loaded conversation — it goes through the exact
@@ -294,15 +316,28 @@ func (m Model) chatBodyLines() []string {
 			lines = append(lines, m.dayPillLine(dayLabel(item.Timestamp, now)))
 			lastDay = item.Timestamp
 		}
+		pad()
 		showName := !item.FromMe && (i == 0 || items[i-1].From.Name != item.From.Name || items[i-1].FromMe)
 		dim := i == optIdx
 		status := ""
 		if dim {
 			status = m.chatOptimisticStatusText()
 		}
-		lines = append(lines, chatBubbleLines(r, item, m.width, showName, now, dim, status, m.readyThumb)...)
+		bubble := chatBubbleLines(r, item, m.width, showName, now, dim, status, m.readyThumb)
+		lines = append(lines, bubble...)
+		tags = append(tags, voiceLineTags(item, bubble)...)
 	}
-	return wrapLines(lines, m.width)
+	pad()
+	// wrapLines splits only lines wider than the pane, which a bubble line
+	// never is; the leading error line is the one case, so tag it by hand.
+	var wrapped, wrappedTags []string
+	for i, line := range lines {
+		for _, w := range wrapLines([]string{line}, m.width) {
+			wrapped = append(wrapped, w)
+			wrappedTags = append(wrappedTags, tags[i])
+		}
+	}
+	return wrapped, wrappedTags
 }
 
 // chatOptimisticStatusText is the K10 optimistic bubble's bottom-right
@@ -347,9 +382,16 @@ func (m Model) chatTailLines() []string {
 		// composer, replacing the blank separator line.
 		lines[0] = completion
 	}
-	lines = append(lines, strings.Split(m.composerBox(), "\n")...)
+	if m.voiceRec != nil {
+		lines = append(lines, strings.Split(m.voiceRecordBox(), "\n")...)
+	} else {
+		lines = append(lines, strings.Split(m.composerBox(), "\n")...)
+	}
 	if attach, ok := m.chatAttachLine(); ok {
 		lines = append(lines, attach)
+	}
+	if play, ok := m.voicePlayLine(); ok {
+		lines = append(lines, play)
 	}
 	if m.mediaErr != nil {
 		lines = append(lines, "Error: "+humanError(m.mediaErr))
@@ -361,7 +403,15 @@ func (m Model) chatTailLines() []string {
 	case m.chatPreviewPending:
 		lines = append(lines, "Preparando…")
 	case m.chatConfirm:
-		lines = append(lines, fmt.Sprintf("¿Enviar a %s? ↵ enviar · Esc cancelar", safeLine(strings.Join(m.chatPlan.Recipients, ", "))))
+		what := ""
+		if m.chatPlan.Voice {
+			what = "nota de voz"
+			if len(m.chatPlan.Attachments) > 0 {
+				what += " (" + formatVoiceDuration(int((m.chatPlan.Attachments[0].VoiceDuration()+500*time.Millisecond)/time.Second)) + ")"
+			}
+			what += " "
+		}
+		lines = append(lines, fmt.Sprintf("¿Enviar %sa %s? ↵ enviar · Esc cancelar", what, safeLine(strings.Join(m.chatPlan.Recipients, ", "))))
 	case m.chatSending:
 		lines = append(lines, "Enviando…")
 	case m.chatSendErr != nil:
@@ -385,6 +435,17 @@ func (m Model) chatTailLines() []string {
 func (m Model) composerBox() string {
 	border := m.renderer().NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(style.ColorDim)).Padding(0, 1)
 	return border.Render(m.composer.View())
+}
+
+// voiceRecordBox is the recording state in the composer's place: the same
+// rounded box, holding the timer and the keys.
+func (m Model) voiceRecordBox() string {
+	border := m.renderer().NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(style.ColorDim)).Padding(0, 1)
+	text := m.voiceRecordLine()
+	if w := chatComposerWidth(m.width); w > 0 {
+		text = runewidth.Truncate(text, w, "…")
+	}
+	return border.Render(text)
 }
 
 // dayPillLine renders the day separator as a centered dim pill: a
@@ -493,6 +554,14 @@ func chatBubbleLines(r *lipgloss.Renderer, item core.Item, width int, showName b
 			}
 		}
 		for i, attachment := range item.Attachments {
+			// A voice note is its own line (and waveform), never a file.
+			if attachment.Voice {
+				for _, text := range voiceBubbleTexts(attachment, bubbleWidth) {
+					padded := padTo(runewidth.Truncate(text, bubbleWidth, "…"), bubbleWidth)
+					lines = append(lines, alignBubbleLine(bodyStyle.Render(padded), bubbleWidth, width, item.FromMe))
+				}
+				continue
+			}
 			// Issue #4: an image already uploaded to a kitty-graphics
 			// terminal renders as its thumbnail instead of a text row.
 			if thumb != nil {

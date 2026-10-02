@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1156,5 +1157,33 @@ func TestMigrationV2AddsEditedDeletedAndReactionsToExistingDatabase(t *testing.T
 	// The reactions table must also exist and accept a write.
 	if err := s.SetReaction(context.Background(), "whatsapp:personal:1", core.Reaction{Sender: "bob@s.whatsapp.net", Emoji: "👍"}); err != nil {
 		t.Fatalf("SetReaction after migrateV2: %v", err)
+	}
+}
+
+// TestVoiceAttachmentRoundTripAndOldRows checks the voice-note fields
+// survive attachments_json and that a row written before they existed
+// (no voice/duration/waveform keys) still decodes as a plain attachment.
+func TestVoiceAttachmentRoundTripAndOldRows(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	want := sampleItem()
+	want.Attachments = []core.Attachment{{Name: "audio", MIME: "audio/ogg; codecs=opus", Size: 900, Ref: "/v/x", Voice: true, Duration: 12, Waveform: []byte{1, 50, 100}}}
+	if err := s.Upsert(ctx, want); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	got, err := s.Get(ctx, want.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(got.Attachments) != 1 || !got.Attachments[0].Equal(want.Attachments[0]) {
+		t.Fatalf("Attachments = %+v, want %+v", got.Attachments, want.Attachments)
+	}
+
+	var old []core.Attachment
+	if err := json.Unmarshal([]byte(`[{"Name":"audio","MIME":"audio/ogg","Size":5,"Ref":"/x"}]`), &old); err != nil {
+		t.Fatalf("old row must still decode: %v", err)
+	}
+	if old[0].Voice || old[0].Duration != 0 || old[0].Waveform != nil {
+		t.Errorf("old row = %+v, want no voice fields", old[0])
 	}
 }

@@ -160,6 +160,11 @@ type Outgoing struct {
 	Subject     string
 	Body        string
 	Attachments []string // local file paths
+	// Voice sends the single audio attachment as a voice note instead of a
+	// file. Service validates it (exactly one Ogg Opus file, no text, one
+	// recipient) and routes it to VoiceSender; a channel without that
+	// capability reports ErrUnsupported rather than sending a plain file.
+	Voice bool `json:"voice,omitempty"`
 }
 
 // Receipt confirms a write op actually reached the channel.
@@ -258,6 +263,10 @@ type AttachmentInfo struct {
 	Name string `json:"name"`
 	MIME string `json:"mime"`
 	Size int64  `json:"size"`
+	// Voice and DurationMS are set for a voice note: the plan shows both so
+	// a dry run tells what would go out as one and how long it is.
+	Voice      bool  `json:"voice,omitempty"`
+	DurationMS int64 `json:"duration_ms,omitempty"`
 }
 
 // AttachmentPolicy is what a MediaSender declares it accepts. MaxBytes
@@ -289,6 +298,15 @@ const AnyMIME = "*/*"
 type MediaSender interface {
 	Sender
 	SendMedia(ctx context.Context, out Outgoing) (Receipt, error)
+	AttachmentPolicy() AttachmentPolicy
+}
+
+// VoiceSender is an optional capability: an adapter that can send an
+// Ogg Opus file as a voice note (WhatsApp PTT, Matrix MSC3245) implements
+// it. out carries exactly one validated attachment and no body.
+// AttachmentPolicy bounds the file size like it does for MediaSender.
+type VoiceSender interface {
+	SendVoice(ctx context.Context, out Outgoing) (Receipt, error)
 	AttachmentPolicy() AttachmentPolicy
 }
 
@@ -504,6 +522,8 @@ type Plan struct {
 	// computed and validated against the adapter's AttachmentPolicy
 	// before any upload. Empty for actions with no attachments.
 	Attachments []AttachmentInfo `json:"attachments,omitempty"`
+	// Voice reports that the attachment goes out as a voice note.
+	Voice bool `json:"voice,omitempty"`
 	// Recipients lists every To address this send/reply reaches, in
 	// order — one entry whether the adapter addressed everyone with a
 	// single native call (mail) or Service fanned out N sequential
