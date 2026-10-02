@@ -79,7 +79,7 @@ func TestEndToEndCLIAgainstFakeDaemon(t *testing.T) {
 	var out string
 	var code int
 	pollUntil(daemonStartBudget, func() bool {
-		code, out = runCLI(t, []string{"list", "--json"})
+		code, out = runCLI(t, []string{"list", "--unread", "--json"})
 		if code != 0 {
 			t.Fatalf("list --json exit code = %d", code)
 		}
@@ -115,18 +115,37 @@ func TestEndToEndCLIAgainstFakeDaemon(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &page); code != 0 || err != nil || len(page.Items) != 1 || page.Items[0].ID != mailID || page.NextCursor != "" {
 		t.Fatalf("find channel:mail --json = %d %q (%v)", code, out, err)
 	}
-	code, out = runCLI(t, []string{"list", "--query", "-channel:mail", "--limit", "1", "--json"})
+	code, out = runCLI(t, []string{"list", "--query", "-channel:mail is:unread", "--limit", "1", "--json"})
 	if err := json.Unmarshal([]byte(out), &page); code != 0 || err != nil || len(page.Items) != 1 || page.NextCursor == "" {
 		t.Fatalf("list --query page 1 = %d %q (%v)", code, out, err)
 	}
 	first := page.Items[0].ID
-	code, out = runCLI(t, []string{"list", "--query", "-channel:mail", "--limit", "1", "--cursor", page.NextCursor, "--json"})
+	code, out = runCLI(t, []string{"list", "--query", "-channel:mail is:unread", "--limit", "1", "--cursor", page.NextCursor, "--json"})
 	page.NextCursor = ""
 	if err := json.Unmarshal([]byte(out), &page); code != 0 || err != nil || len(page.Items) != 1 || page.Items[0].ID == first || page.Items[0].ID == mailID || page.NextCursor != "" {
 		t.Fatalf("list --query page 2 = %d %q (%v)", code, out, err)
 	}
 	if code, out = runCLI(t, []string{"find", "foo:bar", "--json"}); code == 0 || !strings.Contains(out, `foo:`) {
 		t.Fatalf("find foo:bar = %d %q, want an error naming the operator", code, out)
+	}
+
+	// chats lists conversations, read ones included, newest first: the
+	// unread demo chat, then the two already-read demo chats.
+	var chatsResp struct {
+		Conversations []struct {
+			Last   struct{ ID string }
+			Unread int
+		} `json:"conversations"`
+	}
+	code, out = runCLI(t, []string{"chats", "--channel", "whatsapp", "--json"})
+	if err := json.Unmarshal([]byte(out), &chatsResp); code != 0 || err != nil || len(chatsResp.Conversations) != 3 {
+		t.Fatalf("chats --channel whatsapp --json = %d %q (%v), want 3 conversations", code, out, err)
+	}
+	if first := chatsResp.Conversations[0]; first.Last.ID != "whatsapp:demo:1" || first.Unread != 1 {
+		t.Fatalf("newest conversation = %+v, want the unread demo chat", first)
+	}
+	if read := chatsResp.Conversations[2]; read.Unread != 0 {
+		t.Fatalf("oldest conversation = %+v, want a read one", read)
 	}
 
 	// read <id> --json

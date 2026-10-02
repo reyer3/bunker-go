@@ -101,14 +101,24 @@ func shortenIdentifier(s string) string {
 // whose subject hasn't synced) — falling back to a shortened, dimmed
 // identifier when nothing human-facing is available at all.
 func rowTitle(item core.Item) (text string, dimmed bool) {
-	for _, candidate := range []string{item.ThreadName, item.Subject, item.From.Name} {
+	candidates := []string{item.ThreadName, item.Subject, item.From.Name}
+	if item.FromMe {
+		// A conversation whose newest message is ours must not be titled
+		// with our own name.
+		candidates = candidates[:2]
+	}
+	for _, candidate := range candidates {
 		candidate = strings.TrimSpace(candidate)
 		if candidate == "" || looksLikeRawIdentifier(candidate) {
 			continue
 		}
 		return candidate, false
 	}
-	for _, candidate := range []string{item.ThreadName, item.Thread, item.From.ID, item.From.Name, item.ID} {
+	fallbacks := []string{item.ThreadName, item.Thread, item.From.ID, item.From.Name, item.ID}
+	if item.FromMe {
+		fallbacks = []string{item.ThreadName, item.Thread, item.ID}
+	}
+	for _, candidate := range fallbacks {
 		if candidate != "" {
 			return shortenIdentifier(candidate), true
 		}
@@ -122,6 +132,9 @@ func rowTitle(item core.Item) (text string, dimmed bool) {
 func previewLine(item core.Item, width int) string {
 	body := safeLine(item.Body)
 	sender := strings.TrimSpace(item.From.Name)
+	if item.FromMe {
+		sender = "Tú"
+	}
 	text := body
 	if sender != "" && !looksLikeRawIdentifier(sender) {
 		text = safeLine(sender)

@@ -22,6 +22,10 @@ type fakeBackend struct {
 	contactsErr   error
 	contactsCalls []core.ContactFilter
 
+	conversations      []core.Conversation
+	conversationsErr   error
+	conversationsCalls []core.ConversationFilter
+
 	listErr, getErr, fetchErr, readErr, countsErr error
 	replyErr, sendErr, organizeErr, statusErr     error
 	downloadErr                                   error
@@ -154,6 +158,24 @@ func (f *fakeBackend) React(ctx context.Context, id, emoji string, dryRun bool) 
 func (f *fakeBackend) MarkUnread(ctx context.Context, id string) (bool, error) {
 	f.unreadCalls = append(f.unreadCalls, id)
 	return f.unreadLocal, f.unreadErr
+}
+
+func (f *fakeBackend) Conversations(ctx context.Context, filter core.ConversationFilter) ([]core.Conversation, error) {
+	f.conversationsCalls = append(f.conversationsCalls, filter)
+	if f.conversationsErr != nil {
+		return nil, f.conversationsErr
+	}
+	var out []core.Conversation
+	for _, c := range f.conversations {
+		if filter.Channel != "" && c.Last.Channel != filter.Channel {
+			continue
+		}
+		if filter.Account != "" && c.Last.Account != filter.Account {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out, nil
 }
 
 func (f *fakeBackend) Contacts(ctx context.Context, filter core.ContactFilter) ([]core.Contact, error) {

@@ -113,6 +113,10 @@ Commands:
                                                              conversations; send
                                                              and call also take
                                                              a contact's name
+  chats [--channel c] [--account a] [--limit n] [--json]   conversations, newest
+                                                             first, read ones
+                                                             too, with unread
+                                                             counts
   counts [--json]                                          unread counts
   health [--json]                                          per-adapter connection
                                                              state, since when,
@@ -220,6 +224,8 @@ func runWithBackend(ctx context.Context, backend Backend, args []string, stdin i
 		return cmdCalls(ctx, backend, args[1:], stdout, stderr)
 	case "contacts":
 		return cmdContacts(ctx, backend, args[1:], stdout, stderr)
+	case "chats":
+		return cmdChats(ctx, backend, args[1:], stdout, stderr)
 	case "unread":
 		return cmdUnread(ctx, backend, args[1:], stdout, stderr)
 	default:

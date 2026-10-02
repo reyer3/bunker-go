@@ -9,6 +9,20 @@ import (
 
 type inboxGroup struct {
 	items []core.Item
+	// conversation marks a chat-list row (see chatlist.go): items holds
+	// only the conversation's newest item, and unread, not len(items),
+	// is its unread count (zero for a fully read conversation).
+	conversation bool
+	unread       int
+}
+
+// unreadCount is the row's badge number: the daemon's per-conversation
+// total for a chat-list row, else how many unread items the group holds.
+func (g inboxGroup) unreadCount() int {
+	if g.conversation {
+		return g.unread
+	}
+	return len(g.items)
 }
 
 type inboxKey struct {

@@ -346,6 +346,19 @@ func (s *Server) call(ctx context.Context, req Request) (any, error) {
 		}
 		return contactsResult{Contacts: contacts}, nil
 
+	case MethodConversations:
+		var p conversationsParams
+		if len(req.Params) > 0 {
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				return nil, fmt.Errorf("rpc: bad params: %w", err)
+			}
+		}
+		conversations, err := s.svc.Conversations(ctx, p.Filter)
+		if err != nil {
+			return nil, err
+		}
+		return conversationsResult{Conversations: conversations}, nil
+
 	case MethodHealth:
 		report, err := s.svc.HealthReport(ctx)
 		if err != nil {

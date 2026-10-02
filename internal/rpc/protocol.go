@@ -61,6 +61,7 @@ const (
 	MethodCallControl       = "call_control"
 	MethodCalls             = "calls"
 	MethodContacts          = "contacts"
+	MethodConversations     = "conversations"
 	MethodMarkUnread        = "mark_unread"
 	MethodEdit              = "edit"
 	MethodDelete            = "delete"
@@ -212,6 +213,13 @@ type contactsParams struct {
 }
 type contactsResult struct {
 	Contacts []core.Contact `json:"contacts"`
+}
+
+type conversationsParams struct {
+	Filter core.ConversationFilter `json:"filter"`
+}
+type conversationsResult struct {
+	Conversations []core.Conversation `json:"conversations"`
 }
 
 type planResult struct {

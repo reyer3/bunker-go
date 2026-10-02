@@ -277,6 +277,16 @@ func (c *Client) Contacts(ctx context.Context, filter core.ContactFilter) ([]cor
 	return res.Contacts, nil
 }
 
+// Conversations lists conversations, newest first, each with its unread
+// count (see core.Service.Conversations).
+func (c *Client) Conversations(ctx context.Context, filter core.ConversationFilter) ([]core.Conversation, error) {
+	var res conversationsResult
+	if err := c.call(ctx, MethodConversations, conversationsParams{Filter: filter}, &res); err != nil {
+		return nil, err
+	}
+	return res.Conversations, nil
+}
+
 // PostStatus publishes a status/story on channel/account.
 func (c *Client) PostStatus(ctx context.Context, channel core.Channel, account string, status core.Status, dryRun bool) (core.Plan, core.Receipt, error) {
 	var res planReceiptResult

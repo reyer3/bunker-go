@@ -54,9 +54,13 @@ func (m Model) threadGroups(channel core.Channel) []inboxGroup {
 		}
 		return out
 	}
-	out := make([]inboxGroup, 0, len(m.groups))
+	source := m.groups
+	if chats, ok := m.chatList(channel); ok {
+		source = chats
+	}
+	out := make([]inboxGroup, 0, len(source))
 	query := m.foldedFilter()
-	for _, g := range m.groups {
+	for _, g := range source {
 		if len(g.items) > 0 && g.items[0].Channel == channel && groupMatches(g, query) {
 			out = append(out, g)
 		}

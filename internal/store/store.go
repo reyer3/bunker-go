@@ -115,6 +115,7 @@ var migrations = []migration{
 	{version: 1, apply: migrateV1},
 	{version: 2, apply: migrateV2},
 	{version: 3, apply: migrateV3},
+	{version: 4, apply: migrateV4},
 }
 
 // CurrentSchemaVersion returns the latest schema version this binary
@@ -303,6 +304,21 @@ func migrateV3(db *sql.DB) error {
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit fts migration: %w", err)
+	}
+	return nil
+}
+
+// migrateV4 adds the covering index Conversations aggregates over: with
+// timestamp and unread stored in it, the per-conversation newest time and
+// unread total come from an index-only scan instead of reading every
+// message row of the channel. The partial index serves the items without
+// a thread, each a conversation of its own, without scanning the rest.
+func migrateV4(db *sql.DB) error {
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_items_conversation ON items(channel, account, thread, timestamp, unread)`); err != nil {
+		return fmt.Errorf("create conversation index: %w", err)
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_items_threadless ON items(timestamp) WHERE thread = ''`); err != nil {
+		return fmt.Errorf("create threadless index: %w", err)
 	}
 	return nil
 }

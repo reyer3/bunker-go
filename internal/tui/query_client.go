@@ -270,6 +270,19 @@ func (c *queryClient) Contacts(ctx context.Context, filter core.ContactFilter) (
 	})
 }
 
+// Conversations is an idempotent query (the WhatsApp and Matrix tabs'
+// chat list); it errors with core.ErrUnsupported when the connection
+// underneath cannot list conversations.
+func (c *queryClient) Conversations(ctx context.Context, filter core.ConversationFilter) ([]core.Conversation, error) {
+	return query(c, ctx, func(client Client) ([]core.Conversation, error) {
+		lister, ok := client.(ConversationsClient)
+		if !ok {
+			return nil, fmt.Errorf("tui: conversations: %w", core.ErrUnsupported)
+		}
+		return lister.Conversations(ctx, filter)
+	})
+}
+
 func (c *queryClient) Presence(ctx context.Context, channel string, account, thread string) (core.Presence, error) {
 	return query(c, ctx, func(client Client) (core.Presence, error) { return client.Presence(ctx, channel, account, thread) })
 }

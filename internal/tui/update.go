@@ -374,6 +374,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		oldGroups := m.groups
 		m.groups = groupUnread(msg.items)
+		m.chats = mergeChatLists(m.chats, msg.chats)
 		m.counts = msg.counts
 		if visible := len(m.visibleRows()); m.selected >= visible {
 			m.selected = max(0, visible-1)
@@ -578,7 +579,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "x", "h":
 			return m.plainCallKeyOrNothing(msg.String())
 		case "m":
-			if id, ok := m.selectedItemID(); ok && m.client != nil {
+			// A read chat-list row has nothing to mark.
+			if id, ok := m.selectedItemID(); ok && m.client != nil && (m.detail || m.selectedRowUnread()) {
 				m.marking = true
 				m.markLoading = true
 				m.markConfirm = false

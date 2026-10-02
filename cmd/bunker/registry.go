@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/reyer3/bunker-go/internal/channel/fake"
 	"github.com/reyer3/bunker-go/internal/config"
@@ -42,9 +43,12 @@ func buildRegistry(cfg *config.Config) (*core.Registry, error) {
 	return reg, nil
 }
 
-// demoAdapter builds a fake.Adapter preloaded with one demo item, used by
-// "bunker daemon --fake".
+// demoAdapter builds a fake.Adapter preloaded with one unread demo item
+// (plus, on the chat channels, a few already-read conversations so the
+// WhatsApp and Matrix tabs show a chat list), used by "bunker daemon
+// --fake".
 func demoAdapter(channel core.Channel, account string) *fake.Adapter {
+	now := time.Now()
 	item := core.Item{
 		ID:      fmt.Sprintf("%s:%s:1", channel, account),
 		Channel: channel,
@@ -56,8 +60,27 @@ func demoAdapter(channel core.Channel, account string) *fake.Adapter {
 		Body:       fmt.Sprintf("This is a fake %s message from bunker-go's demo mode.", channel),
 		From:       core.Address{ID: "demo", Name: "bunker-go demo"},
 		Unread:     true,
+		Timestamp:  now.Add(-5 * time.Minute),
 	}
-	return fake.New(channel, account, item)
+	seed := []core.Item{item}
+	if channel == core.ChannelWhatsApp || channel == core.ChannelMatrix {
+		for i, c := range []struct{ thread, name, from, body string }{
+			{"demo-ana", "Demo Ana", "Demo Ana", "Nos vemos mañana a las 10."},
+			{"demo-team", "Demo equipo", "Demo Luis", "Subí las notas de la reunión."},
+		} {
+			seed = append(seed, core.Item{
+				ID:         fmt.Sprintf("%s:%s:chat%d", channel, account, i+1),
+				Channel:    channel,
+				Account:    account,
+				Thread:     c.thread,
+				ThreadName: c.name,
+				Body:       c.body,
+				From:       core.Address{ID: c.thread, Name: c.from},
+				Timestamp:  now.Add(time.Duration(-(i + 1)) * time.Hour),
+			})
+		}
+	}
+	return fake.New(channel, account, seed...)
 }
 
 // demoRegistry wires one fake adapter per channel under the "demo"
