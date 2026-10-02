@@ -204,6 +204,17 @@ func runCommandLine(args []string, stdin *os.File, stdout, stderr io.Writer) int
 			return 1
 		}
 		return cmdLink(context.Background(), cfg, args[1:], stdin, stdout, stderr)
+	case "call":
+		// audio-test only checks this machine's audio tools: it reads the
+		// config but needs no daemon. Every other call command goes below.
+		if len(args) > 1 && args[1] == "audio-test" {
+			cfg, err := config.LoadDefault()
+			if err != nil {
+				fmt.Fprintln(stderr, "error: load config:", err)
+				return 1
+			}
+			return cmdCallAudioTest(context.Background(), cfg, args[2:], stdout, stderr)
+		}
 	case "import-keys":
 		cfg, err := config.LoadDefault()
 		if err != nil {

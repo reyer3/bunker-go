@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"log/slog"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -47,10 +50,25 @@ type liveCall interface {
 
 // callAudio opens the local microphone (src) and speaker (sink) for one
 // call, both 16 kHz mono (meowcaller.SampleRate). Either may be nil when
-// the account configured no capture/playback command.
+// the account configured no capture/playback command. problem is told
+// (short text for the user, full error for the log) when a helper fails or
+// dies after Open returned.
 type callAudio interface {
-	Open() (meowcaller.AudioSource, meowcaller.AudioSink, error)
+	Open(problem func(short string, err error)) (meowcaller.AudioSource, meowcaller.AudioSink, error)
 }
+
+// audioChecker is an optional callAudio capability: Check reports, before
+// a call starts, why it could not have any sound (a missing helper).
+type audioChecker interface {
+	Check() error
+}
+
+// callMediaTimeout is how long an answered call may go without any media
+// from the peer before it is flagged (see noMedia).
+const callMediaTimeout = 10 * time.Second
+
+// errNoMedia is the AudioError of a call whose peer never sent media.
+const errNoMedia = "no llega audio del otro lado (sin medios)"
 
 // callRecord is one call this adapter tracks until it ends.
 type callRecord struct {
@@ -60,6 +78,12 @@ type callRecord struct {
 	answered bool
 	src      meowcaller.AudioSource
 	sink     meowcaller.AudioSink
+	// audioOpened is set once the audio helpers were started, so a
+	// repeated OnReady never spawns a second set.
+	audioOpened bool
+	// mediaTimer is the no-media watchdog, armed when the call is
+	// answered/accepted and stopped when media arrives or the call ends.
+	mediaTimer func() bool
 }
 
 // EnableCalls turns on voice calls for this account, driving engine for
@@ -72,6 +96,36 @@ func (a *Adapter) EnableCalls(engine callEngine, audio callAudio) {
 	a.liveCalls = make(map[string]*callRecord)
 	a.callMu.Unlock()
 	engine.OnIncomingCall(a.handleIncomingCall)
+	// Say at startup, not mid-call, that the audio tools are missing: the
+	// call itself is refused with the same message (see checkCallAudio).
+	if err := a.checkCallAudio(); err != nil {
+		a.callLog().Warn("calls are enabled but cannot have audio", "error", err)
+	}
+}
+
+// callLog is the logger of this account's call activity.
+func (a *Adapter) callLog() *slog.Logger {
+	return slog.Default().With("channel", string(core.ChannelWhatsApp), "account", a.account, "component", "call")
+}
+
+// checkCallAudio fails when the configured audio helpers cannot work, so a
+// call with no possible sound is refused instead of ringing silently.
+func (a *Adapter) checkCallAudio() error {
+	a.callMu.Lock()
+	audio := a.callAudio
+	a.callMu.Unlock()
+	if c, ok := audio.(audioChecker); ok {
+		return c.Check()
+	}
+	return nil
+}
+
+// afterFunc runs f after d; tests replace callAfter to fire it by hand.
+func (a *Adapter) afterFunc(d time.Duration, f func()) (stop func() bool) {
+	if a.callAfter != nil {
+		return a.callAfter(d, f)
+	}
+	return time.AfterFunc(d, f).Stop
 }
 
 // CanCall implements core.Caller.
@@ -89,6 +143,9 @@ func (a *Adapter) CanCall() error {
 // peer answers and media flows (see OnReady).
 func (a *Adapter) PlaceCall(ctx context.Context, to string) (core.Call, error) {
 	if err := a.CanCall(); err != nil {
+		return core.Call{}, err
+	}
+	if err := a.checkCallAudio(); err != nil {
 		return core.Call{}, err
 	}
 	a.callMu.Lock()
@@ -122,22 +179,32 @@ func (a *Adapter) PlaceCall(ctx context.Context, to string) (core.Call, error) {
 func (a *Adapter) ControlCall(ctx context.Context, callID string, action core.CallAction) (core.Call, error) {
 	a.callMu.Lock()
 	rec, ok := a.liveCalls[callID]
+	var info core.Call
+	if ok {
+		info = rec.info
+	}
 	a.callMu.Unlock()
 	if !ok {
 		return core.Call{}, fmt.Errorf("whatsapp: call %q: %w", callID, core.ErrNotFound)
 	}
+	ringing := info.Direction == core.CallIncoming && info.State == core.CallStateRinging
 
 	switch action {
 	case core.CallAnswer:
-		if rec.info.Direction != core.CallIncoming || rec.info.State != core.CallStateRinging {
+		if !ringing {
 			return core.Call{}, fmt.Errorf("whatsapp: call %q is not ringing", callID)
+		}
+		// Refuse before answering: the call stays ringing, so it can still
+		// be rejected, instead of connecting into silence.
+		if err := a.checkCallAudio(); err != nil {
+			return core.Call{}, err
 		}
 		if err := rec.live.Answer(); err != nil {
 			return core.Call{}, fmt.Errorf("whatsapp: answer: %w", err)
 		}
 		return a.setCallState(callID, core.CallStateConnecting, true), nil
 	case core.CallReject:
-		if rec.info.Direction != core.CallIncoming || rec.info.State != core.CallStateRinging {
+		if !ringing {
 			return core.Call{}, fmt.Errorf("whatsapp: call %q is not ringing, use hangup", callID)
 		}
 		if err := rec.live.Reject(); err != nil {
@@ -223,9 +290,53 @@ func (a *Adapter) setCallState(callID, state string, answered bool) core.Call {
 	if !ok {
 		return core.Call{}
 	}
-	rec.info.State = state
+	// Media can start (OnReady -> active) before the accept/answer path
+	// gets here; never move an active call back to connecting.
+	if rec.info.State != core.CallStateActive {
+		rec.info.State = state
+	}
 	rec.answered = rec.answered || answered
+	if answered && rec.info.State != core.CallStateActive && rec.mediaTimer == nil {
+		rec.mediaTimer = a.afterFunc(callMediaTimeout, func() { a.noMedia(callID) })
+	}
 	return rec.info
+}
+
+// noMedia flags a call that was answered but never received a packet from
+// the peer: the local audio setup may be fine, the network, the relay or
+// the codec is not. It is a diagnosis, not a hangup.
+func (a *Adapter) noMedia(callID string) {
+	a.callMu.Lock()
+	rec, ok := a.liveCalls[callID]
+	flag := ok && rec.info.State != core.CallStateActive && rec.info.AudioError == ""
+	if flag {
+		rec.info.AudioError = errNoMedia
+	}
+	a.callMu.Unlock()
+	if flag {
+		a.callLog().Warn("answered call received no media", "call_id", callID, "after", callMediaTimeout.String(),
+			"hint", "no RTP from the relay: check network/firewall (UDP), not local audio")
+	}
+}
+
+// setAudioError records why callID has no sound (first problem wins, it is
+// the root cause) and logs every one.
+func (a *Adapter) setAudioError(callID, short string, err error) {
+	a.callLog().Error("call audio problem", "call_id", callID, "problem", short, "error", err)
+	a.callMu.Lock()
+	defer a.callMu.Unlock()
+	if rec, ok := a.liveCalls[callID]; ok && rec.info.AudioError == "" {
+		rec.info.AudioError = short
+	}
+}
+
+// audioOpenProblem is the short, user-facing text for an Open failure.
+func audioOpenProblem(err error) string {
+	if errors.Is(err, exec.ErrNotFound) || errors.Is(err, fs.ErrNotExist) {
+		return "falta el programa de audio, revisa call_capture_command y call_playback_command"
+	}
+	msg := strings.TrimPrefix(err.Error(), "whatsapp: ")
+	return "no se pudo abrir el audio: " + msg
 }
 
 // startCallAudio opens the microphone and speaker once media flows.
@@ -233,20 +344,33 @@ func (a *Adapter) startCallAudio(callID string) {
 	a.callMu.Lock()
 	rec, ok := a.liveCalls[callID]
 	audio := a.callAudio
+	opened := false
 	if ok {
 		rec.info.State = core.CallStateActive
 		rec.answered = true
 		if rec.info.ConnectedAt.IsZero() {
 			rec.info.ConnectedAt = time.Now()
 		}
+		if rec.mediaTimer != nil {
+			rec.mediaTimer()
+		}
+		if rec.info.AudioError == errNoMedia {
+			rec.info.AudioError = ""
+		}
+		opened = rec.audioOpened
+		rec.audioOpened = true
 	}
 	a.callMu.Unlock()
-	if !ok || audio == nil {
+	if !ok {
 		return
 	}
-	src, sink, err := audio.Open()
+	a.callLog().Info("call media is flowing", "call_id", callID)
+	if audio == nil || opened {
+		return
+	}
+	src, sink, err := audio.Open(func(short string, err error) { a.setAudioError(callID, short, err) })
 	if err != nil {
-		core.LogSinkError(core.ChannelWhatsApp, a.account, "call_audio", err)
+		a.setAudioError(callID, audioOpenProblem(err), err)
 		return
 	}
 	a.callMu.Lock()
@@ -271,6 +395,9 @@ func (a *Adapter) endCall(ctx context.Context, callID, reason string) core.Call 
 		rec.info.State = core.CallStateEnded
 		rec.info.EndReason = reason
 		rec.info.EndedAt = time.Now()
+		if rec.mediaTimer != nil {
+			rec.mediaTimer()
+		}
 	}
 	a.callMu.Unlock()
 	if !ok {

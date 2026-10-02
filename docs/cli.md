@@ -915,6 +915,11 @@ call ok: 3EB0C4... whatsapp/personal outgoing +51999999999@s.whatsapp.net callin
  "EndedAt": "0001-01-01T00:00:00Z", "EndReason": ""}
 ```
 
+`audio_error` (omitted while empty) says why the call has no sound, e.g.
+`"pacat terminó (exit status 1): Connection refused"` or
+`"no llega audio del otro lado (sin medios)"`; see
+[Troubleshooting call audio](#troubleshooting-call-audio).
+
 `Direction` is `incoming` or `outgoing`; `State` moves `ringing`/`calling`
 → `connecting` → `active` → `ended`. `StartedAt` is when the call started
 ringing, `ConnectedAt` when media started flowing (zero until then) and
@@ -947,6 +952,72 @@ none). A connected call also shows how long it has been connected:
 3EB0C4... whatsapp/wa outgoing Ana (51999999999@s.whatsapp.net) active 2:35
 ```
  `--json` returns `{"calls": [...]}` with the shape above.
+
+## `bunker call audio-test [--account A] [--seconds N] [--json]`
+
+Checks this machine's call audio without WhatsApp: it plays a 1 s 440 Hz
+tone through the account's `call_playback_command` while recording `N`
+seconds (default 3, 1 to 30) from its `call_capture_command`, then reports
+the commands used, whether each was found and started, any exit error and
+stderr tail, and the microphone level (peak and RMS, as a fraction of full
+scale and in dBFS). `--account` is optional when there is a single WhatsApp
+account. The call gains are applied, so the level is what a call would send.
+
+It is local only: it runs in the CLI process (it reads `config.toml`, it
+does not need the daemon) and never touches the network or WhatsApp, so
+it has no `--dry-run`. Exit status is 1 when a helper is missing or died,
+or the mic heard digital silence.
+
+```
+$ bunker call audio-test --seconds 2
+capture : started, recorded 2.0 s of 2 s
+  command: parec --raw --format=s16le --rate=16000 --channels=1 --latency-msec=60
+playback: started, played a 1 s 440 Hz tone
+  command: pacat --playback --raw --format=s16le --rate=16000 --channels=1 --latency-msec=60
+mic level: peak 0.1204 (-18.4 dBFS), rms 0.0310 (-30.2 dBFS)
+hint: playback accepted a 1 s 440 Hz tone; if you did not hear it, ...
+result: ok
+```
+
+`--json` returns `{"account", "capture", "playback", "seconds_wanted",
+"seconds_recorded", "mic_peak", "mic_rms", "mic_peak_dbfs", "mic_rms_dbfs",
+"hints", "ok"}`, where `capture`/`playback` are `{"command", "disabled",
+"found", "started", "error", "stderr"}`. A peak of 0 (-120 dBFS) means the
+microphone is muted or the wrong source is selected.
+
+### Troubleshooting call audio
+
+When a call connects but nobody hears anything ("las llamadas no se
+escuchan"), go in this order:
+
+1. `bunker call audio-test`: proves the speaker and microphone commands
+   work outside any call. A missing `parec`/`pacat` is also refused up
+   front: `bunker call` and `bunker call answer` fail with
+   `whatsapp: call audio: parec not found in PATH; install pulseaudio-utils
+   ...` instead of starting a silent call (an incoming call stays ringing,
+   so it can still be rejected).
+2. `bunker calls` (or the TUI banner) during the call: a non-empty
+   `audio_error` / `[sin audio: ...]` names the problem. A helper that dies
+   mid-call is reported with its exit status and stderr; an `audio_error`
+   of `no llega audio del otro lado (sin medios)` means the call was
+   answered but no media packet arrived from the peer within 10 s (a
+   network, firewall/UDP or relay problem, not local audio). It clears by
+   itself if media shows up later.
+3. The daemon log (its stderr: the terminal running `bunker daemon`, or
+   your service manager's journal), lines tagged `component=call`. Look for
+   `meowcaller: first RTP decoded from relay, inbound audio flowing`
+   (the peer's media reached you), `meowcaller: first RTP sent to relay,
+   outbound media flowing` (yours left), `call audio helper started`,
+   `call audio helper failed` (with the exit status and stderr) and
+   `meowcaller: failed to write ... audio`. meowcaller's own warnings and
+   errors always reach the log; its debug output does not.
+
+| What you see | Meaning |
+| --- | --- |
+| `audio-test` fails or `parec not found` | local audio tools; fix `call_capture_command` / `call_playback_command` |
+| `audio-test` ok, `first RTP decoded` missing, `sin medios` | the peer's audio never arrived: network/relay |
+| `first RTP decoded` present, `audio_error` empty, still silent | output device/volume (`pactl list short sinks`) |
+| `audio-test` mic peak 0 | muted or wrong input source |
 
 ### Voice calls in the TUI
 

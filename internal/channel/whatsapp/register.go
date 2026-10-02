@@ -117,15 +117,26 @@ func NewFromAccount(acc config.Account) (core.Adapter, error) {
 	// signaling, so it is only installed (and must be installed before
 	// Run connects) when the account asks for it.
 	if boolOption(acc.Options, "calls", false) {
-		adapter.EnableCalls(meowEngine{meowcaller.NewClient(cli.Client)}, commandAudio{
-			capture:  stringSliceOption(acc.Options, "call_capture_command", defaultCaptureCommand),
-			playback: stringSliceOption(acc.Options, "call_playback_command", defaultPlaybackCommand),
-			// Gains above maxCallGain only add clipping, never loudness.
-			captureGain:  gainOption(acc.Options, "call_capture_gain"),
-			playbackGain: gainOption(acc.Options, "call_playback_gain"),
-		})
+		log := adapter.callLog()
+		// meowcaller is silent without a logger, and its messages say
+		// whether media ever flowed ("first RTP decoded from relay").
+		client := meowcaller.NewClient(cli.Client, meowcaller.WithLogger(meowLogger(log)))
+		audio := commandAudioFromOptions(acc.Options)
+		audio.log = log
+		adapter.EnableCalls(meowEngine{client}, audio)
 	}
 	return adapter, nil
+}
+
+// commandAudioFromOptions reads an account's call audio options.
+func commandAudioFromOptions(opts map[string]interface{}) commandAudio {
+	return commandAudio{
+		capture:  stringSliceOption(opts, "call_capture_command", defaultCaptureCommand),
+		playback: stringSliceOption(opts, "call_playback_command", defaultPlaybackCommand),
+		// Gains above maxCallGain only add clipping, never loudness.
+		captureGain:  gainOption(opts, "call_capture_gain"),
+		playbackGain: gainOption(opts, "call_playback_gain"),
+	}
 }
 
 // Link runs the QR-pairing handshake for acc and renders each code to

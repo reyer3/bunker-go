@@ -105,6 +105,10 @@ Commands:
                                                              daemon's machine)
   call answer|reject|hangup <call-id|latest>
        [--dry-run] [--json]                                 control a live call
+  call audio-test [--account A] [--seconds N] [--json]     local speaker and mic
+                                                             check, no WhatsApp
+                                                             and no network (so
+                                                             no --dry-run)
   calls [--json]                                           list live calls
   unread <id> [--json]                                     put an item back in
                                                              the unread inbox

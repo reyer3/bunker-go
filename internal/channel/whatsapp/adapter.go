@@ -80,6 +80,9 @@ type Adapter struct {
 	callAudio   callAudio
 	liveCalls   map[string]*callRecord
 	placingCall bool
+	// callAfter replaces time.AfterFunc for the no-media watchdog, so
+	// tests fire it by hand instead of sleeping.
+	callAfter func(d time.Duration, f func()) (stop func() bool)
 }
 
 var (
