@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -36,6 +37,10 @@ const (
 	// herdrPaneLabel is how toggle finds its panel again: herdr has no
 	// "which plugin owns this pane" query, so the pane is renamed to it.
 	herdrPaneLabel = "bunker"
+	// herdrChatLabel marks the tab's single conversation pane the same
+	// way. It differs from herdrPaneLabel, so toggle never mistakes it for
+	// the panel.
+	herdrChatLabel = "bunker:chat"
 	// herdrSidebarRatio is the panel's share of the split. A split opens
 	// 50/50, so moving the left pane's edge left by (0.5 - ratio) leaves
 	// it that wide.
@@ -231,31 +236,129 @@ func validHerdrPaneID(id string) error {
 	return nil
 }
 
-// herdrOpenItemCommand opens one conversation in a new plugin pane to
-// the right of the focused one (the sidebar that asked for it) and
-// focuses it. The id reaches "bunker open" as BUNKER_OPEN_ID because
-// herdr runs a manifest pane's command as fixed argv.
-func herdrOpenItemCommand(id string) []string {
-	return []string{"plugin", "pane", "open", "--plugin", herdrPluginID, "--entrypoint", herdrOpenEntrypoint,
-		"--placement", "split", "--direction", "right", "--env", openIDEnv + "=" + id, "--focus"}
+// herdrOpenItemCommand opens one conversation in a new plugin pane and
+// focuses it. With a target it splits that pane (the conversation pane
+// being replaced), else the focused one (the sidebar that asked for it).
+// The id reaches "bunker open" as BUNKER_OPEN_ID because herdr runs a
+// manifest pane's command as fixed argv.
+func herdrOpenItemCommand(id, target string) []string {
+	argv := []string{"plugin", "pane", "open", "--plugin", herdrPluginID, "--entrypoint", herdrOpenEntrypoint,
+		"--placement", "split"}
+	if target != "" {
+		argv = append(argv, "--target-pane", target)
+	}
+	return append(argv, "--direction", "right", "--env", openIDEnv+"="+id, "--focus")
+}
+
+// herdrTabOf returns the tab the sidebar lives in, decided as toggle does:
+// the focused pane's tab, else HERDR_TAB_ID.
+func herdrTabOf(panes []herdrPane, envTab string) (string, error) {
+	for _, p := range panes {
+		if p.Focused {
+			return p.TabID, nil
+		}
+	}
+	if envTab == "" {
+		return "", errors.New("herdr: no focused pane and HERDR_TAB_ID is not set")
+	}
+	return envTab, nil
+}
+
+// herdrChatPane finds bunker's conversation pane in tab: the pane labelled
+// herdrChatLabel. The side panel (herdrPaneLabel) and the pane that runs
+// the sidebar never qualify, so they cannot be closed or reused here.
+func herdrChatPane(panes []herdrPane, tab, selfPane string) (herdrPane, bool, error) {
+	for _, p := range panes {
+		if p.TabID != tab || p.Label != herdrChatLabel || p.PaneID == selfPane {
+			continue
+		}
+		if err := validHerdrPaneID(p.PaneID); err != nil {
+			return herdrPane{}, false, fmt.Errorf("herdr: conversation pane: %w", err)
+		}
+		return p, true, nil
+	}
+	return herdrPane{}, false, nil
 }
 
 // herdrItemOpener is what Enter does in "bunker sidebar": inside herdr
-// (HERDR_ENV=1) it opens the conversation in a herdr pane; anywhere else
-// it returns nil and the sidebar opens it in place.
+// (HERDR_ENV=1) it shows the conversation in the tab's single conversation
+// pane; anywhere else it returns nil and the sidebar opens it in place.
+//
+// The pane is found by its label (see herdrChatLabel). Item ids can hold
+// characters that do not belong in a label, so which conversation a pane
+// shows is remembered here, in the process that opens them. A labelled
+// pane this process does not know (the sidebar restarted) is replaced.
 func herdrItemOpener(getenv func(string) string, run herdrRunner) func(id string) error {
 	if run == nil || getenv("HERDR_ENV") != "1" {
 		return nil
 	}
+	var mu sync.Mutex
+	shown := map[string]string{} // conversation pane id -> item id
 	return func(id string) error {
 		if err := validItemID(id); err != nil {
 			return fmt.Errorf("herdr: open: %w", err)
 		}
+		mu.Lock()
+		defer mu.Unlock()
 		ctx, cancel := context.WithTimeout(context.Background(), herdrTimeout)
 		defer cancel()
-		_, err := run(ctx, herdrOpenItemCommand(id)...)
+
+		out, err := run(ctx, "pane", "list")
+		if err != nil {
+			return err
+		}
+		panes, err := parseHerdrPanes(out)
+		if err != nil {
+			return err
+		}
+		tab, err := herdrTabOf(panes, getenv("HERDR_TAB_ID"))
+		if err != nil {
+			return err
+		}
+		old, found, err := herdrChatPane(panes, tab, getenv("HERDR_PANE_ID"))
+		if err != nil {
+			return err
+		}
+		if !found {
+			clear(shown) // every remembered pane is gone
+			return openHerdrChat(ctx, run, shown, id, "")
+		}
+		if shown[old.PaneID] == id {
+			_, err := run(ctx, "plugin", "pane", "focus", old.PaneID)
+			return err
+		}
+		// Open the new pane by splitting the old one and close the old
+		// one after: the new pane then takes its slot, and a failed open
+		// leaves the old conversation in place.
+		if err := openHerdrChat(ctx, run, shown, id, old.PaneID); err != nil {
+			return err
+		}
+		delete(shown, old.PaneID)
+		_, err = run(ctx, "pane", "close", old.PaneID)
 		return err
 	}
+}
+
+// openHerdrChat opens the conversation pane, labels it so the next Enter
+// finds it, and records the item it shows. An unlabelled pane would never
+// be found again, so a failed rename closes the new pane.
+func openHerdrChat(ctx context.Context, run herdrRunner, shown map[string]string, id, target string) error {
+	out, err := run(ctx, herdrOpenItemCommand(id, target)...)
+	if err != nil {
+		return err
+	}
+	pane, err := parseHerdrOpenedPane(out)
+	if err != nil {
+		return err
+	}
+	if _, err := run(ctx, "pane", "rename", pane, herdrChatLabel); err != nil {
+		if _, cerr := run(ctx, "pane", "close", pane); cerr != nil {
+			return fmt.Errorf("%w (and closing the new pane %s failed: %v)", err, pane, cerr)
+		}
+		return err
+	}
+	shown[pane] = id
+	return nil
 }
 
 // herdrToggle is what toggle decided and ran (or, in a dry run, would

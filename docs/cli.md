@@ -1678,20 +1678,42 @@ running daemon (else the same "cannot reach bunker daemon" hint, exit 1).
   switch channel, `/` filters, `g` refreshes, `Ctrl+K` or `F2` opens the
   command palette, `?` or `F1` shows help, `q` quits. The other inbox
   keys work as in the full TUI.
-- **Enter:** inside herdr (`HERDR_ENV=1`) it opens the conversation in a
-  new herdr pane to the right and focuses it, and the list stays where it
-  was:
+- **Enter:** inside herdr (`HERDR_ENV=1`) it shows the conversation in
+  the tab's single conversation pane, to the right of the list, and
+  focuses it; the list stays where it was. bunker keeps one such pane per
+  tab, labelled `bunker:chat` (herdr cannot say which plugin owns a pane,
+  so, like the panel's `bunker` label, the pane is renamed). It lists the
+  panes (`herdr pane list`) and:
 
-  ```sh
-  herdr plugin pane open --plugin bunker --entrypoint open --placement split --direction right --env BUNKER_OPEN_ID=<id> --focus
-  ```
+  - no conversation pane in the tab: opens one and labels it:
 
-  herdr is found the same way as for `bunker herdr toggle`
-  (`HERDR_BIN_PATH`, else `herdr` on `PATH`), the call has a 10s timeout,
-  and an id starting with `-` or holding a control character is never
-  passed on. A failure shows on the status line
-  (`no se pudo abrir: …`). Outside herdr, Enter opens the conversation in
-  place, as the full TUI does, and Esc goes back to the list.
+    ```sh
+    herdr plugin pane open --plugin bunker --entrypoint open --placement split --direction right --env BUNKER_OPEN_ID=<id> --focus
+    herdr pane rename <new-pane> bunker:chat
+    ```
+
+  - it already shows `<id>`: `herdr plugin pane focus <pane>` and nothing
+    else;
+  - it shows another conversation (or one this sidebar process did not
+    open): the new pane is opened by splitting it and the old one is
+    closed, so the new conversation takes the same slot:
+
+    ```sh
+    herdr plugin pane open … --target-pane <old-pane> … --env BUNKER_OPEN_ID=<id> --focus
+    herdr pane rename <new-pane> bunker:chat
+    herdr pane close <old-pane>
+    ```
+
+  Which item a pane shows is remembered in the sidebar process (ids can
+  hold characters a label should not), so a conversation pane closed by
+  hand is simply opened again. The panel (`bunker` label) and the pane
+  running the sidebar are never closed or reused. herdr is found the
+  same way as for `bunker herdr toggle` (`HERDR_BIN_PATH`, else `herdr`
+  on `PATH`), the call has a 10s timeout, and an id starting with `-` or
+  holding a control character is never passed on. A failure shows on the
+  status line (`no se pudo abrir: …`); a failed relabel closes the pane
+  it just opened. Outside herdr, Enter opens the conversation in place,
+  as the full TUI does, and Esc goes back to the list.
 - **`a`, ask Claude:** inside herdr only (the key and its `a Claude` hint
   are absent elsewhere). It runs `herdr agent list`, keeps the agents
   whose `agent` kind is `claude`, and picks the first that is `idle` or

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -104,7 +105,7 @@ func TestRunOpenAndSidebarReportAnUnreachableDaemon(t *testing.T) {
 }
 
 func TestRunSidebarWiresTheHerdrOpenerOnlyInsideHerdr(t *testing.T) {
-	herdr := &fakeHerdr{}
+	herdr := &fakeHerdr{replies: map[string]string{"pane list": chatList(), "plugin pane open": openedReply}}
 	deps, launches := launchDeps(true, map[string]string{"HERDR_ENV": "1"}, herdr)
 	if code := runWithDependencies([]string{"sidebar"}, os.Stdin, io.Discard, io.Discard, deps); code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
@@ -117,8 +118,8 @@ func TestRunSidebarWiresTheHerdrOpenerOnlyInsideHerdr(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "plugin pane open --plugin bunker --entrypoint open --placement split --direction right --env BUNKER_OPEN_ID=whatsapp:p:1 --focus"
-	if len(herdr.calls) != 1 || herdr.calls[0] != want {
-		t.Fatalf("herdr calls = %q, want %q", herdr.calls, want)
+	if len(herdr.calls) != 3 || herdr.calls[1] != want {
+		t.Fatalf("herdr calls = %q, want the open %q", herdr.calls, want)
 	}
 
 	deps, launches = launchDeps(true, nil, &fakeHerdr{})
@@ -173,9 +174,140 @@ func TestHerdrItemOpener(t *testing.T) {
 		t.Fatalf("herdr ran %q for an invalid id", herdr.calls)
 	}
 
-	herdr = &fakeHerdr{errs: map[string]error{"plugin pane open": errors.New("herdr: plugin pane open: no such plugin")}}
+	herdr = &fakeHerdr{replies: map[string]string{"pane list": chatList()}, errs: map[string]error{"plugin pane open": errors.New("herdr: plugin pane open: no such plugin")}}
 	if err := herdrItemOpener(inside, herdr.run)("mail:cl:1"); err == nil || !strings.Contains(err.Error(), "no such plugin") {
 		t.Fatalf("open error = %v, want herdr's message", err)
+	}
+}
+
+// chatList is a tab with the side panel (focused, as when Enter is
+// pressed) and optionally a conversation pane, plus a bunker pane in
+// another tab that must never count.
+func chatList(chat ...string) string {
+	panes := []herdrPane{
+		{PaneID: "w1:p1", TabID: "w1:t1", Focused: true, Label: herdrPaneLabel},
+		{PaneID: "w1:p2", TabID: "w1:t1"},
+		{PaneID: "w1:p9", TabID: "w1:t2", Label: herdrChatLabel},
+	}
+	for _, id := range chat {
+		panes = append(panes, herdrPane{PaneID: id, TabID: "w1:t1", Label: herdrChatLabel})
+	}
+	return paneList(panes...)
+}
+
+func TestHerdrItemOpenerReusesOnePane(t *testing.T) {
+	inside := herdrEnv(map[string]string{"HERDR_ENV": "1", "HERDR_PANE_ID": "w1:p1"})
+	const openNew = "plugin pane open --plugin bunker --entrypoint open --placement split --direction right --env BUNKER_OPEN_ID=mail:cl:1 --focus"
+	const openSplit = "plugin pane open --plugin bunker --entrypoint open --placement split --target-pane w1:p7 --direction right --env BUNKER_OPEN_ID=%s --focus"
+
+	t.Run("none: open and label", func(t *testing.T) {
+		herdr := &fakeHerdr{replies: map[string]string{"pane list": chatList(), "plugin pane open": openedReply}}
+		if err := herdrItemOpener(inside, herdr.run)("mail:cl:1"); err != nil {
+			t.Fatal(err)
+		}
+		wantCalls(t, herdr, "pane list", openNew, "pane rename w1:p5 bunker:chat")
+	})
+
+	t.Run("same id: focus only", func(t *testing.T) {
+		herdr := &fakeHerdr{replies: map[string]string{"pane list": chatList(), "plugin pane open": openedReply}}
+		open := herdrItemOpener(inside, herdr.run)
+		if err := open("mail:cl:1"); err != nil {
+			t.Fatal(err)
+		}
+		herdr.calls = nil
+		herdr.replies["pane list"] = chatList("w1:p5")
+		if err := open("mail:cl:1"); err != nil {
+			t.Fatal(err)
+		}
+		wantCalls(t, herdr, "pane list", "plugin pane focus w1:p5")
+	})
+
+	t.Run("other id: replaced in the same slot", func(t *testing.T) {
+		herdr := &fakeHerdr{replies: map[string]string{"pane list": chatList(), "plugin pane open": openedReply}}
+		open := herdrItemOpener(inside, herdr.run)
+		if err := open("mail:cl:1"); err != nil {
+			t.Fatal(err)
+		}
+		herdr.calls = nil
+		herdr.replies["pane list"] = chatList("w1:p5")
+		if err := open("mail:cl:2"); err != nil {
+			t.Fatal(err)
+		}
+		want := "plugin pane open --plugin bunker --entrypoint open --placement split --target-pane w1:p5 --direction right --env BUNKER_OPEN_ID=mail:cl:2 --focus"
+		wantCalls(t, herdr, "pane list", want, "pane rename w1:p5 bunker:chat", "pane close w1:p5")
+		for _, c := range herdr.calls {
+			if strings.Contains(c, "w1:p1") && !strings.HasPrefix(c, "pane list") {
+				t.Fatalf("the side panel was touched: %q", c)
+			}
+		}
+	})
+
+	t.Run("a pane this process did not open is replaced", func(t *testing.T) {
+		herdr := &fakeHerdr{replies: map[string]string{"pane list": chatList("w1:p7"), "plugin pane open": openedReply}}
+		if err := herdrItemOpener(inside, herdr.run)("mail:cl:1"); err != nil {
+			t.Fatal(err)
+		}
+		wantCalls(t, herdr, "pane list", fmt.Sprintf(openSplit, "mail:cl:1"), "pane rename w1:p5 bunker:chat", "pane close w1:p7")
+	})
+
+	t.Run("vanished pane: opens a new one", func(t *testing.T) {
+		herdr := &fakeHerdr{replies: map[string]string{"pane list": chatList(), "plugin pane open": openedReply}}
+		open := herdrItemOpener(inside, herdr.run)
+		if err := open("mail:cl:1"); err != nil {
+			t.Fatal(err)
+		}
+		herdr.calls = nil // the user closed it: the list has no chat pane
+		if err := open("mail:cl:1"); err != nil {
+			t.Fatal(err)
+		}
+		wantCalls(t, herdr, "pane list", openNew, "pane rename w1:p5 bunker:chat")
+	})
+
+	t.Run("the sidebar's own pane is never reused", func(t *testing.T) {
+		herdr := &fakeHerdr{replies: map[string]string{"pane list": chatList("w1:p1"), "plugin pane open": openedReply}}
+		if err := herdrItemOpener(inside, herdr.run)("mail:cl:1"); err != nil {
+			t.Fatal(err)
+		}
+		wantCalls(t, herdr, "pane list", openNew, "pane rename w1:p5 bunker:chat")
+	})
+
+	t.Run("a failed open keeps the old pane", func(t *testing.T) {
+		herdr := &fakeHerdr{replies: map[string]string{"pane list": chatList("w1:p7")},
+			errs: map[string]error{"plugin pane open": errors.New("herdr: plugin pane open: boom")}}
+		if err := herdrItemOpener(inside, herdr.run)("mail:cl:1"); err == nil || !strings.Contains(err.Error(), "boom") {
+			t.Fatalf("err = %v, want boom", err)
+		}
+		wantCalls(t, herdr, "pane list", fmt.Sprintf(openSplit, "mail:cl:1"))
+	})
+
+	t.Run("a failed rename closes the new pane", func(t *testing.T) {
+		herdr := &fakeHerdr{replies: map[string]string{"pane list": chatList(), "plugin pane open": openedReply},
+			errs: map[string]error{"pane rename": errors.New("herdr: pane rename: boom")}}
+		if err := herdrItemOpener(inside, herdr.run)("mail:cl:1"); err == nil || !strings.Contains(err.Error(), "boom") {
+			t.Fatalf("err = %v, want boom", err)
+		}
+		wantCalls(t, herdr, "pane list", openNew, "pane rename w1:p5 bunker:chat", "pane close w1:p5")
+	})
+
+	t.Run("herdr errors surface", func(t *testing.T) {
+		for name, herdr := range map[string]*fakeHerdr{
+			"pane list fails":   {errs: map[string]error{"pane list": errors.New("herdr: pane list: down")}},
+			"bad pane list":     {replies: map[string]string{"pane list": "not json"}},
+			"no tab":            {replies: map[string]string{"pane list": paneList()}},
+			"invalid chat pane": {replies: map[string]string{"pane list": chatList("--x")}},
+			"bad open reply":    {replies: map[string]string{"pane list": chatList(), "plugin pane open": `{"result":{}}`}},
+		} {
+			if err := herdrItemOpener(inside, herdr.run)("mail:cl:1"); err == nil {
+				t.Errorf("%s: no error", name)
+			}
+		}
+	})
+}
+
+func wantCalls(t *testing.T, herdr *fakeHerdr, want ...string) {
+	t.Helper()
+	if got, w := strings.Join(herdr.calls, "\n"), strings.Join(want, "\n"); got != w {
+		t.Fatalf("herdr calls:\n%s\nwant:\n%s", got, w)
 	}
 }
 

@@ -41,9 +41,13 @@ selected one, a line each. `j`/`k` move, `Tab` or `1`/`2`/`3`/`0` switch
 channel, `/` filters, `g` refreshes, `a` asks Claude (see below), `?`
 shows help and `q` quits.
 
-Enter opens the selected conversation in a new pane to the right of the
-panel (the plugin's `open` pane, which runs `bunker open`) and focuses
-it; the list stays open. The item id reaches that pane through the
+Enter opens the selected conversation in the tab's conversation pane,
+to the right of the panel (the plugin's `open` pane, which runs
+`bunker open`), and focuses it; the list stays open. There is only ever
+one conversation pane per tab, labelled `bunker:chat`: Enter on the
+conversation it already shows just focuses it, and Enter on another one
+replaces it in the same place instead of piling up panes. A pane you
+closed is opened again. The item id reaches the pane through the
 `BUNKER_OPEN_ID` environment variable, since herdr runs pane commands as
 fixed argv. Esc in the conversation pane closes it.
 
