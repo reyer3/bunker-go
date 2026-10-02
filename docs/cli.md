@@ -10,7 +10,7 @@ compact plain text for a human at a terminal.
 
 | Command | `--json` |
 |---|---|
-| `list`, `find`, `read`, `thread`, `search`, `counts`, `health`, `contacts`, `calls`, `avatar`, `download` | yes: data |
+| `list`, `find`, `read`, `thread`, `search`, `counts`, `health`, `contacts`, `chats`, `calls`, `avatar`, `download` | yes: data |
 | `reply`, `send`, `edit`, `delete`, `react`, `organize`, `status post`, `call`, `call answer\|reject\|hangup`, `backfill` | yes: `{"dryRun", "plan", ...}` with the [`core.Plan`/`core.Receipt` shape](#coreplan-and-corereceipt-json-shape) |
 | `unread`, `read-thread` | yes: the result of the change |
 | `version`, `update`, `render`, `herdr toggle` | yes |
@@ -35,7 +35,8 @@ back to reading the store directly, and `daemon` itself.
 
 Runs the daemon: opens the SQLite store, wires one adapter per configured
 `[[account]]` (or three in-memory demo adapters under `--fake`, one per
-channel), starts each adapter's receive loop under a supervisor, and
+channel; the WhatsApp and Matrix ones also hold two already-read
+conversations, so their chat-list tabs have something to show), starts each adapter's receive loop under a supervisor, and
 serves the RPC socket until it receives `SIGINT`/`SIGTERM`. A missing
 config file is not an error — the daemon starts with no accounts, so
 `list`/`counts` still work against an empty store.
@@ -153,6 +154,22 @@ colored left bar. An empty section still shows its header and one dim
 each getting a fair share of the pane's height; a section with more
 conversations than fit ends in a dim "+N más" line rather than pushing
 another section off screen.
+
+**Chat list (WhatsApp and Matrix tabs).** Mail and the overview (`Todo`)
+list unread conversations only: reading one makes it disappear (inbox
+zero). The WhatsApp and Matrix tabs (`2`, `3`, and the same tabs in
+`bunker sidebar`) work like a messaging app instead: they list the most
+recent conversations (up to 200 per channel), read or not, one row each,
+ordered by their newest message. A conversation with unread messages
+carries its `⬤N` badge and a bold title; a fully read one has no badge and
+a regular-weight title, and the preview line shows the newest message
+(`Tú: ...` when it is ours). `Enter`, a click, or the sidebar's opener
+opens a read conversation exactly as an unread one. `m` (mark read) does
+nothing on a fully read row. The section header's number is still the
+unread total, and notifications still come from the unread list only. An
+empty list shows "sin conversaciones". The list comes from
+[`bunker chats`](#bunker-chats---channel-c---account-a---limit-n---json); against
+an older daemon without it, these tabs keep listing unread items only.
 
 Every view ends in a one-line key hint in the same notation (`key
 label`, joined by ` · `). When it does not fit the width, the
@@ -1061,6 +1078,30 @@ bunker send whatsapp wa jose "hola"
 
 `bunker call` also accepts a contact's phone-number JID directly. A group
 cannot be called.
+
+## `bunker chats [--channel c] [--account a] [--limit n] [--json]`
+
+Lists conversations the way a messaging app does: one per
+`(channel, account, thread)` (an item without a thread is its own
+conversation), ordered by their newest item, newest first, **including
+fully read ones**, each with its unread count. `--channel` and `--account`
+narrow it (`bunker chats --channel whatsapp`); `--limit` defaults to 50 and
+is capped at 500. It only reads the daemon's store: nothing reaches a
+channel. This is what the TUI's WhatsApp and Matrix tabs show.
+
+```
+whatsapp/personal	Ana Díaz	0 unread	whatsapp:personal:3
+matrix/work	Equipo	3 unread	matrix:work:9
+```
+
+Columns: `channel/account`, name (the thread name, else the sender), unread
+count, and the id of the conversation's newest item (what `read`, `reply`
+and `open` take).
+
+`--json` returns `{"conversations": [{"last": <item>, "unread": N}]}`,
+where `last` is the full [item](#bunker-list-flags) (without labels or
+reactions) of the conversation's newest message and `unread` is how many of
+the conversation's items are unread (0 for a read one).
 
 ## `bunker counts [--json]`
 

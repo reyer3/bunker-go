@@ -25,6 +25,7 @@ type inboxLoadedMsg struct {
 	token     uint64
 	items     []core.Item
 	counts    map[core.Channel]map[string]int
+	chats     map[core.Channel][]core.Conversation
 	listErr   error
 	countsErr error
 	health    []core.AdapterHealth
@@ -163,7 +164,8 @@ func loadInbox(client Client, token uint64) tea.Cmd {
 			return inboxLoadedMsg{token: token, listErr: err}
 		}
 		counts, countsErr := client.Counts(ctx)
+		chats := fetchChatLists(ctx, client)
 		report := fetchHealthReport(ctx, client)
-		return inboxLoadedMsg{token: token, items: items, counts: counts, countsErr: countsErr, health: report.Adapters, update: report.Update}
+		return inboxLoadedMsg{token: token, items: items, counts: counts, chats: chats, countsErr: countsErr, health: report.Adapters, update: report.Update}
 	}
 }

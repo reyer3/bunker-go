@@ -21,6 +21,10 @@ import (
 type Model struct {
 	client Client
 	groups []inboxGroup
+	// chats are the WhatsApp and Matrix tabs' conversation lists (see
+	// chatlist.go), read ones included; groups stays the unread snapshot
+	// that counts and notifications are built from.
+	chats map[core.Channel][]inboxGroup
 	// mailExpanded is mail-sender-groups.md's collapse/expand state for
 	// the Mail section's sender rows, keyed by senderKey (the lower-
 	// cased From address): true once a sender's threads have been

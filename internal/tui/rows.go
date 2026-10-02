@@ -36,8 +36,11 @@ const narrowWidth = 30
 // Width/MaxWidth: every string is truncated/padded with go-runewidth
 // first, then wrapped in a style, so ANSI codes never confuse truncation.
 type rowStyles struct {
-	dim         lipgloss.Style
-	title       lipgloss.Style
+	dim   lipgloss.Style
+	title lipgloss.Style
+	// readTitle is a fully read chat-list row's title: regular weight,
+	// so it recedes behind unread rows without fading out.
+	readTitle   lipgloss.Style
 	selectedBar lipgloss.Style
 	selectedRow lipgloss.Style
 	glyph       map[core.Channel]lipgloss.Style
@@ -56,6 +59,7 @@ func newRowStyles(r *lipgloss.Renderer) rowStyles {
 	rs := rowStyles{
 		dim:           r.NewStyle().Foreground(lipgloss.Color(style.ColorDim)),
 		title:         r.NewStyle().Bold(true),
+		readTitle:     r.NewStyle(),
 		selectedBar:   r.NewStyle().Background(lipgloss.Color(selectionBackground)).Bold(true),
 		selectedRow:   r.NewStyle().Background(lipgloss.Color(selectionBackground)).Foreground(lipgloss.Color(selectionForeground)).Bold(true),
 		glyph:         make(map[core.Channel]lipgloss.Style, len(style.ChannelColors)),
@@ -123,7 +127,7 @@ func buildRow(group inboxGroup, selected bool, width int, glyphs map[core.Channe
 		accountTag = "  " + item.Account
 	}
 	timeStr := relativeTime(item.Timestamp, now)
-	badgeText := fmt.Sprintf("⬤%d", len(group.items))
+	badgeText := unreadBadge(group.unreadCount())
 
 	marker := " "
 	if selected {
@@ -190,6 +194,9 @@ func buildRow(group inboxGroup, selected bool, width int, glyphs map[core.Channe
 	}
 
 	titleStyle := styles.title
+	if group.conversation && group.unread == 0 {
+		titleStyle = styles.readTitle
+	}
 	if dimmed {
 		titleStyle = styles.dim
 	}
@@ -199,6 +206,16 @@ func buildRow(group inboxGroup, selected bool, width int, glyphs map[core.Channe
 		line2 = styles.dim.Render(preview)
 	}
 	return line1, line2
+}
+
+// unreadBadge is the "⬤N" unread marker. A fully read chat-list row shows
+// blanks of the same width instead, so its time column lines up with the
+// unread rows around it.
+func unreadBadge(n int) string {
+	if n > 0 {
+		return fmt.Sprintf("⬤%d", n)
+	}
+	return strings.Repeat(" ", runewidth.StringWidth("⬤0"))
 }
 
 // indentWidth is how many cells an expanded Mail sender's thread rows
@@ -360,6 +377,11 @@ func (m Model) emptySectionLine(styles rowStyles, width int) string {
 	}
 	if m.filterQuery != "" {
 		return styles.dim.Render(truncatePlain("sin coincidencias", width))
+	}
+	if channel, ok := m.currentChannelFilter(); ok {
+		if _, listed := m.chatList(channel); listed {
+			return styles.dim.Render(truncatePlain("sin conversaciones", width))
+		}
 	}
 	return styles.dim.Render(truncatePlain("sin pendientes", width))
 }

@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -98,7 +97,7 @@ func sidebarRowLine(row navRow, selected bool, width int, glyphs map[core.Channe
 		channel = item.Channel
 		lead = glyphs[channel]
 		title, dimmed = rowTitle(item)
-		unread = len(row.thread.items)
+		unread = row.thread.unreadCount()
 	}
 	title = safeLine(title)
 	indent := ""
@@ -109,7 +108,7 @@ func sidebarRowLine(row navRow, selected bool, width int, glyphs map[core.Channe
 	if selected {
 		marker = "▌"
 	}
-	badge := fmt.Sprintf("⬤%d", unread)
+	badge := unreadBadge(unread)
 	left := marker + " " + indent + lead + " "
 	if width > 0 {
 		budget := max(1, width-runewidth.StringWidth(left)-runewidth.StringWidth(badge)-1)
@@ -121,6 +120,9 @@ func sidebarRowLine(row navRow, selected bool, width int, glyphs map[core.Channe
 		return styles.selectedBar.Render(marker) + styles.selectedRow.Render(padTo(rest, max(0, width-1)))
 	}
 	titleStyle := styles.title
+	if row.kind == navThread && row.thread.conversation && row.thread.unread == 0 {
+		titleStyle = styles.readTitle
+	}
 	if dimmed {
 		titleStyle = styles.dim
 	}
