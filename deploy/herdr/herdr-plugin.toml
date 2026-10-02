@@ -6,7 +6,7 @@ min_herdr_version = "0.8.0"
 description = "Mail, WhatsApp and Matrix in a side panel"
 platforms = ["linux", "macos"]
 
-# The panel "bunker herdr toggle" docks on the left: the compact TUI made
+# The panel "bunker herdr toggle" docks on the right: the compact TUI made
 # for a narrow column.
 [[panes]]
 id = "sidebar"

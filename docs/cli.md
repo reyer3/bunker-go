@@ -2064,16 +2064,20 @@ running daemon (else the same "cannot reach bunker daemon" hint, exit 1).
   command palette, `?` or `F1` shows help, `q` quits. The other inbox
   keys work as in the full TUI.
 - **Enter:** inside herdr (`HERDR_ENV=1`) it shows the conversation in
-  the tab's single conversation pane, to the right of the list, and
-  focuses it; the list stays where it was. bunker keeps one such pane per
+  the tab's single conversation pane, between the list and the pane on
+  its left, and focuses it; the list stays where it was. bunker keeps one such pane per
   tab, labelled `bunker:chat` (herdr cannot say which plugin owns a pane,
   so, like the panel's `bunker` label, the pane is renamed). It lists the
   panes (`herdr pane list`) and:
 
-  - no conversation pane in the tab: opens one and labels it:
+  - no conversation pane in the tab: opens one right of the sidebar's left
+    neighbour (from `herdr pane edges`), so the narrow sidebar keeps its
+    width, and labels it; with no neighbour, or if herdr cannot say, it
+    opens right of the sidebar:
 
     ```sh
-    herdr plugin pane open --plugin bunker --entrypoint open --placement split --direction right --env BUNKER_OPEN_ID=<id> --focus
+    herdr pane edges --pane $HERDR_PANE_ID
+    herdr plugin pane open --plugin bunker --entrypoint open --placement split --target-pane <left-neighbour> --direction right --env BUNKER_OPEN_ID=<id> --focus
     herdr pane rename <new-pane> bunker:chat
     ```
 
@@ -2171,7 +2175,7 @@ command as fixed argv and passes the id with `--env`.
 
 ## `bunker herdr toggle [--dry-run] [--json]`
 
-Docks bunker as a narrow panel on the left of the current herdr tab. It
+Docks bunker as a narrow panel on the right of the current herdr tab. It
 is the `bunker.toggle` action of the herdr plugin in `deploy/herdr` (see
 its README to install it and bind a key), and needs herdr 0.8.0 or later.
 It talks to herdr only through the `herdr` CLI: `HERDR_BIN_PATH` when
@@ -2187,14 +2191,13 @@ when herdr reports none focused), and looks there for a pane labelled
 
   ```sh
   herdr plugin pane open --plugin bunker --entrypoint sidebar --placement split --target-pane <focused> --direction right --no-focus
-  herdr pane swap --source-pane <new-pane> --target-pane <focused>
-  herdr pane resize --direction left --amount 0.25 --pane <new-pane>
+  herdr pane resize --direction right --amount 0.25 --pane <new-pane>
   herdr pane rename <new-pane> bunker
   herdr plugin pane focus <new-pane>
   ```
 
-  The split opens right of the focused pane without focus, the swap moves
-  it to the left, and the resize leaves it a quarter of the split. The
+  The split opens right of the focused pane without focus and the resize
+  leaves it a quarter of the split. The
   label is how the next toggle finds it. If a step after the open fails,
   the new pane is closed again so a later toggle does not open a second
   one.

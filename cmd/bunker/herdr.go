@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-// "bunker herdr toggle" (issue #80) docks bunker as a left side panel in
+// "bunker herdr toggle" (issue #80) docks bunker as a right side panel in
 // herdr, a terminal workspace manager for coding agents. bunker ships a
 // herdr plugin (deploy/herdr) whose "sidebar" pane runs "bunker sidebar"; this
 // command is that plugin's "toggle" action. It drives herdr only through
@@ -26,7 +26,7 @@ import (
 //
 // Known limitation: the panel docks beside the focused pane, so in a tab
 // that already has several panes it is as tall as that pane, not a
-// full-height column at the tab's left edge. That is a follow-up.
+// full-height column at the tab's right edge. That is a follow-up.
 
 const (
 	// herdrPluginID and herdrSidebarEntrypoint match
@@ -42,7 +42,7 @@ const (
 	// the panel.
 	herdrChatLabel = "bunker:chat"
 	// herdrSidebarRatio is the panel's share of the split. A split opens
-	// 50/50, so moving the left pane's edge left by (0.5 - ratio) leaves
+	// 50/50, so moving the right pane's edge right by (0.5 - ratio) leaves
 	// it that wide.
 	herdrSidebarRatio = 0.25
 	// herdrNewPane stands in for the pane id "plugin pane open" returns,
@@ -280,6 +280,61 @@ func herdrChatPane(panes []herdrPane, tab, selfPane string) (herdrPane, bool, er
 	return herdrPane{}, false, nil
 }
 
+// herdrLeftNeighbor returns the pane sharing self's left edge with the
+// most rows in common, from a "pane edges" reply, or "" when there is
+// none or the reply does not parse.
+func herdrLeftNeighbor(out []byte, self string) string {
+	type rect struct{ X, Y, Width, Height int }
+	var resp struct {
+		Result struct {
+			Edges struct {
+				Layout struct {
+					Panes []struct {
+						PaneID string `json:"pane_id"`
+						Rect   rect   `json:"rect"`
+					} `json:"panes"`
+				} `json:"layout"`
+			} `json:"edges"`
+		} `json:"result"`
+	}
+	if json.Unmarshal(out, &resp) != nil {
+		return ""
+	}
+	panes := resp.Result.Edges.Layout.Panes
+	var me *rect
+	for i := range panes {
+		if panes[i].PaneID == self {
+			me = &panes[i].Rect
+		}
+	}
+	if me == nil {
+		return ""
+	}
+	best, bestRows := "", 0
+	for _, p := range panes {
+		r := p.Rect
+		rows := min(r.Y+r.Height, me.Y+me.Height) - max(r.Y, me.Y)
+		if p.PaneID != self && r.X+r.Width == me.X && rows > bestRows {
+			best, bestRows = p.PaneID, rows
+		}
+	}
+	return best
+}
+
+// herdrSidebarNeighbor asks herdr for the layout around the sidebar pane
+// self and returns its left neighbour, or "" when there is none, self is
+// not a valid pane id, or herdr cannot say.
+func herdrSidebarNeighbor(ctx context.Context, run herdrRunner, self string) string {
+	if validHerdrPaneID(self) != nil {
+		return ""
+	}
+	out, err := run(ctx, "pane", "edges", "--pane", self)
+	if err != nil {
+		return ""
+	}
+	return herdrLeftNeighbor(out, self)
+}
+
 // herdrItemOpener is what Enter does in "bunker sidebar": inside herdr
 // (HERDR_ENV=1) it shows the conversation in the tab's single conversation
 // pane; anywhere else it returns nil and the sidebar opens it in place.
@@ -321,7 +376,10 @@ func herdrItemOpener(getenv func(string) string, run herdrRunner) func(id string
 		}
 		if !found {
 			clear(shown) // every remembered pane is gone
-			return openHerdrChat(ctx, run, shown, id, "")
+			// The sidebar sits at the tab's right edge: splitting it
+			// would halve its narrow column, so split its left
+			// neighbour. Without one (or if herdr cannot say), split it.
+			return openHerdrChat(ctx, run, shown, id, herdrSidebarNeighbor(ctx, run, getenv("HERDR_PANE_ID")))
 		}
 		if shown[old.PaneID] == id {
 			_, err := run(ctx, "plugin", "pane", "focus", old.PaneID)
@@ -432,16 +490,15 @@ func planHerdrToggle(panes []herdrPane, envTab, envPane string) (herdrToggle, er
 }
 
 // herdrOpenCommands opens the plugin pane as a split right of anchor
-// without focus, swaps it into anchor's place so it sits on the left,
-// narrows it, labels it so the next toggle finds it, then focuses it.
+// without focus, narrows it, labels it so the next toggle finds it, then
+// focuses it.
 // Every command after the first acts on newPane.
 func herdrOpenCommands(anchor, newPane string) [][]string {
 	amount := strconv.FormatFloat(0.5-herdrSidebarRatio, 'f', -1, 64)
 	return [][]string{
 		{"plugin", "pane", "open", "--plugin", herdrPluginID, "--entrypoint", herdrSidebarEntrypoint,
 			"--placement", "split", "--target-pane", anchor, "--direction", "right", "--no-focus"},
-		{"pane", "swap", "--source-pane", newPane, "--target-pane", anchor},
-		{"pane", "resize", "--direction", "left", "--amount", amount, "--pane", newPane},
+		{"pane", "resize", "--direction", "right", "--amount", amount, "--pane", newPane},
 		{"pane", "rename", newPane, herdrPaneLabel},
 		{"plugin", "pane", "focus", newPane},
 	}

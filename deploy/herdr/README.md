@@ -1,7 +1,7 @@
 # bunker for herdr
 
 A plugin for herdr, the terminal workspace manager for coding agents, that
-docks bunker as a narrow panel on the left of the current tab, next to
+docks bunker as a narrow panel on the right of the current tab, next to
 your agents. Needs herdr 0.8.0 or later.
 
 ## Install
@@ -21,7 +21,7 @@ herdr plugin link <checkout>/deploy/herdr
 The plugin adds one action, `bunker.toggle`, which runs
 `bunker herdr toggle`:
 
-- no bunker panel in the tab: opens one on the left of the focused pane
+- no bunker panel in the tab: opens one on the right of the focused pane
   and focuses it;
 - a panel that is not focused: focuses it;
 - a focused panel: closes it.
@@ -42,8 +42,8 @@ channel, `/` filters, `g` refreshes, `a` asks Claude (see below), `?`
 shows help and `q` quits.
 
 Enter opens the selected conversation in the tab's conversation pane,
-to the right of the panel (the plugin's `open` pane, which runs
-`bunker open`), and focuses it; the list stays open. There is only ever
+between the panel and the pane on its left (the plugin's `open` pane,
+which runs `bunker open`), and focuses it; the list stays open. There is only ever
 one conversation pane per tab, labelled `bunker:chat`: Enter on the
 conversation it already shows just focuses it, and Enter on another one
 replaces it in the same place instead of piling up panes. A pane you
