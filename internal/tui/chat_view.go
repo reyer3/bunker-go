@@ -487,9 +487,10 @@ func chatBubbleLines(r *lipgloss.Renderer, item core.Item, width int, showName b
 		body := sanitizeTerminalText(item.Body)
 		for _, raw := range strings.Split(body, "\n") {
 			text := strings.ReplaceAll(raw, "\r", "")
-			text = runewidth.Truncate(text, bubbleWidth, "…")
-			padded := padTo(text, bubbleWidth)
-			lines = append(lines, alignBubbleLine(bodyStyle.Render(padded), bubbleWidth, width, item.FromMe))
+			for _, wrapped := range wrapWords(text, bubbleWidth) {
+				padded := padTo(wrapped, bubbleWidth)
+				lines = append(lines, alignBubbleLine(bodyStyle.Render(padded), bubbleWidth, width, item.FromMe))
+			}
 		}
 		for i, attachment := range item.Attachments {
 			// Issue #4: an image already uploaded to a kitty-graphics
