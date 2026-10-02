@@ -1457,6 +1457,11 @@ decrypts them in place — a hash mismatch (tampered or corrupted ciphertext)
 is rejected rather than returned; an item stored before this feature
 existed, or whose room key never arrived, has no descriptor and fails
 with a clear error instead of a panic.
+Matrix downloads (attachments and avatars) use authenticated media
+(`/_matrix/client/v1/media/download`); a homeserver without it (before
+spec v1.11) answers `M_UNRECOGNIZED`, and bunker then retries once on the
+legacy `/_matrix/media/v3/download` path, which it keeps using for that
+account until the daemon restarts.
 
 ```json
 {"result": {"Path": "/home/alice/manual.pdf", "Bytes": 483921, "Name": "manual.pdf", "MIME": "application/pdf"}}
