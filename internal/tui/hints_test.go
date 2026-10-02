@@ -65,6 +65,7 @@ func TestHelpListsChatKeys(t *testing.T) {
 func TestCtrlSSendsLikeEnterEverywhere(t *testing.T) {
 	// Chat: Ctrl+S previews like Enter, and confirms like Enter.
 	model, client := openedChat(t)
+	model.confirmChatSend = true // the explicit two-step flow
 	model = typeIntoChat(t, model, "hola")
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
 	if cmd == nil {

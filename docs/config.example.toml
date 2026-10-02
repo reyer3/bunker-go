@@ -14,6 +14,17 @@
 # [app]
 # command = ["wezterm", "start", "--class", "dev.bunker.app", "--", "bunker"]
 
+# --- tui: the interactive panel ---
+# A plain text message in an existing chat is sent by a single Enter (the
+# panel runs the dry-run itself first and sends only if it is clean).
+# confirm_chat_send = true brings back the two-step flow: Enter shows the
+# preview, a second Enter sends. Attachments, voice notes, a new
+# conversation, edits and mail always ask for the confirm.
+# notify = false turns off desktop notifications (OSC 777).
+# [tui]
+# confirm_chat_send = false
+# notify = true
+
 # --- herdr: bunker as a side panel (deploy/herdr) ---
 # notify = true makes "bunker sidebar", when it runs inside herdr, show a
 # herdr notification (with its "request" sound) for each new unread

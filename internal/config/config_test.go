@@ -146,6 +146,26 @@ func TestLoadReadsTuiNotifyFalse(t *testing.T) {
 	}
 }
 
+func TestLoadReadsTuiConfirmChatSend(t *testing.T) {
+	dir := t.TempDir()
+	for body, want := range map[string]bool{
+		"[[account]]\nchannel = \"mail\"\nname = \"cl\"\n": false,
+		"[tui]\nconfirm_chat_send = true\n":                true,
+	} {
+		path := filepath.Join(dir, "config.toml")
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := config.Load(path)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.Tui.ConfirmChatSend != want {
+			t.Errorf("Tui.ConfirmChatSend = %v for %q, want %v", cfg.Tui.ConfirmChatSend, body, want)
+		}
+	}
+}
+
 func TestLoadReadsRenderGlyphOverrides(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	body := "[render.glyphs]\nmatrix = \"\\U00100000\"\n\n[[account]]\nchannel = \"mail\"\nname = \"cl\"\n"

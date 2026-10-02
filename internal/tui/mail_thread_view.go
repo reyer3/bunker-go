@@ -117,10 +117,25 @@ func (m Model) threadViewLines() []string {
 // used both to window the view here and, in update.go, to reset
 // threadScroll so a newly selected/expanded item's start stays visible.
 func (m Model) threadBodyLinesWithStarts() (lines []string, starts []int) {
+	lines, starts, _ = m.threadBodyTagged()
+	return lines, starts
+}
+
+// threadLineAttachment names the attachment a thread body line shows.
+type threadLineAttachment struct {
+	item  string
+	index int
+}
+
+// threadBodyTagged is threadBodyLinesWithStarts plus, parallel to lines,
+// the attachment each line names (nil for every other line), which is how
+// a double click finds the file to open.
+func (m Model) threadBodyTagged() (lines []string, starts []int, tags []*threadLineAttachment) {
 	dim := m.styles().dim
 	starts = make([]int, len(m.threadItems))
 	for i, item := range m.threadItems {
 		var raw []string
+		var rawTags []*threadLineAttachment
 		marker := "  "
 		if i == m.threadSelected {
 			marker = "▶ "
@@ -147,8 +162,12 @@ func (m Model) threadBodyLinesWithStarts() (lines []string, starts []int) {
 			default:
 				raw = append(raw, "(empty)")
 			}
-			for _, attachment := range item.Attachments {
+			for len(rawTags) < len(raw) {
+				rawTags = append(rawTags, nil)
+			}
+			for j, attachment := range item.Attachments {
 				raw = append(raw, fmt.Sprintf("📎 %s (%d bytes)", safeLine(attachment.Name), attachment.Size))
+				rawTags = append(rawTags, &threadLineAttachment{item: item.ID, index: j})
 			}
 		} else {
 			snippet := threadSnippet(item, bodyText)
@@ -165,9 +184,29 @@ func (m Model) threadBodyLinesWithStarts() (lines []string, starts []int) {
 		// too-wide line (a long, un-truncated body line) has been split
 		// into more physical rows than it had logical ones.
 		starts[i] = len(lines)
-		lines = append(lines, wrapLines(raw, m.width)...)
+		for len(rawTags) < len(raw) {
+			rawTags = append(rawTags, nil)
+		}
+		for j, line := range raw {
+			for _, w := range wrapLines([]string{line}, m.width) {
+				lines = append(lines, w)
+				tags = append(tags, rawTags[j])
+			}
+		}
 	}
-	return lines, starts
+	return lines, starts, tags
+}
+
+// threadAttachmentAt is the attachment shown on screen row y of the mail
+// thread view ("" and 0 when that row shows none).
+func (m Model) threadAttachmentAt(y int) (string, int) {
+	_, _, tags := m.threadBodyTagged()
+	scroll := clampScroll(m.threadScroll, len(tags), m.threadScrollBudget())
+	row := scroll + y - len(m.threadHeadLines())
+	if y < len(m.threadHeadLines()) || row < 0 || row >= len(tags) || tags[row] == nil {
+		return "", 0
+	}
+	return tags[row].item, tags[row].index
 }
 
 // quotedLinesDimmed splits body line by line, dimming any line that

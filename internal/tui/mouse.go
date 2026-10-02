@@ -117,6 +117,8 @@ func (m Model) openChat(item core.Item) (Model, tea.Cmd) {
 	}
 	m.chatDraftID = item.ID
 	m.chatNewTo = ""
+	m.chatFocus = ""
+	m.chatAutoSend = false
 	m.unreadOnOpen = ""
 	if item.Unread {
 		m.unreadOnOpen = item.ID
@@ -166,6 +168,8 @@ func (m Model) leaveChat() (Model, tea.Cmd) {
 	m.chatSending = false
 	m.chatTypingOn = false
 	m.chatPreviewPending = false
+	m.chatAutoSend = false
+	m.chatFocus = ""
 	m.chatOptimistic = nil
 	m = m.cancelVoiceRecording().stopVoicePlay()
 	m = m.clearChatAttachments()
@@ -207,7 +211,21 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.viewer != nil {
 		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
-			return m.closeViewer()
+			// The first click of a double click opened this image; the
+			// second opens the file with the system viewer instead of
+			// just closing the overlay.
+			key := ""
+			if m.viewer.index >= 0 && m.viewer.index < len(m.viewer.keys) {
+				key = m.viewer.keys[m.viewer.index]
+			}
+			var double bool
+			m, double = m.registerClick(key)
+			next, cmd := m.closeViewer()
+			if double {
+				opened, openCmd := next.(Model).openChatAttachment(key)
+				return opened, tea.Batch(cmd, openCmd)
+			}
+			return next, cmd
 		}
 		return m, nil
 	}
@@ -277,16 +295,36 @@ func (m Model) updateChatMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		lines := strings.Split(m.View(), "\n")
-		if key, ok := m.voiceKeyAtLine(msg.Y); ok {
-			return m.startVoicePlay(key)
+		meta := m.chatLineMetaAt(msg.Y)
+		// A click on a bubble selects it (Alt+Y copies it); one on
+		// anything else drops the selection.
+		m.chatFocus = meta.item
+		if meta.voice != "" {
+			m.lastClickKey = ""
+			return m.startVoicePlay(meta.voice)
 		}
 		if msg.Y >= 0 && msg.Y < len(lines) {
 			if key, ok := m.imageKeyAt(lines[msg.Y]); ok {
-				if _, _, a, found := m.chatAttachment(key); found && isVideoAttachment(a) {
+				var double bool
+				m, double = m.registerClick(key)
+				_, _, a, found := m.chatAttachment(key)
+				if found && isVideoAttachment(a) {
+					// The first click already started the player.
+					if double {
+						return m, nil
+					}
 					return m, m.playVideo(key)
+				}
+				if double {
+					return m.openChatAttachment(key)
 				}
 				return m.openViewer(key)
 			}
+		}
+		var double bool
+		m, double = m.registerClick(meta.file)
+		if double {
+			return m.openChatAttachment(meta.file)
 		}
 		return m, nil
 	case tea.MouseButtonWheelUp:
@@ -306,6 +344,27 @@ func (m Model) updateThreadMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	budget := m.threadScrollBudget()
 	total := m.threadBodyLen()
 	switch msg.Button {
+	case tea.MouseButtonLeft:
+		if msg.Action != tea.MouseActionPress || m.downloadActive {
+			return m, nil
+		}
+		// A double click on an attachment line opens the file.
+		item, index := m.threadAttachmentAt(msg.Y)
+		key := ""
+		if item != "" {
+			key = mediaKey(item, index)
+		}
+		var double bool
+		m, double = m.registerClick(key)
+		if !double {
+			return m, nil
+		}
+		for _, it := range m.threadItems {
+			if it.ID == item && index < len(it.Attachments) {
+				return m.startOpenAttachment(it.ID, index, it.Attachments[index])
+			}
+		}
+		return m, nil
 	case tea.MouseButtonWheelUp:
 		m.threadScroll = clampScroll(m.threadScroll-chatWheelScroll, total, budget)
 	case tea.MouseButtonWheelDown:

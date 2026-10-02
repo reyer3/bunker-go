@@ -192,21 +192,6 @@ func voiceLineTags(item core.Item, bubble []string) []string {
 	return tags
 }
 
-// voiceKeyAtLine returns the voice note shown on screen row y of the chat
-// view, for the click that plays it.
-func (m Model) voiceKeyAtLine(y int) (string, bool) {
-	header := len(m.chatHeaderLines())
-	_, tags := m.chatBodyTagged()
-	budget := m.chatScrollBudget()
-	start, end, _ := windowBounds(len(tags), m.chatScroll, budget)
-	row := y - header
-	if row < 0 || start+row >= end {
-		return "", false
-	}
-	key := tags[start+row]
-	return key, key != ""
-}
-
 // newestVoiceKey is the open chat's newest voice note.
 func (m Model) newestVoiceKey() (string, bool) {
 	for i := len(m.chatItems) - 1; i >= 0; i-- {

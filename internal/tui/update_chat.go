@@ -33,37 +33,7 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m = m.dropChatVoice()
 			return m, nil
 		case "enter", "ctrl+s":
-			draft := m.composer.Value()
-			// K10: clear the confirm state as the send starts (it was
-			// previously left true for the whole in-flight send, which
-			// left chatTailLines' "Enviando..." case dead code, since its
-			// switch checks chatConfirm first) so the tail line actually
-			// shows the send-in-progress state.
-			m.chatConfirm = false
-			m.chatSending = true
-			m.chatReplyToken++
-			// Show the optimistic own bubble and clear the composer right
-			// away, before the real send even returns — the draft is
-			// restored only if chatReplySentMsg comes back with an error
-			// (see its handler above).
-			m.chatOptimistic = &chatOptimisticMsg{body: draft, at: m.clock()}
-			m.composer.Reset()
-			m = m.resizeChatComposer()
-			if err := validateAttachments(m.chatAttachments); err != nil {
-				m.chatSending = false
-				m.chatOptimistic = nil
-				m.composer.SetValue(draft)
-				m.chatSendErr = err
-				return m.resizeChatComposer(), nil
-			}
-			m.chatOptimistic.attachments = attachmentNames(m.chatAttachments)
-			if m.chatVoice {
-				for i := range m.chatOptimistic.attachments {
-					m.chatOptimistic.attachments[i].Voice = true
-					m.chatOptimistic.attachments[i].Duration = int((m.chatVoiceDur + 500*time.Millisecond) / time.Second)
-				}
-			}
-			return m, m.chatSendCmd(draft, false)
+			return m.confirmChatSendNow()
 		}
 		return m, nil
 	}
@@ -78,6 +48,10 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	switch msg.String() {
+	case copyKey:
+		return m.copySelected()
+	case openFileKey:
+		return m.openNewestAttachment()
 	case voicePlayKey:
 		key, ok := m.newestVoiceKey()
 		if !ok && m.voicePlay == nil {
@@ -126,6 +100,9 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.chatSendErr = nil
 		m.chatReplyToken++
 		m.chatPreviewPending = true
+		// The dry-run always runs first. When one Enter is enough the
+		// preview's clean reply sends the draft itself (update.go).
+		m.chatAutoSend = m.chatSendsOnOneEnter()
 		return m, m.chatSendCmd(m.composer.Value(), true)
 	case "ctrl+v":
 		// Issue #5: paste an image (e.g. a screenshot) from the clipboard
@@ -250,4 +227,42 @@ func (m Model) scrollChatUp(amount int) (tea.Model, tea.Cmd) {
 	}
 	m.chatScroll = clampScroll(m.chatScroll+amount, total, budget)
 	return m, nil
+}
+
+// confirmChatSendNow sends the previewed chat draft for real: the second
+// Enter of the explicit flow, or the preview's own reply when one Enter is
+// enough (chatSendsOnOneEnter).
+func (m Model) confirmChatSendNow() (Model, tea.Cmd) {
+	draft := m.composer.Value()
+	// K10: clear the confirm state as the send starts (it was
+	// previously left true for the whole in-flight send, which
+	// left chatTailLines' "Enviando..." case dead code, since its
+	// switch checks chatConfirm first) so the tail line actually
+	// shows the send-in-progress state.
+	m.chatConfirm = false
+	m.chatAutoSend = false
+	m.chatSending = true
+	m.chatReplyToken++
+	// Show the optimistic own bubble and clear the composer right
+	// away, before the real send even returns — the draft is
+	// restored only if chatReplySentMsg comes back with an error
+	// (see its handler above).
+	m.chatOptimistic = &chatOptimisticMsg{body: draft, at: m.clock()}
+	m.composer.Reset()
+	m = m.resizeChatComposer()
+	if err := validateAttachments(m.chatAttachments); err != nil {
+		m.chatSending = false
+		m.chatOptimistic = nil
+		m.composer.SetValue(draft)
+		m.chatSendErr = err
+		return m.resizeChatComposer(), nil
+	}
+	m.chatOptimistic.attachments = attachmentNames(m.chatAttachments)
+	if m.chatVoice {
+		for i := range m.chatOptimistic.attachments {
+			m.chatOptimistic.attachments[i].Voice = true
+			m.chatOptimistic.attachments[i].Duration = int((m.chatVoiceDur + 500*time.Millisecond) / time.Second)
+		}
+	}
+	return m, m.chatSendCmd(draft, false)
 }

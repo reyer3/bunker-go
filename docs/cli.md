@@ -409,15 +409,50 @@ covers a hard quit) and the header shows the other side's live presence
 ("en línea"/"escribiendo…"/"grabando audio…"/"últ. vez HH:MM", or
 nothing for a channel without presence data). Composing: every key is
 literal draft text; `Enter` (or `Ctrl+S`, the send key of every other
-composer) requests a dry-run preview and then shows an inline "¿Enviar a
-…? ↵ enviar · Esc cancelar" confirm — a second `Enter` or `Ctrl+S` sends
-for real, `Esc` cancels back to editing with the draft kept, and typing your
+composer) sends a plain text message with **one** keypress: the panel
+still runs the dry-run first (so the plan is validated like any other
+send) and sends only if it comes back clean; a plan error is shown and
+nothing is sent. Everything else keeps the explicit flow — the dry-run
+preview and an inline "¿Enviar a …? ↵ enviar · Esc cancelar" confirm that
+a second `Enter` or `Ctrl+S` answers — namely attachments, voice notes, a
+new conversation started from the contact picker, edits, calls and every
+mail composer. `[tui] confirm_chat_send = true` in the config restores the
+two-step flow for plain text too (see `docs/config.example.toml`). Input
+is ignored while the preview or the send is in flight, so a fast double
+`Enter` sends once. `Esc` cancels back to editing with the draft kept, and typing your
 own composing state is reported to the other side, throttled to at most
 once every 5s and cleared after 5s idle, on send, or on leave. `Alt+Enter`
 inserts a newline (plain `Enter` is reserved for send/confirm here, unlike
 the mail reply composer). `Up` at the top of an empty draft loads an
 older page of the conversation instead of moving the cursor. `Esc` leaves
 the chat view and returns to the inbox.
+
+**Selecting and copying text.** The panel captures the mouse, which is
+what keeps the terminal from selecting text. Three ways around it:
+`F7` (or `Alt+S`) enters the *selection mode*: the mouse goes back to the
+terminal, a "Modo selección: selecciona con el ratón · Esc/F7 volver"
+line replaces the key hints, and `Esc` or `F7` capture it again. Many
+terminals also select with `Shift`+drag while the mouse is captured, no
+mode needed. And `Alt+Y` copies a whole message to the clipboard: in a
+chat, the message a click selected (the bubble is highlighted) or, with
+none selected, the newest; in a mail thread, the selected message's body;
+in the plain detail view, its body. The clipboard is written through
+`wl-copy` (Wayland), `xclip` or `xsel` (X11) when one is installed, else
+as an OSC 52 sequence, which the terminal turns into a clipboard write
+(it works over SSH and in tmux with `set-clipboard on`; some terminals
+need it enabled). The status line says "Copiado", or why it failed.
+
+**Opening attachments.** A double click (two presses on the same
+attachment line within 400 ms) in a chat bubble or in an expanded mail
+message downloads the file into the media cache and opens it with
+`xdg-open`; `BUNKER_OPEN_FILE` replaces the command (the path is appended
+as the last argument). `Alt+O` does the same from the keyboard for the
+selected chat message's first file (or the newest message that has one)
+and for the selected mail message's first attachment. A missing opener is
+an error shown on screen, before anything is downloaded. Voice notes keep
+their single click to play; on an image thumbnail the first click still
+opens the viewer and the second opens the file; on a video the first
+click plays it as before. All of these are also in the command palette.
 
 Opening a mail item now opens its thread view instead of the plain
 single-item detail: the Subject renders as a bold title, every message in
