@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"mime"
 	"os"
 	"path/filepath"
 	"strings"
@@ -288,10 +287,7 @@ func buildRawMessage(cfg AccountConfig, out core.Outgoing, subject, messageID, i
 		if err != nil {
 			return nil, fmt.Errorf("read attachment %s: %w", path, err)
 		}
-		contentType := mime.TypeByExtension(filepath.Ext(path))
-		if contentType == "" {
-			contentType = "application/octet-stream"
-		}
+		contentType := core.AttachmentMIME(path, data)
 		var attHeader gomail.AttachmentHeader
 		attHeader.Set("Content-Type", contentType)
 		attHeader.SetFilename(filepath.Base(path))

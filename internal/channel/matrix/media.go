@@ -6,8 +6,6 @@ package matrix
 import (
 	"context"
 	"fmt"
-	"mime"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,13 +75,7 @@ func msgTypeForMIME(mimeType string) event.MessageType {
 // core.Service's own inspectAttachment uses for AttachmentPolicy
 // validation.
 func detectAttachmentMIME(path string, data []byte) string {
-	mimeType := http.DetectContentType(data)
-	if mimeType == "application/octet-stream" {
-		if guessed := mime.TypeByExtension(filepath.Ext(path)); guessed != "" {
-			mimeType = guessed
-		}
-	}
-	return mimeType
+	return core.AttachmentMIME(path, data)
 }
 
 // buildMediaContent reads path, uploads it to the homeserver's media repo
