@@ -60,6 +60,8 @@ var inboxHints = []keyHint{
 	{"g", "refrescar", false},
 	{"1/2/3", "secciones", false},
 	{"Ctrl+K", "comandos", false},
+	{"@", "contacto", false},
+	{"c", "llamar", false},
 	{"?", "ayuda", true},
 }
 
@@ -72,6 +74,8 @@ var sidebarHints = []keyHint{
 	{"Tab", "canal", false},
 	{"g", "refrescar", false},
 	{"Ctrl+K", "comandos", false},
+	{"@", "contacto", false},
+	{"c", "llamar", false},
 	{"?", "ayuda", true},
 }
 
@@ -142,6 +146,8 @@ var helpSections = []helpSection{
 		{"↵", "abrir"},
 		{"←/→", "plegar/desplegar un remitente"},
 		{"n", "nuevo mensaje (elegir contacto)"},
+		{"@", "buscar contacto (en la pestaña WhatsApp o Matrix, solo de ese canal)"},
+		{"c", "llamar a la conversación de WhatsApp seleccionada (vista previa y confirmación)"},
 		{"/", "filtrar por texto o consultar (ver Consultas)"},
 		{"r", "responder"},
 		{"m", "marcar leído (envía confirmación de lectura)"},
@@ -178,6 +184,8 @@ var helpSections = []helpSection{
 		{"1/2/3", "Mail/WhatsApp/Matrix"},
 		{"0", "Todo"},
 		{"/", "filtrar (Esc quita el filtro)"},
+		{"@", "buscar contacto (en WhatsApp o Matrix, solo de ese canal)"},
+		{"c", "llamar: en herdr avisa de usar Alt+C en el panel de la conversación"},
 		{"g", "refrescar"},
 		{"? o F1", "esta ayuda"},
 		{"Ctrl+K o F2", "paleta de comandos"},
@@ -205,6 +213,7 @@ var helpSections = []helpSection{
 	}},
 	{"calls", "Llamadas de voz", [][2]string{
 		{"Alt+C", "llamar desde un chat de WhatsApp (vista previa y confirmación)"},
+		{"c", "llamar a la conversación seleccionada de la bandeja o del panel lateral"},
 		{"a / x", "contestar / rechazar la llamada que suena"},
 		{"h", "colgar la llamada en curso"},
 		{"Alt+A/X/H", "lo mismo donde se escribe (chat, editores, filtro)"},
@@ -229,10 +238,11 @@ var helpSections = []helpSection{
 		{"Ctrl+A/X", "adjuntar / quitar adjunto (respuesta)"},
 		{"Esc", "cerrar y guardar el borrador"},
 	}},
-	{"picker", "Nuevo mensaje (n)", [][2]string{
+	{"picker", "Nuevo mensaje (n) y buscar contacto (@)", [][2]string{
 		{"escribir", "filtrar contactos"},
 		{"↑/↓", "elegir"},
 		{"↵ o clic", "abrir"},
+		{"Alt+C", "llamar al contacto de WhatsApp elegido (vista previa y confirmación)"},
 		{"Esc", "cancelar"},
 	}},
 	{"palette", "Paleta de comandos (Ctrl+K)", [][2]string{

@@ -16,6 +16,10 @@ import (
 // opens the chat with that contact even when there is no history yet, or,
 // for mail, the full editor with the address in To. Sending then goes
 // through the usual dry-run preview and confirm.
+//
+// "@" opens the same picker as a contact search: on the WhatsApp or Matrix
+// tab it is scoped to that channel, and Alt+C on a WhatsApp contact opens
+// its chat and starts the call action (preview, then confirm).
 
 // ContactsClient is the optional capability the picker needs: the RPC
 // client and the TUI's query client implement it.
@@ -31,6 +35,11 @@ const pickerLimit = 50
 const pickerHeaderLines = 3
 
 type contactPicker struct {
+	// channel, when set, scopes the search to one channel; title heads
+	// the picker; notice says why Alt+C did nothing.
+	channel  core.Channel
+	title    string
+	notice   string
 	query    string
 	results  []core.Contact
 	selected int
@@ -45,7 +54,7 @@ type contactsLoadedMsg struct {
 	err      error
 }
 
-func loadContactsCmd(client Client, query string, token uint64) tea.Cmd {
+func loadContactsCmd(client Client, channel core.Channel, query string, token uint64) tea.Cmd {
 	return func() tea.Msg {
 		lister, ok := client.(ContactsClient)
 		if !ok {
@@ -53,7 +62,7 @@ func loadContactsCmd(client Client, query string, token uint64) tea.Cmd {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), readTimeout)
 		defer cancel()
-		contacts, err := lister.Contacts(ctx, core.ContactFilter{Query: query, Limit: pickerLimit})
+		contacts, err := lister.Contacts(ctx, core.ContactFilter{Channel: channel, Query: query, Limit: pickerLimit})
 		return contactsLoadedMsg{token: token, contacts: contacts, err: err}
 	}
 }
@@ -61,6 +70,21 @@ func loadContactsCmd(client Client, query string, token uint64) tea.Cmd {
 // openPicker shows the contact picker with every contact, newest query
 // results replacing older ones as the user types.
 func (m Model) openPicker() (Model, tea.Cmd) {
+	return m.openPickerFor("", "Nuevo mensaje")
+}
+
+// openSearchPicker is "@": the contact picker as a search, scoped to the
+// focused tab's channel on the WhatsApp and Matrix tabs and open to every
+// channel from the overview and Mail (where it is the same as "n").
+func (m Model) openSearchPicker() (Model, tea.Cmd) {
+	channel, ok := m.currentChannelFilter()
+	if !ok || channel == core.ChannelMail {
+		return m.openPickerFor("", "Buscar contacto")
+	}
+	return m.openPickerFor(channel, "Buscar contacto en "+channelLabel(channel))
+}
+
+func (m Model) openPickerFor(channel core.Channel, title string) (Model, tea.Cmd) {
 	if m.client == nil {
 		return m, nil
 	}
@@ -68,8 +92,8 @@ func (m Model) openPicker() (Model, tea.Cmd) {
 	if m.picker != nil {
 		token = m.picker.token + 1
 	}
-	m.picker = &contactPicker{loading: true, token: token}
-	return m, loadContactsCmd(m.client, "", token)
+	m.picker = &contactPicker{loading: true, token: token, channel: channel, title: title}
+	return m, loadContactsCmd(m.client, channel, "", token)
 }
 
 func (m Model) refilterPicker() (Model, tea.Cmd) {
@@ -78,7 +102,7 @@ func (m Model) refilterPicker() (Model, tea.Cmd) {
 	p.loading = true
 	p.selected = 0
 	m.picker = &p
-	return m, loadContactsCmd(m.client, p.query, p.token)
+	return m, loadContactsCmd(m.client, p.channel, p.query, p.token)
 }
 
 func (m Model) handleContactsLoaded(msg contactsLoadedMsg) (tea.Model, tea.Cmd) {
@@ -106,11 +130,15 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.pickContact(p.results[p.selected])
 		}
 		return m, nil
+	case callPlaceKey:
+		return m.callPickedContact()
 	case "up", "ctrl+p", "shift+tab":
+		p.notice = ""
 		if p.selected > 0 {
 			p.selected--
 		}
 	case "down", "ctrl+n", "tab":
+		p.notice = ""
 		if p.selected < len(p.results)-1 {
 			p.selected++
 		}
@@ -120,11 +148,13 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		r := []rune(p.query)
 		p.query = string(r[:len(r)-1])
+		p.notice = ""
 		m.picker = &p
 		return m.refilterPicker()
 	default:
 		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
 			p.query += string(msg.Runes)
+			p.notice = ""
 			if msg.Type == tea.KeySpace {
 				p.query += " "
 			}
@@ -158,6 +188,27 @@ func (m Model) updatePickerMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	m.picker = &p
 	return m, nil
+}
+
+// callPickedContact is Alt+C on the highlighted contact: open its chat and
+// start the chat's call action, which previews the call and waits for
+// ↵. A contact that cannot be called says why in the picker and stays.
+func (m Model) callPickedContact() (tea.Model, tea.Cmd) {
+	p := *m.picker
+	if p.selected < 0 || p.selected >= len(p.results) {
+		p.notice = "no hay un contacto seleccionado"
+		m.picker = &p
+		return m, nil
+	}
+	c := p.results[p.selected]
+	if err := m.callBlockedFor(c.Channel, c.Address); err != nil {
+		p.notice = humanError(err)
+		m.picker = &p
+		return m, nil
+	}
+	next, open := m.pickContact(c)
+	after, call := next.(Model).startChatCall()
+	return after, tea.Batch(open, call)
 }
 
 // pickContact opens the chosen contact: the chat view for chat channels,
@@ -208,7 +259,11 @@ func (m Model) pickerRows() int {
 	if m.height <= 0 {
 		return pickerLimit
 	}
-	return max(1, m.height-pickerHeaderLines-1)
+	reserved := 1
+	if m.picker != nil && m.picker.notice != "" {
+		reserved++
+	}
+	return max(1, m.height-pickerHeaderLines-reserved)
 }
 
 // pickerOffset scrolls the result list so the selection stays visible.
@@ -222,8 +277,12 @@ func (m Model) pickerOffset() int {
 
 func (m Model) pickerView() string {
 	p := m.picker
+	title := p.title
+	if title == "" {
+		title = "Nuevo mensaje"
+	}
 	lines := []string{
-		"Nuevo mensaje",
+		title,
 		"Para: " + p.query + "▏",
 		strings.Repeat("─", max(1, min(m.width, 40))),
 	}
@@ -251,7 +310,10 @@ func (m Model) pickerView() string {
 			lines = append(lines, line)
 		}
 	}
-	lines = append(lines, "↵ abrir · ↑/↓ elegir · Esc cancelar")
+	if p.notice != "" {
+		lines = append(lines, "No se puede llamar: "+p.notice)
+	}
+	lines = append(lines, "↵ abrir · ↑/↓ elegir · Esc cancelar · Alt+C llamar")
 	if m.width > 0 {
 		for i, line := range lines {
 			lines[i] = runewidth.Truncate(line, m.width, "…")

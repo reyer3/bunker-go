@@ -2,6 +2,7 @@
 > ▏
 ────────────────────────────────
 [1;38;2;245;245;245;48;2;27;42;60m▸ Nuevo mensaje                n[0m
+  Buscar contacto              @
   Buscar / filtrar             /
   Refrescar                    g
   Ir a Mail                    1
@@ -11,6 +12,5 @@
   Responder                    r
   Ayuda                        ?
   Salir                        q
-[38;2;163;160;158m  Ir a Todo · ya estás aquí    0[0m
-[38;2;163;160;158m  Deshacer leído · nada que d… u[0m
+[38;2;163;160;158m  Llamar · esta conexión no p… c[0m
 [38;2;163;160;158m↵ ejecutar · Esc cerrar[0m

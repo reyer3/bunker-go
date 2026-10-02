@@ -210,6 +210,9 @@ editor, the `/` filter and the contact picker never open it).
   newest first, up to 8, filtered by the same text); `Enter` opens one
   as `Enter` on its inbox row does, leaving the conversation on screen
   first.
+- **Shortcuts:** from the inbox and the side panel it also lists
+  "Buscar contacto" (`@`) and "Llamar" (`c`, dimmed with the reason when
+  the selected row cannot be called).
 - **`@` contacts:** a query starting with `@` lists contacts instead (the
   same `bunker contacts` lookup as `n`); `Enter` starts a new message to
   one, exactly like picking it with `n`.
@@ -301,7 +304,9 @@ overview → Mail → WhatsApp → Matrix → overview, `r` starts a reply to th
 selected/open item, `m` marks it read (dry-run preview, then `Enter` to
 confirm; on WhatsApp this sends the other side a read receipt), `u`
 undoes the last mark-read, including opening a chat or mail thread (see
-`bunker unread`), `n` starts a new conversation (see below), `g`
+`bunker unread`), `n` starts a new conversation and `@` searches a contact
+(see below), `c` calls the selected WhatsApp conversation (see Voice calls),
+`g`
 refreshes the inbox now, `?` opens the help overlay, `q`
 quits (asks again first if a reply preview/send is in flight). A directly
 opened single-item detail view (kept for parity; every current channel
@@ -346,6 +351,16 @@ New conversation (`n`): a contact picker over `bunker contacts`.
   the contact, still previewed and confirmed like a reply.
 - **Mail contacts:** the full editor opens with the address in To and the
   cursor on the subject.
+
+Contact search (`@`): the same picker, headed `Buscar contacto`, from the
+inbox list and the side panel (not inside a chat, thread, detail view,
+editor, filter or palette, where `@` is text). On the WhatsApp or Matrix
+tab it is scoped to that channel (`Buscar contacto en WhatsApp`, the
+daemon's `contacts` lookup with `channel` set); from the overview and Mail
+it lists every channel, like `n`, which always does. `Alt+C` on a
+highlighted WhatsApp contact opens its chat and starts the call preview
+(see Voice calls); on any other contact the picker says why it cannot be
+called and stays open.
 
 Composing a reply: the draft is a real multi-line text editor (a shared
 [bubbles](https://github.com/charmbracelet/bubbles) textarea), so arrows,
@@ -948,6 +963,15 @@ sharing are not part of it. Audio still runs on the daemon's machine.
   without `calls = true` is an error on the chat's last line
   (`las llamadas no están activadas en esta cuenta · añade calls = true …`),
   never a silent no-op.
+- **From the list:** `c` on a selected WhatsApp 1:1 row of the inbox or the
+  side panel opens that conversation and starts the same `Alt+C` action
+  (dry-run plan, `↵` confirms, `Esc` cancels); nothing else is placed by
+  it. A Mail or Matrix row, a group, a connection without calls or a call
+  already live flashes the reason on the list (`no se puede llamar: …`)
+  and opens nothing. Inside herdr the side panel hands conversations to
+  another pane, so `c` there only flashes to press `Alt+C` in the
+  conversation pane. `Alt+C` also works on a contact in the `n`/`@`
+  picker. The palette lists `Llamar` (`c`) and `Buscar contacto` (`@`).
 - **Incoming:** a banner replaces the last line of every view:
   `📞 Llamada entrante de Ana · a contestar · x rechazar`. `a` answers and `x`
   rejects. A desktop notification (`Llamada entrante de Ana`) fires once per
@@ -1716,7 +1740,9 @@ running daemon (else the same "cannot reach bunker daemon" hint, exit 1).
   on a Mail sender row), name and unread badge, the name truncated so the
   badge always shows; then a one-line key hint.
 - **Keys:** `j`/`k` and the arrows move, `Tab`/`⇧Tab` or `1`/`2`/`3`/`0`
-  switch channel, `/` filters, `g` refreshes, `Ctrl+K` or `F2` opens the
+  switch channel, `/` filters, `@` searches a contact (scoped to the focused
+  channel), `c` explains to call with `Alt+C` in the conversation pane,
+  `g` refreshes, `Ctrl+K` or `F2` opens the
   command palette, `?` or `F1` shows help, `q` quits. The other inbox
   keys work as in the full TUI.
 - **Enter:** inside herdr (`HERDR_ENV=1`) it shows the conversation in
