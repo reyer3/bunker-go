@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.17.0](https://github.com/reyer3/bunker-go/compare/v0.16.0...v0.17.0) (2026-10-02)
+
+
+### Features
+
+* **tui:** wrap sidebar previews onto two lines ([#138](https://github.com/reyer3/bunker-go/issues/138)) ([c269a84](https://github.com/reyer3/bunker-go/commit/c269a84f54273e16998891507d36052665ff3db4))
+
+
+### Bug Fixes
+
+* **matrix:** fall back to legacy media download on servers without authenticated media ([#137](https://github.com/reyer3/bunker-go/issues/137)) ([9c54683](https://github.com/reyer3/bunker-go/commit/9c54683abfe2cd9af12eafc6c391037d212ab36b))
+
 ## [0.16.0](https://github.com/reyer3/bunker-go/compare/v0.15.0...v0.16.0) (2026-10-02)
 
 
