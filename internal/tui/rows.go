@@ -248,7 +248,14 @@ func buildRowUnits(rows []navRow, localSelected, width int, glyphs map[core.Chan
 		selected := i == localSelected
 		if row.kind == navSender {
 			line := buildSenderRow(row.sender, row.expanded, selected, width, counts, styles, now)
-			rowUnits[i] = rowUnit{lines: []string{line}, hit: inboxHit{kind: hitRow, row: i}}
+			lines := []string{line}
+			// A collapsed sender previews its newest thread; an expanded
+			// one lists those threads right below, so it stays a header.
+			if !row.expanded && (width <= 0 || width >= narrowWidth) {
+				preview := previewFit(senderPreview(row.sender), max(0, width-2))
+				lines = append(lines, previewRow("  "+preview, selected, width, styles))
+			}
+			rowUnits[i] = rowUnit{lines: lines, hit: inboxHit{kind: hitRow, row: i}}
 			continue
 		}
 		rowWidth := width
@@ -278,14 +285,23 @@ func buildRowUnits(rows []navRow, localSelected, width int, glyphs map[core.Chan
 	return rowUnits
 }
 
+// previewRow styles a preview line the way buildRow's line 2 is: dim, or
+// on the selection's full-width background when its row is selected.
+func previewRow(plain string, selected bool, width int, styles rowStyles) string {
+	if selected {
+		return styles.selectedRow.Render(padTo(plain, width))
+	}
+	return styles.dim.Render(plain)
+}
+
 // buildSenderRow renders one Mail sender's collapsible header line: a
 // chevron (▸ collapsed, ▾ expanded), the sender's display name (see
 // senderDisplayName — the newest thread's newest non-empty From.Name,
 // else the address itself), a dim account tag when Mail has more than
 // one account, the sender's newest time, and an unread badge summing
 // every thread's loaded unread count. It mirrors buildRow's column math
-// (right-aligned account/time/badge) but is always a single line: a
-// sender row never shows a body preview.
+// (right-aligned account/time/badge) but is always a single line; the
+// collapsed sender's preview is a second line (see buildRowUnits).
 func buildSenderRow(s senderGroup, expanded, selected bool, width int, counts map[core.Channel]map[string]int, styles rowStyles, now time.Time) string {
 	chevron := "▸"
 	if expanded {

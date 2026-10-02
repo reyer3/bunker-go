@@ -127,23 +127,9 @@ func rowTitle(item core.Item) (text string, dimmed bool) {
 }
 
 // previewLine is line 2: a single-line, sanitized, truncated "Sender:
-// body" preview of a group's newest item. The sender prefix is omitted
-// (not replaced by a raw id) when no human-facing sender name is known.
+// body" preview of a group's newest item (see previewText for what stands
+// in for a body-less message). The sender prefix is omitted (not replaced
+// by a raw id) when no human-facing sender name is known.
 func previewLine(item core.Item, width int) string {
-	body := safeLine(item.Body)
-	sender := strings.TrimSpace(item.From.Name)
-	if item.FromMe {
-		sender = "Tú"
-	}
-	text := body
-	if sender != "" && !looksLikeRawIdentifier(sender) {
-		text = safeLine(sender)
-		if body != "" {
-			text += ": " + body
-		}
-	}
-	if width > 0 {
-		text = runewidth.Truncate(text, width, "…")
-	}
-	return text
+	return previewFit(joinPreview(previewSender(item), previewText(item)), width)
 }
