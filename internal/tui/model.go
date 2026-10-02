@@ -224,6 +224,24 @@ type Model struct {
 	emojiDismissed  string
 	chatTypingAt    time.Time
 	chatTypingOn    bool
+	// confirmChatSend ([tui] confirm_chat_send) keeps the two-step chat
+	// send for plain text; chatAutoSend marks the preview in flight as
+	// one that sends itself when it comes back clean (chat_ux.go).
+	confirmChatSend bool
+	chatAutoSend    bool
+	// chatFocus is the ID of the message a click selected (Alt+Y copies
+	// it, Alt+O opens its attachment); "" selects the newest.
+	chatFocus string
+	// selectMode is true while the mouse is released so the terminal
+	// selects text natively (F7/Alt+S).
+	selectMode bool
+	// lastClickKey/lastClickAt back double-click detection by the model
+	// clock; copier and openFile replace the real clipboard and opener
+	// in tests.
+	lastClickKey string
+	lastClickAt  time.Time
+	copier       *textCopier
+	openFile     func(argv []string) error
 	// Voice notes (voice.go, voice_record.go): voiceRecordCmds are the
 	// accounts' voice_record_command (keyed "channel/account"), voiceRec
 	// the recording in progress and voicePlay the note being fetched or
@@ -430,16 +448,19 @@ func (m Model) Init() tea.Cmd {
 func Run(client Client, input io.Reader, output io.Writer, opts ...Option) error {
 	glyphs := style.Glyphs
 	var notify *bool
+	var confirmChatSend bool
 	var folderLayouts map[string]folderLayout
 	var voiceRecordCommands map[string][]string
 	if cfg, err := config.LoadDefault(); err == nil {
 		voiceRecordCommands = voiceRecordCommandsFromConfig(*cfg)
 		glyphs = style.ResolveGlyphs(cfg.Render.Glyphs)
 		notify = cfg.Tui.Notify
+		confirmChatSend = cfg.Tui.ConfirmChatSend
 		folderLayouts = folderLayoutsFromConfig(*cfg)
 	}
 	model := NewModel(client, opts...).withGlyphs(glyphs)
 	model.folderLayouts = folderLayouts
+	model.confirmChatSend = confirmChatSend
 	model.voiceRecordCmds = voiceRecordCommands
 	model.render = lipgloss.NewRenderer(output)
 	output = lockOutput(output)

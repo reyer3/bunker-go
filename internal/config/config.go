@@ -45,6 +45,11 @@ type Tui struct {
 	// explicit false; nil (the key absent) means the default, enabled.
 	// BUNKER_TUI_NOTIFY=0 is a second, independent opt-out.
 	Notify *bool
+	// ConfirmChatSend restores the two-step chat send (Enter previews,
+	// a second Enter sends) for plain text messages. Off by default:
+	// a plain text reply in an existing conversation is sent by one
+	// Enter, after the TUI itself ran the dry-run and found no error.
+	ConfirmChatSend bool
 }
 
 // Herdr holds the settings of bunker as a herdr side panel.
@@ -77,7 +82,8 @@ type rawConfig struct {
 		Glyphs map[string]string `toml:"glyphs"`
 	} `toml:"render"`
 	Tui struct {
-		Notify *bool `toml:"notify"`
+		Notify          *bool `toml:"notify"`
+		ConfirmChatSend bool  `toml:"confirm_chat_send"`
 	} `toml:"tui"`
 	App struct {
 		Command []string `toml:"command"`
@@ -100,7 +106,7 @@ func Load(path string) (*Config, error) {
 	cfg := &Config{
 		Accounts: make([]Account, 0, len(raw.Account)),
 		Render:   Render{Glyphs: raw.Render.Glyphs},
-		Tui:      Tui{Notify: raw.Tui.Notify},
+		Tui:      Tui{Notify: raw.Tui.Notify, ConfirmChatSend: raw.Tui.ConfirmChatSend},
 		App:      App{Command: raw.App.Command},
 		Herdr:    Herdr{Notify: raw.Herdr.Notify},
 		Update:   Update{Check: raw.Update.Check == nil || *raw.Update.Check},

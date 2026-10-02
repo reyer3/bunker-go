@@ -8,7 +8,7 @@ import (
 )
 
 func (m Model) View() string {
-	return m.withCallBanner(m.baseView())
+	return m.withCallBanner(m.withSelectBanner(m.baseView()))
 }
 
 func (m Model) baseView() string {

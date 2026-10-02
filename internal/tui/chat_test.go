@@ -111,6 +111,7 @@ func TestChatViewRendersOwnAndOtherBubblesWithDaySeparator(t *testing.T) {
 func TestChatEnterShowsInlineConfirmBeforeSending(t *testing.T) {
 	client := &replyClient{previewOut: core.Plan{Recipients: []string{"5511999999999@s.whatsapp.net"}}}
 	model := chatReadyModel(client, "whatsapp:personal:1")
+	model.confirmChatSend = true // these pin the explicit two-step flow
 	model, cmd := openChat(model)
 	updated, _ := model.Update(cmd())
 	model = updated.(Model)
@@ -154,6 +155,7 @@ func TestChatEnterShowsInlineConfirmBeforeSending(t *testing.T) {
 func TestChatNoDoubleSendWhileOneIsInFlight(t *testing.T) {
 	client := &replyClient{previewOut: core.Plan{Recipients: []string{"alice"}}}
 	model := chatReadyModel(client, "whatsapp:personal:1")
+	model.confirmChatSend = true // these pin the explicit two-step flow
 	model, cmd := openChat(model)
 	updated, _ := model.Update(cmd())
 	model = updated.(Model)
@@ -190,6 +192,7 @@ func TestChatNoDoubleSendWhileOneIsInFlight(t *testing.T) {
 func TestChatEscCancelsConfirmWithoutSending(t *testing.T) {
 	client := &replyClient{previewOut: core.Plan{Recipients: []string{"alice"}}}
 	model := chatReadyModel(client, "whatsapp:personal:1")
+	model.confirmChatSend = true // these pin the explicit two-step flow
 	model, cmd := openChat(model)
 	updated, _ := model.Update(cmd())
 	model = updated.(Model)
@@ -329,6 +332,7 @@ func TestChatScrollUpAtTopPaginatesOlderMessages(t *testing.T) {
 func TestChatEnterIgnoredWhilePreviewPending(t *testing.T) {
 	client := &replyClient{previewOut: core.Plan{Recipients: []string{"alice"}}}
 	model := chatReadyModel(client, "whatsapp:personal:1")
+	model.confirmChatSend = true // these pin the explicit two-step flow
 	model, cmd := openChat(model)
 	updated, _ := model.Update(cmd())
 	model = updated.(Model)
@@ -380,6 +384,7 @@ func TestChatEnterIgnoredWhilePreviewPending(t *testing.T) {
 func TestChatConfirmShowsOptimisticBubbleAndClearsComposer(t *testing.T) {
 	client := &replyClient{previewOut: core.Plan{Recipients: []string{"alice"}}}
 	model := chatReadyModel(client, "whatsapp:personal:1")
+	model.confirmChatSend = true // these pin the explicit two-step flow
 	model, cmd := openChat(model)
 	updated, _ := model.Update(cmd())
 	model = updated.(Model)
@@ -432,6 +437,7 @@ func TestChatSendSuccessReloadsAndDedupesOptimisticBubble(t *testing.T) {
 		sendRcpt:   core.Receipt{ID: "whatsapp:personal:99"},
 	}
 	model := chatReadyModel(client, "whatsapp:personal:1")
+	model.confirmChatSend = true // these pin the explicit two-step flow
 	model, cmd := openChat(model)
 	updated, _ := model.Update(cmd())
 	model = updated.(Model)
@@ -479,6 +485,7 @@ func TestChatSendFailureMarksBubbleAndRestoresDraft(t *testing.T) {
 		sendErr:    context.DeadlineExceeded,
 	}
 	model := chatReadyModel(client, "whatsapp:personal:1")
+	model.confirmChatSend = true // pins the explicit two-step flow
 	model, cmd := openChat(model)
 	updated, _ := model.Update(cmd())
 	model = updated.(Model)

@@ -197,6 +197,9 @@ func (m Model) paletteCommands() []paletteEntry {
 			download = "el mensaje no tiene adjuntos"
 		}
 		add("Descargar adjunto", "d", paletteRune('d'), download)
+		add("Abrir adjunto", "Alt+O", paletteAlt('o'), m.openBlocked())
+		add("Copiar mensaje", "Alt+Y", paletteAlt('y'), m.copyBlocked())
+		add("Modo selección", "F7", tea.KeyMsg{Type: tea.KeyF7}, "")
 		ask("a", paletteRune('a'))
 		add(back, "Esc", esc, "")
 		add("Ayuda", "?", paletteRune('?'), "")
@@ -237,6 +240,9 @@ func (m Model) paletteCommands() []paletteEntry {
 		add("Llamar", "Alt+C", paletteAlt('c'), reason)
 		add("Grabar nota de voz", "Alt+V", paletteAlt('v'), m.voiceRecordBlocked())
 		add("Reproducir nota de voz", "Alt+P", paletteAlt('p'), m.voicePlayBlocked())
+		add("Copiar mensaje", "Alt+Y", paletteAlt('y'), m.copyBlocked())
+		add("Abrir adjunto", "Alt+O", paletteAlt('o'), m.openBlocked())
+		add("Modo selección", "F7", tea.KeyMsg{Type: tea.KeyF7}, "")
 		ask("Alt+A", paletteAlt('a'))
 		add(back, "Esc", esc, "")
 		add("Ayuda", "F1", tea.KeyMsg{Type: tea.KeyF1}, "")

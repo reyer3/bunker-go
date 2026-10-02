@@ -15,6 +15,10 @@ func (m Model) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "?":
 		return m.openHelp(), nil
+	case copyKey:
+		return m.copySelected()
+	case openFileKey:
+		return m.openNewestAttachment()
 	case "a":
 		if next, cmd, ok := m.plainCallKey("a"); ok {
 			return next, cmd

@@ -172,11 +172,20 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.chatPreviewPending = false
+		autoSend := m.chatAutoSend
+		m.chatAutoSend = false
 		if msg.err != nil {
 			m.chatSendErr = msg.err
 			// A recorded note that cannot be sent is not worth keeping.
 			m = m.dropChatVoice()
 			return m, nil
+		}
+		if autoSend {
+			// A clean dry-run on a plain text reply: send it now instead
+			// of waiting for a second Enter.
+			m.chatPlan = msg.plan
+			m.chatSendErr = nil
+			return m.confirmChatSendNow()
 		}
 		m.chatConfirm = true
 		m.chatPlan = msg.plan
@@ -403,7 +412,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.startPoll()
+	case copyDoneMsg:
+		return m.handleCopyDone(msg)
+	case openAttachMsg:
+		return m.handleOpenAttach(msg)
 	case tea.KeyMsg:
+		if next, cmd, ok := m.selectModeToggle(msg.String()); ok {
+			return next, cmd
+		}
 		if m.helpOpen {
 			return m.updateHelp(msg.String()), nil
 		}
@@ -456,6 +472,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateThread(msg)
 		}
 		switch msg.String() {
+		case copyKey:
+			if m.detail {
+				return m.copySelected()
+			}
 		case "q":
 			return m, tea.Quit
 		case "?":

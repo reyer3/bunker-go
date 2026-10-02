@@ -31,6 +31,9 @@ const (
 	// message.
 	bubbleOptimisticBg = "#3a3a3a"
 	bubbleOptimisticFg = "#a3a09e"
+	// bubbleFocusedBg/Fg mark the bubble a click selected for Alt+Y.
+	bubbleFocusedBg = "#3b5b7a"
+	bubbleFocusedFg = "#ffffff"
 )
 
 // senderPalette colors group-chat sender names stably (hashed by name, so
@@ -265,17 +268,37 @@ func (m Model) chatBodyLines() []string {
 	return lines
 }
 
+// chatLineMeta is what one rendered body line stands for, parallel to
+// chatBodyMeta's lines: voice is the media key of the voice note it shows,
+// file the media key of the file attachment it names (double-click opens
+// it), item the ID of the message it belongs to (click selects it). Each
+// is "" for a line that is none of those.
+type chatLineMeta struct {
+	voice, file, item string
+}
+
 // chatBodyTagged is chatBodyLines plus, parallel to it, the media key of
 // the voice note each line shows ("" for every other line), which is how a
 // click on a voice bubble finds the note to play.
 func (m Model) chatBodyTagged() (lines, tags []string) {
+	lines, meta := m.chatBodyMeta()
+	tags = make([]string, len(meta))
+	for i, mt := range meta {
+		tags[i] = mt.voice
+	}
+	return lines, tags
+}
+
+// chatBodyMeta renders the body like chatBodyLines and describes each
+// line (see chatLineMeta).
+func (m Model) chatBodyMeta() (lines []string, meta []chatLineMeta) {
 	if m.chatLoadErr != nil {
 		lines = append(lines, "Error: "+humanError(m.chatLoadErr))
-		tags = append(tags, "")
+		meta = append(meta, chatLineMeta{})
 	}
 	pad := func() {
-		for len(tags) < len(lines) {
-			tags = append(tags, "")
+		for len(meta) < len(lines) {
+			meta = append(meta, chatLineMeta{})
 		}
 	}
 	r := m.renderer()
@@ -288,7 +311,7 @@ func (m Model) chatBodyTagged() (lines, tags []string) {
 			lines = append(lines, dim.Render("sin mensajes todavía · escribe abajo para empezar"))
 		}
 		pad()
-		return lines, tags
+		return lines, meta
 	}
 	// K10: the optimistic own bubble, if any, renders as one more item
 	// appended after the loaded conversation — it goes through the exact
@@ -323,21 +346,31 @@ func (m Model) chatBodyTagged() (lines, tags []string) {
 		if dim {
 			status = m.chatOptimisticStatusText()
 		}
-		bubble := chatBubbleLines(r, item, m.width, showName, now, dim, status, m.readyThumb)
+		focused := !dim && item.ID != "" && item.ID == m.chatFocus
+		bubble := chatBubbleLinesFocus(r, item, m.width, showName, now, dim, status, m.readyThumb, focused)
 		lines = append(lines, bubble...)
-		tags = append(tags, voiceLineTags(item, bubble)...)
+		voice := voiceLineTags(item, bubble)
+		file := fileLineTags(item, bubble, m.width)
+		for j := range bubble {
+			mt := chatLineMeta{voice: voice[j], file: file[j]}
+			if !dim {
+				mt.item = item.ID
+			}
+			meta = append(meta, mt)
+		}
 	}
 	pad()
 	// wrapLines splits only lines wider than the pane, which a bubble line
 	// never is; the leading error line is the one case, so tag it by hand.
-	var wrapped, wrappedTags []string
+	var wrapped []string
+	var wrappedMeta []chatLineMeta
 	for i, line := range lines {
 		for _, w := range wrapLines([]string{line}, m.width) {
 			wrapped = append(wrapped, w)
-			wrappedTags = append(wrappedTags, tags[i])
+			wrappedMeta = append(wrappedMeta, meta[i])
 		}
 	}
-	return wrapped, wrappedTags
+	return wrapped, wrappedMeta
 }
 
 // chatOptimisticStatusText is the K10 optimistic bubble's bottom-right
@@ -511,12 +544,23 @@ func presenceHeaderText(p core.Presence, now time.Time) string {
 // status replaces the trailing "HH:MM" time line with that text (e.g.
 // "enviando…"/"no enviado") instead.
 func chatBubbleLines(r *lipgloss.Renderer, item core.Item, width int, showName bool, now time.Time, dim bool, status string, thumb func(key string) (*mediaThumb, bool)) []string {
+	return chatBubbleLinesFocus(r, item, width, showName, now, dim, status, thumb, false)
+}
+
+// chatBubbleLinesFocus is chatBubbleLines for a bubble the user selected
+// by clicking it (focused): it gets a lighter background, so it is plain
+// which message Alt+Y copies.
+func chatBubbleLinesFocus(r *lipgloss.Renderer, item core.Item, width int, showName bool, now time.Time, dim bool, status string, thumb func(key string) (*mediaThumb, bool), focused bool) []string {
 	bubbleWidth := chatBubbleWidth(width)
 	bgHex := bubbleIncomingBg
 	fgHex := bubbleIncomingFg
 	if item.FromMe {
 		bgHex = ownBubbleBg(item.Channel)
 		fgHex = bubbleOwnFg
+	}
+	if focused {
+		bgHex = bubbleFocusedBg
+		fgHex = bubbleFocusedFg
 	}
 	if dim {
 		bgHex = bubbleOptimisticBg
