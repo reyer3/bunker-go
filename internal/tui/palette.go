@@ -166,6 +166,7 @@ func (m Model) paletteCommands() []paletteEntry {
 			}
 			add("Ir a "+name, string(rune('0'+tab)), paletteRune(rune('0'+tab)), reason)
 		}
+		add("Unirse a la próxima reunión", meetingJoinKey, paletteRune('J'), m.joinReason())
 		add("Marcar leído", "m", paletteRune('m'), selected)
 		undo := ""
 		if len(m.readUndo) == 0 {

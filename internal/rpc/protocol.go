@@ -62,6 +62,7 @@ const (
 	MethodCalls             = "calls"
 	MethodContacts          = "contacts"
 	MethodConversations     = "conversations"
+	MethodMeetings          = "meetings"
 	MethodMarkUnread        = "mark_unread"
 	MethodEdit              = "edit"
 	MethodDelete            = "delete"
@@ -222,6 +223,13 @@ type conversationsParams struct {
 }
 type conversationsResult struct {
 	Conversations []core.Conversation `json:"conversations"`
+}
+
+type meetingsParams struct {
+	Filter core.MeetingFilter `json:"filter"`
+}
+type meetingsResult struct {
+	Meetings []core.UpcomingMeeting `json:"meetings"`
 }
 
 type planResult struct {

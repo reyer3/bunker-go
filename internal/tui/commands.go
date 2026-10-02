@@ -30,6 +30,10 @@ type inboxLoadedMsg struct {
 	countsErr error
 	health    []core.AdapterHealth
 	update    core.UpdateStatus
+	// meetings is the poll's upcoming meetings; meetingsOK is false when
+	// they could not be loaded, so the model keeps what it showed.
+	meetings   []core.UpcomingMeeting
+	meetingsOK bool
 }
 
 type pollTickMsg struct{ token uint64 }
@@ -166,6 +170,7 @@ func loadInbox(client Client, token uint64) tea.Cmd {
 		counts, countsErr := client.Counts(ctx)
 		chats := fetchChatLists(ctx, client)
 		report := fetchHealthReport(ctx, client)
-		return inboxLoadedMsg{token: token, items: items, counts: counts, chats: chats, countsErr: countsErr, health: report.Adapters, update: report.Update}
+		meetings, meetingsOK := fetchMeetings(ctx, client)
+		return inboxLoadedMsg{token: token, items: items, counts: counts, chats: chats, countsErr: countsErr, health: report.Adapters, update: report.Update, meetings: meetings, meetingsOK: meetingsOK}
 	}
 }

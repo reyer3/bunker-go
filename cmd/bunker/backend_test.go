@@ -23,6 +23,10 @@ type fakeBackend struct {
 	contactsErr   error
 	contactsCalls []core.ContactFilter
 
+	meetings      []core.UpcomingMeeting
+	meetingsErr   error
+	meetingsCalls []core.MeetingFilter
+
 	conversations      []core.Conversation
 	conversationsErr   error
 	conversationsCalls []core.ConversationFilter
@@ -177,6 +181,11 @@ func (f *fakeBackend) Conversations(ctx context.Context, filter core.Conversatio
 		out = append(out, c)
 	}
 	return out, nil
+}
+
+func (f *fakeBackend) Meetings(ctx context.Context, filter core.MeetingFilter) ([]core.UpcomingMeeting, error) {
+	f.meetingsCalls = append(f.meetingsCalls, filter)
+	return f.meetings, f.meetingsErr
 }
 
 func (f *fakeBackend) Contacts(ctx context.Context, filter core.ContactFilter) ([]core.Contact, error) {

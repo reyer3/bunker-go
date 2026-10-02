@@ -17,6 +17,8 @@ const (
 	// section — see Model.switchTab), from a click on a section header,
 	// its rule, or a "+N más" truncation notice.
 	hitFocus
+	// hitMeeting joins activeMeetings()[row] (the "Reuniones" section).
+	hitMeeting
 )
 
 // inboxHit is one physical line's click target.

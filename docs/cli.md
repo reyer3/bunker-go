@@ -10,9 +10,9 @@ compact plain text for a human at a terminal.
 
 | Command | `--json` |
 |---|---|
-| `list`, `find`, `read`, `thread`, `search`, `counts`, `health`, `contacts`, `chats`, `calls`, `avatar`, `download` | yes: data |
+| `list`, `find`, `read`, `thread`, `search`, `counts`, `health`, `contacts`, `chats`, `meetings`, `calls`, `avatar`, `download` | yes: data |
 | `reply`, `send`, `edit`, `delete`, `react`, `organize`, `status post`, `call`, `call answer\|reject\|hangup`, `backfill` | yes: `{"dryRun", "plan", ...}` with the [`core.Plan`/`core.Receipt` shape](#coreplan-and-corereceipt-json-shape) |
-| `unread`, `read-thread` | yes: the result of the change |
+| `unread`, `read-thread`, `meetings join` | yes: the result of the change |
 | `version`, `update`, `render`, `herdr toggle` | yes |
 | `import-keys matrix` | yes: `{"new", "already_known", "failed", "total"}` |
 | `daemon`, `mcp`, `bunker` (no arguments), `sidebar`, `open`, `app`, `link`, `help` | exempt: interactive, long-running or setup commands with no data result |
@@ -174,6 +174,22 @@ unread total, and notifications still come from the unread list only. An
 empty list shows "sin conversaciones". The list comes from
 [`bunker chats`](#bunker-chats---channel-c---account-a---limit-n---json); against
 an older daemon without it, these tabs keep listing unread items only.
+
+**Reuniones.** Under the conversation list (inbox and sidebar) a compact
+"Reuniones" section lists the next meetings from calendar invitations and
+recent call links, as listed by
+[`bunker meetings`](#bunker-meetings---days-n---json): `📅 10:30 Revisión
+semanal · en 25 min`, with `ahora` while it is on, `en N min` or `en N h`
+within the day, then `hoy`, `mañana`, `jue 8`, `15 oct`; a bare link shows
+`🔗 Equipo · enlace`. A click on a row, or `J` (the first meeting with a
+link; also "Unirse a la próxima reunión" in the palette), opens its link
+with `xdg-open` (or `$BUNKER_OPEN_URL`) and says "Abriendo reunión…" on the
+status line; a meeting without a link, or an opener that is missing, says so
+there instead. The section shows at most 4 rows (the rest as `+N más`),
+takes at most a third of the pane and only what still fits, so a channel
+section or the footer never leaves the screen, and it is hidden while
+there is nothing to show. It refreshes with the 5-second poll; against an
+older daemon without `meetings` it stays hidden.
 
 Every view ends in a one-line key hint in the same notation (`key
 label`, joined by ` · `). When it does not fit the width, the
@@ -1244,6 +1260,103 @@ where `last` is the full [item](#bunker-list-flags) (without labels or
 reactions) of the conversation's newest message and `unread` is how many of
 the conversation's items are unread (0 for a read one).
 
+## `bunker meetings [--days N] [--json]`
+
+Lists the upcoming meetings, soonest first: those that start within the
+next `--days` days (default 7) plus any in progress. It only reads the
+daemon's store; nothing reaches a channel. The TUI and `bunker sidebar`
+show the same list in a "Reuniones" section under the conversations.
+
+```
+2026-10-05 10:30	Revisión semanal	Meet	mail:cl:1234
+ahora (hasta 11:00)	Demo de producto	Zoom	mail:cl:1301
+enlace	Demo equipo	Jitsi	whatsapp:personal:3EB0A1
+```
+
+Columns: when (local time; `ahora (hasta HH:MM)` while in progress;
+`enlace` for a bare link, which has no time), the title, the provider
+(`Meet`, `Zoom`, `Teams`, `Webex`, `Jitsi`, or `sin enlace` when the
+invitation carries no join link) and the id of the item that carried it
+(what `meetings join` takes).
+
+`--json` returns `{"meetings": [...]}`. Each meeting is the stored meeting
+plus where it came from:
+
+```json
+{"uid": "abc-1@example.com", "method": "REQUEST", "summary": "Revisión semanal",
+ "start": "2026-10-05T14:30:00Z", "end": "2026-10-05T15:30:00Z", "tz": "America/Lima",
+ "organizer": "Ana <ana@example.com>", "location": "...", "url": "https://meet.google.com/abc-defg-hij",
+ "sequence": 1, "item_id": "mail:cl:1234", "channel": "mail", "account": "cl"}
+```
+
+`all_day`, `link` (a bare link, no `start`/`end`) and `recurring` (the
+`start`/`end` are the next occurrence of a repeating event) appear when
+true.
+
+### Where meetings come from
+
+- **Calendar invitations (mail).** A `text/calendar` part or an `.ics`
+  attachment with `METHOD:REQUEST` or `PUBLISH` (a calendar without a
+  method counts as `PUBLISH`), whether or not you accepted it. Replies
+  (`METHOD:REPLY`) and the other attendee-to-attendee methods are ignored.
+  Read from the bounded body text mail sync already fetches
+  (`index_body_max_kb`, 64 KiB by default; with `index_body_max_kb = 0`
+  a meeting is only found when the message is read), and again when a
+  message is read in full.
+- **Updates and cancellations.** Meetings are deduplicated by the event's
+  `UID`: the version with the highest `SEQUENCE` wins (a later message when
+  equal). `METHOD:CANCEL` or `STATUS:CANCELLED` leaves the meeting out.
+- **The join link** is, in this order: `X-GOOGLE-CONFERENCE`,
+  `X-MICROSOFT-SKYPETEAMSMEETINGURL`, `X-MICROSOFT-ONLINEMEETINGCONFLINK`;
+  then a Google Meet, Zoom, Teams, Webex or Jitsi link found in `LOCATION`,
+  `URL`, `DESCRIPTION` or any other `X-` property (Outlook Safe Links and
+  Google redirect wrappers are unwrapped); then a `LOCATION` that is itself
+  a web address. Links are matched by host and path, so a Teams
+  "meeting options" link is not a join link.
+- **Times** accept UTC (`Z`), `TZID` (IANA names, Outlook's Windows names,
+  or the invitation's own `VTIMEZONE` as a fixed offset), floating times
+  (read in the daemon's zone), all-day dates, and `DTEND` or `DURATION`.
+- **Recurring events** (`RRULE`) are expanded for `DAILY`, `WEEKLY` (with
+  `BYDAY`), `MONTHLY` (same day of the month) and `YEARLY` rules, with
+  `INTERVAL`, `COUNT`, `UNTIL` and `EXDATE`. Other rules (`BYSETPOS`,
+  "second Tuesday", ...) show only their first occurrence. A single edited
+  instance (`RECURRENCE-ID`) is its own meeting and does not remove the
+  series' occurrence on that day.
+- **Bare links.** A Meet, Zoom, Teams, Webex or Jitsi link in the subject
+  or body of any message (mail, WhatsApp or Matrix) sent in the last 24
+  hours is listed as a "link" meeting without a time, after the timed
+  ones; older messages are never scanned. A link repeated in several
+  messages counts once. The 24 hours are measured from the message's date
+  and applied both when it is stored and when the list is built.
+
+The meeting is stored with the item (`Meta["meeting"]`, and
+`Meta["meeting_end"]` as an indexed `items.meeting_end` column added by
+schema migration 5). Items stored before that migration gain a meeting only
+when their mail is synced or read again.
+
+## `bunker meetings join <item-id|next> [--dry-run] [--json]`
+
+Opens a meeting's join link with the desktop opener **on this machine**
+(not the daemon's): `xdg-open` on Linux, `open` on macOS, or the command in
+`$BUNKER_OPEN_URL`, which receives the URL as its last argument (for
+example `BUNKER_OPEN_URL="firefox --new-window"`). `next` joins the first
+upcoming meeting that has a link. `--dry-run` prints the URL and the
+command and opens nothing:
+
+```
+$ bunker meetings join mail:cl:1234 --dry-run
+[dry-run] would open https://meet.google.com/abc-defg-hij with: xdg-open https://meet.google.com/abc-defg-hij
+```
+
+`--json` returns `{"dryRun", "id", "summary", "url", "command"}`. Only
+`http` and `https` links are ever opened. An item that carries no meeting,
+a meeting without a link, or a missing opener is an error (exit 1), never
+a silent no-op.
+
+In the TUI the same link opens with a click on a row of the "Reuniones"
+section, `J` (the next meeting with a link) or the palette's "Unirse a la
+próxima reunión"; a meeting without a link says so on the status line.
+
 ## `bunker counts [--json]`
 
 Unread item counts per channel and account.
@@ -1947,7 +2060,7 @@ running daemon (else the same "cannot reach bunker daemon" hint, exit 1).
 - **Keys:** `j`/`k` and the arrows move, `Tab`/`⇧Tab` or `1`/`2`/`3`/`0`
   switch channel, `/` filters, `@` searches a contact (scoped to the focused
   channel), `c` explains to call with `Alt+C` in the conversation pane,
-  `g` refreshes, `Ctrl+K` or `F2` opens the
+  `J` joins the next meeting (see Reuniones above), `g` refreshes, `Ctrl+K` or `F2` opens the
   command palette, `?` or `F1` shows help, `q` quits. The other inbox
   keys work as in the full TUI.
 - **Enter:** inside herdr (`HERDR_ENV=1`) it shows the conversation in

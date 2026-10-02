@@ -260,6 +260,8 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		switch hit := hits[msg.Y]; hit.kind {
 		case hitFocus:
 			return m.switchTab(hit.tab), nil
+		case hitMeeting:
+			return m.joinMeeting(hit.row)
 		case hitRow:
 			// A Mail sender row toggles on a single click, whether or not
 			// it was already selected — unlike a thread row, which keeps
