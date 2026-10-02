@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.15.0](https://github.com/reyer3/bunker-go/compare/v0.14.0...v0.15.0) (2026-10-02)
+
+
+### Features
+
+* **tui:** message previews in the sidebar and conversation lists ([#131](https://github.com/reyer3/bunker-go/issues/131)) ([2cfd431](https://github.com/reyer3/bunker-go/commit/2cfd431940fcb3ebbca481eef260f0f7a0b7418f))
+* voice notes — receive, play, record and send ([#128](https://github.com/reyer3/bunker-go/issues/128)) ([b355f30](https://github.com/reyer3/bunker-go/commit/b355f30f357e7ba9b3d536702d6b8821e8ab5f7d))
+
+
+### Bug Fixes
+
+* **tui:** stop mouse wheel reports leaking into the composer as text ([#130](https://github.com/reyer3/bunker-go/issues/130)) ([f742b54](https://github.com/reyer3/bunker-go/commit/f742b545ad15adf7e0df40343ed15d162531f602))
+
 ## [0.14.0](https://github.com/reyer3/bunker-go/compare/v0.13.0...v0.14.0) (2026-10-02)
 
 
