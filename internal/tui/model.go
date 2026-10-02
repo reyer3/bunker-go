@@ -456,7 +456,7 @@ func Run(client Client, input io.Reader, output io.Writer, opts ...Option) error
 	// The alternate screen: the panel owns the whole pane, so a resize
 	// redraws from the top instead of diffing against lines the terminal
 	// has already re-wrapped, and quitting restores what was there.
-	_, err := tea.NewProgram(model, tea.WithInput(input), tea.WithOutput(output), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithReportFocus()).Run()
+	_, err := tea.NewProgram(model, tea.WithInput(input), tea.WithOutput(output), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithReportFocus(), tea.WithFilter(mouseLeakFilter())).Run()
 	// Whichever way the interface ended, no recorder or player outlives it.
 	killVoiceProcs()
 	return err
