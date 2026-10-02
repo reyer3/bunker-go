@@ -200,7 +200,7 @@ func (a *Adapter) DownloadAttachment(ctx context.Context, item core.Item, index 
 		if err != nil {
 			return nil, fmt.Errorf("matrix: download %s: parse encrypted file url: %w", item.ID, err)
 		}
-		data, err := a.client.DownloadBytes(ctx, uri)
+		data, err := a.downloadMedia(ctx, uri)
 		if err != nil {
 			return nil, fmt.Errorf("matrix: download %s: %w", item.ID, err)
 		}
@@ -214,7 +214,7 @@ func (a *Adapter) DownloadAttachment(ctx context.Context, item core.Item, index 
 	if err != nil {
 		return nil, fmt.Errorf("matrix: download %s: parse url: %w", item.ID, err)
 	}
-	data, err := a.client.DownloadBytes(ctx, uri)
+	data, err := a.downloadMedia(ctx, uri)
 	if err != nil {
 		return nil, fmt.Errorf("matrix: download %s: %w", item.ID, err)
 	}

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"maunium.net/go/mautrix"
@@ -71,6 +72,10 @@ type Adapter struct {
 	// fails, defaultMaxUploadBytes.
 	mediaConfigOnce     sync.Once
 	mediaMaxUploadBytes int64
+	// legacyMedia is set once a download proved the homeserver lacks
+	// authenticated media (see mediadownload.go): later downloads then
+	// go straight to the legacy /_matrix/media/v3 path.
+	legacyMedia atomic.Bool
 
 	// sink is set once, at the top of Run, so DownloadAttachment (called
 	// independently, e.g. over RPC while Run is still active in the

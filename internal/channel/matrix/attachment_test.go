@@ -87,6 +87,18 @@ func TestToItemIgnoresPlainTextEvent(t *testing.T) {
 }
 
 func TestDownloadAttachmentPlainImageMatchesUploadedBytes(t *testing.T) {
+	testDownloadPlainImage(t, false)
+}
+
+// A homeserver without authenticated media (no v1.11) answers the v1
+// download with M_UNRECOGNIZED; DownloadAttachment falls back to the
+// legacy /_matrix/media/v3/download path.
+func TestDownloadAttachmentPlainImageLegacyMediaFallback(t *testing.T) {
+	testDownloadPlainImage(t, true)
+}
+
+func testDownloadPlainImage(t *testing.T, legacyOnly bool) {
+	t.Helper()
 	const room = id.RoomID("!plain:matrix.example.org")
 	const sender = id.UserID("@alice:matrix.example.org")
 	mxc := id.ContentURI{Homeserver: "matrix.example.org", FileID: "plain-file-1"}
@@ -115,6 +127,7 @@ func TestDownloadAttachmentPlainImageMatchesUploadedBytes(t *testing.T) {
 
 	srv, state := newFakeHomeserver(t, []*mautrix.RespSync{firstSync})
 	state.setMediaFile(mxc, plaintext)
+	state.legacyMediaOnly = legacyOnly
 	adapter := newTestAdapter(t, srv, nil)
 	sink := newMemSink()
 
@@ -146,6 +159,16 @@ func TestDownloadAttachmentPlainImageMatchesUploadedBytes(t *testing.T) {
 }
 
 func TestDownloadAttachmentEncryptedImageDecryptsByteIdentical(t *testing.T) {
+	testDownloadEncryptedImage(t, false)
+}
+
+// The legacy-media fallback hands its ciphertext to the same decryption.
+func TestDownloadAttachmentEncryptedImageLegacyMediaFallback(t *testing.T) {
+	testDownloadEncryptedImage(t, true)
+}
+
+func testDownloadEncryptedImage(t *testing.T, legacyOnly bool) {
+	t.Helper()
 	const room = id.RoomID("!enc-dl:matrix.example.org")
 	const sender = id.UserID("@alice:matrix.example.org")
 	mxc := id.ContentURI{Homeserver: "matrix.example.org", FileID: "enc-file-1"}
@@ -215,6 +238,7 @@ func TestDownloadAttachmentEncryptedImageDecryptsByteIdentical(t *testing.T) {
 
 	srv, state := newFakeHomeserver(t, []*mautrix.RespSync{firstSync})
 	state.setMediaFile(mxc, ciphertext)
+	state.legacyMediaOnly = legacyOnly
 	adapter := newTestAdapter(t, srv, &machineCryptoHelper{mach: receiverMach})
 	sink := newMemSink()
 
