@@ -132,7 +132,7 @@ func TestSidebarShowsAPreviewUnderEachRow(t *testing.T) {
 	)
 	m.selected = 2
 	text, rows, _ := rowLines(m)
-	want := []string{"  󰖣 Equipo", "    Bob: nos vemos", "  󰖣 Ana", "    hola", "▌ 󰖣 Luis", "▌   Tú: ok"}
+	want := []string{"  󰖣 Equipo", "    Bob: nos vemos", "", "  󰖣 Ana", "    hola", "", "▌ 󰖣 Luis", "▌   Tú: ok", "▌"}
 	if len(text) != len(want) {
 		t.Fatalf("row lines = %q, want %q", text, want)
 	}
@@ -141,19 +141,20 @@ func TestSidebarShowsAPreviewUnderEachRow(t *testing.T) {
 			t.Errorf("line %d = %q, want prefix %q", i, text[i], want[i])
 		}
 	}
-	// Both lines of a row are the same click target.
-	if !slices.Equal(rows, []int{0, 0, 1, 1, 2, 2}) {
-		t.Fatalf("hit rows = %v, want 0,0,1,1,2,2", rows)
+	// Every line of a row (name and both preview lines, even a blank
+	// one) is the same click target.
+	if !slices.Equal(rows, []int{0, 0, 0, 1, 1, 1, 2, 2, 2}) {
+		t.Fatalf("hit rows = %v, want 0,0,0,1,1,1,2,2,2", rows)
 	}
 }
 
-func TestSidebarClickOnEitherLineSelectsItsRow(t *testing.T) {
+func TestSidebarClickOnAnyLineSelectsItsRow(t *testing.T) {
 	m := sidebarPreviewModel(34, 24,
 		waItem("1", "g1", "Equipo", "Bob", "a"),
 		waItem("2", "g2", "Otro", "Ana", "b"),
 	)
 	_, _, ys := rowLines(m)
-	for _, y := range ys[2:] { // both lines of the second row
+	for _, y := range ys[3:] { // every line of the second row
 		updated, _ := m.Update(tea.MouseMsg{Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 		if got := updated.(Model).selected; got != 1 {
 			t.Fatalf("click on line %d selected %d, want 1", y, got)
@@ -209,7 +210,7 @@ func TestSidebarDropsPreviewsBeforeRowsInATinyPane(t *testing.T) {
 	}
 }
 
-func TestSidebarSelectionCoversBothLines(t *testing.T) {
+func TestSidebarSelectionCoversEveryLine(t *testing.T) {
 	m := sidebarPreviewModel(34, 24, waItem("1", "g1", "Equipo", "Bob", "hola"))
 	lines, hits := m.sidebarLinesAndHits()
 	n := 0
@@ -225,14 +226,14 @@ func TestSidebarSelectionCoversBothLines(t *testing.T) {
 			t.Errorf("selected line %d is %d cells, want the full pane (34)", n, w)
 		}
 	}
-	if n != 2 {
-		t.Fatalf("selected row spans %d lines, want 2", n)
+	if n != 3 {
+		t.Fatalf("selected row spans %d lines, want 3", n)
 	}
 }
 
 func TestSidebarPreviewTruncatesWideRunes(t *testing.T) {
 	m := sidebarPreviewModel(20, 24,
-		waItem("1", "g1", "Equipo", "Bob", strings.Repeat("😀", 12)),
+		waItem("1", "g1", "Equipo", "Bob", strings.Repeat("😀", 16)),
 		waItem("2", "g2", "Otro", "Ana", strings.Repeat("日本語", 6)),
 	)
 	text, _, _ := rowLines(m)
@@ -241,7 +242,7 @@ func TestSidebarPreviewTruncatesWideRunes(t *testing.T) {
 			t.Errorf("%q is %d cells wide, pane is 20", l, w)
 		}
 	}
-	if !strings.HasSuffix(text[1], "…") || !strings.HasSuffix(text[3], "…") {
+	if !strings.HasSuffix(text[2], "…") || !strings.HasSuffix(text[5], "…") {
 		t.Fatalf("truncated previews lack the ellipsis: %q", text)
 	}
 }
@@ -251,7 +252,7 @@ func TestSidebarCollapsedMailSenderPreviewsNewestSubject(t *testing.T) {
 		From: core.Address{ID: "alice@example.com", Name: "Alice"}, Subject: "Reunión de mañana"}
 	m := sidebarPreviewModel(34, 24, mail)
 	text, _, _ := rowLines(m)
-	if len(text) != 2 || !strings.HasPrefix(text[0], "▌ ▸ Alice") || text[1] != "▌   Reunión de mañana" {
+	if len(text) != 3 || !strings.HasPrefix(text[0], "▌ ▸ Alice") || text[1] != "▌   Reunión de mañana" || text[2] != "▌" {
 		t.Fatalf("collapsed sender row = %q", text)
 	}
 }
@@ -267,5 +268,57 @@ func TestInboxCollapsedMailSenderHasPreviewLine(t *testing.T) {
 	m.width = narrowWidth - 1
 	if strings.Contains(stripANSI(m.inboxView()), "Reunión") {
 		t.Fatal("a narrow inbox must stay one line per row")
+	}
+}
+
+func TestPreviewWrapBreaksOnSpacesAndEllipsizesTheLastLine(t *testing.T) {
+	cases := []struct {
+		name  string
+		plain string
+		width int
+		want  []string
+	}{
+		{"fits on one line", "hola", 10, []string{"hola"}},
+		{"breaks on a space", "uno dos tres", 7, []string{"uno dos", "tres"}},
+		{"ellipsis only at the end of line 2", "uno dos tres cuatro", 9, []string{"uno dos", "tres cua…"}},
+		{"hard-breaks a long word", "abcdefghijkl", 5, []string{"abcde", "fghi…"}},
+		{"a word too long for any line starts on line 1", "ab abcdefghij", 5, []string{"ab ab", "cdef…"}},
+		{"wide runes never split", strings.Repeat("😀", 5), 5, []string{"😀😀", "😀😀…"}},
+		{"cjk text", "日本語 日本語日本語", 7, []string{"日本語", "日本語…"}},
+		{"unbounded", "uno dos tres", 0, []string{"uno dos tres"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := previewWrap(tc.plain, tc.width, 2)
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("previewWrap(%q, %d, 2) = %q, want %q", tc.plain, tc.width, got, tc.want)
+			}
+			for _, l := range got {
+				if tc.width > 0 && runewidth.StringWidth(l) > tc.width {
+					t.Fatalf("line %q is wider than %d", l, tc.width)
+				}
+			}
+		})
+	}
+}
+
+func TestSidebarLongPreviewWrapsOntoTwoLines(t *testing.T) {
+	m := sidebarPreviewModel(24, 24,
+		waItem("1", "g1", "Equipo", "Bob", "nos vemos mañana en la oficina a las diez en punto"),
+		waItem("2", "g2", "Otro", "Ana", "ok"),
+	)
+	text, rows, _ := rowLines(m)
+	want := []string{"▌ 󰖣 Equipo", "▌   Bob: nos vemos", "▌   mañana en la ofici…", "  󰖣 Otro", "    Ana: ok", ""}
+	if len(text) != len(want) {
+		t.Fatalf("row lines = %q, want %q", text, want)
+	}
+	for i := range want {
+		if !strings.HasPrefix(text[i], want[i]) {
+			t.Errorf("line %d = %q, want prefix %q", i, text[i], want[i])
+		}
+	}
+	// Every row is three lines (title + two preview lines), one click target.
+	if !slices.Equal(rows, []int{0, 0, 0, 1, 1, 1}) {
+		t.Fatalf("hit rows = %v, want 0,0,0,1,1,1", rows)
 	}
 }

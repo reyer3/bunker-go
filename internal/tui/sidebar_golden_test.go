@@ -13,8 +13,9 @@ import (
 
 // TestSidebarViewGolden goldens the compact herdr panel (issue #81) at 32
 // columns: the channel list with unread counts, then every conversation
-// of the overview with a dim preview line under it, a long name truncated before its
-// badge, and the short hint line. The clock and color profile are pinned
+// of the overview with its dim preview wrapped onto two lines under it
+// (the second blank when it fits on one), a long name truncated before
+// its badge, and the short hint line. The clock and color profile are pinned
 // so the golden is deterministic.
 func TestSidebarViewGolden(t *testing.T) {
 	at := time.Date(2026, 9, 27, 10, 0, 0, 0, time.UTC)
@@ -24,7 +25,7 @@ func TestSidebarViewGolden(t *testing.T) {
 	m.render = r
 	m.now = func() time.Time { return at }
 	m.loaded = true
-	m.width, m.height = 32, 16
+	m.width, m.height = 32, 19
 	m.groups = []inboxGroup{
 		{items: []core.Item{{
 			ID: "mail:cl:t1", Channel: core.ChannelMail, Account: "cl", Thread: "t1",

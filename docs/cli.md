@@ -2054,14 +2054,17 @@ running daemon (else the same "cannot reach bunker daemon" hint, exit 1).
 
 - **Layout:** a short channel list (Todo, Mail, WhatsApp, Matrix) with
   each one's unread count, the active one marked `▌`; then the
-  conversations of that channel, two lines each: channel glyph (a chevron
-  on a Mail sender row), name and unread badge, the name truncated so the
-  badge always shows, and under it a dim preview of the last message
-  (`Ana: ...` in a group, `Tú: ...` when it is ours, just the text in a
-  1:1 chat, the newest subject on a collapsed Mail sender; the same labels
-  as the full TUI for voice notes, photos and files), truncated to the
-  pane. In a pane too short for two lines per row (under 4 row lines) the
-  previews are dropped and rows are one line; then a one-line key hint.
+  conversations of that channel, three lines each: channel glyph (a
+  chevron on a Mail sender row), name and unread badge, the name truncated
+  so the badge always shows, and under it a dim preview of the last
+  message (`Ana: ...` in a group, `Tú: ...` when it is ours, just the text
+  in a 1:1 chat, the newest subject on a collapsed Mail sender; the same
+  labels as the full TUI for voice notes, photos and files), wrapped onto
+  two lines at word boundaries (a word longer than a line is broken) and
+  ending in `…` only when it does not fit in both. A preview that fits on
+  one line leaves the second blank, so every row has the same height.
+  In a pane too short for two full rows (under 6 row lines) the previews
+  are dropped and rows are one line; then a one-line key hint.
 - **Keys:** `j`/`k` and the arrows move, `Tab`/`⇧Tab` or `1`/`2`/`3`/`0`
   switch channel, `/` filters, `@` searches a contact (scoped to the focused
   channel), `c` explains to call with `Alt+C` in the conversation pane,

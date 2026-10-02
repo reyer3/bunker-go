@@ -37,7 +37,8 @@ command = "bunker.toggle"
 
 The panel runs `bunker sidebar`, a compact list for a narrow column:
 the channels with their unread counts, then the conversations of the
-selected one, a line each. `j`/`k` move, `Tab` or `1`/`2`/`3`/`0` switch
+selected one: each shows its name and unread badge, and under it the
+last message wrapped onto two lines. `j`/`k` move, `Tab` or `1`/`2`/`3`/`0` switch
 channel, `/` filters, `g` refreshes, `a` asks Claude (see below), `?`
 shows help and `q` quits.
 
