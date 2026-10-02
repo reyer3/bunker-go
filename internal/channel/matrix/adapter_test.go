@@ -218,6 +218,16 @@ type fakeState struct {
 	// <fileID> (client.Download/DownloadBytes), keyed by "<homeserver>/
 	// <fileID>", for attachment download tests (M1).
 	mediaFiles map[string][]byte
+	// legacyMediaOnly makes the fake behave like a homeserver without
+	// authenticated media (pre-v1.11): /_matrix/client/v1/media/download
+	// answers 400 M_UNRECOGNIZED and only /_matrix/media/v3/download
+	// serves mediaFiles. mediaErr, when non-zero, makes every download
+	// path answer that HTTP status with a M_FORBIDDEN body instead.
+	legacyMediaOnly bool
+	mediaErr        int
+	// v1Downloads and legacyDownloads count requests to each path.
+	v1Downloads     int
+	legacyDownloads int
 }
 
 // setMediaFile registers uri's bytes for a later client.DownloadBytes call
@@ -328,18 +338,38 @@ func newFakeHomeserver(t *testing.T, syncSeq []*mautrix.RespSync) (*httptest.Ser
 			w.WriteHeader(http.StatusNotFound)
 		}
 	})
-	mux.HandleFunc("/_matrix/client/v1/media/download/", func(w http.ResponseWriter, r *http.Request) {
-		key := strings.TrimPrefix(r.URL.Path, "/_matrix/client/v1/media/download/")
-		state.mu.Lock()
-		data, ok := state.mediaFiles[key]
-		state.mu.Unlock()
-		if !ok {
-			w.WriteHeader(http.StatusNotFound)
-			return
+	serveMedia := func(prefix string, legacy bool) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			key := strings.TrimPrefix(r.URL.Path, prefix)
+			state.mu.Lock()
+			if legacy {
+				state.legacyDownloads++
+			} else {
+				state.v1Downloads++
+			}
+			data, ok := state.mediaFiles[key]
+			legacyOnly, mediaErr := state.legacyMediaOnly, state.mediaErr
+			state.mu.Unlock()
+			if mediaErr != 0 {
+				w.WriteHeader(mediaErr)
+				json.NewEncoder(w).Encode(map[string]string{"errcode": "M_FORBIDDEN", "error": "forbidden"})
+				return
+			}
+			if !legacy && legacyOnly {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"errcode": "M_UNRECOGNIZED", "error": "Unrecognized request"})
+				return
+			}
+			if !ok {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Write(data)
 		}
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Write(data)
-	})
+	}
+	mux.HandleFunc("/_matrix/client/v1/media/download/", serveMedia("/_matrix/client/v1/media/download/", false))
+	mux.HandleFunc("/_matrix/media/v3/download/", serveMedia("/_matrix/media/v3/download/", true))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv, state

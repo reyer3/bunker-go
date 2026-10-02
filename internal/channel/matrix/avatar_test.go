@@ -28,6 +28,10 @@ type avatarFakeState struct {
 	mediaByID       map[string][]byte
 	mediaErr        int // non-zero HTTP status forces a media download error
 	downloadedFiles []string
+	// legacyMediaOnly mimics a homeserver without authenticated media:
+	// the v1 download answers 400 M_UNRECOGNIZED and only the legacy
+	// /_matrix/media/v3/download path serves mediaByID.
+	legacyMediaOnly bool
 }
 
 func writeMatrixNotFound(w http.ResponseWriter) {
@@ -81,6 +85,19 @@ func newAvatarFakeHomeserver(t *testing.T, state *avatarFakeState) *httptest.Ser
 			w.WriteHeader(state.mediaErr)
 			return
 		}
+		if state.legacyMediaOnly {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"errcode": "M_UNRECOGNIZED", "error": "Unrecognized request"})
+			return
+		}
+		parts := strings.Split(r.URL.Path, "/")
+		fileID := parts[len(parts)-1]
+		w.Write(state.mediaByID[fileID])
+	})
+	mux.HandleFunc("/_matrix/media/v3/download/", func(w http.ResponseWriter, r *http.Request) {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		state.downloadedFiles = append(state.downloadedFiles, r.URL.Path)
 		parts := strings.Split(r.URL.Path, "/")
 		fileID := parts[len(parts)-1]
 		w.Write(state.mediaByID[fileID])
@@ -220,6 +237,27 @@ func TestAvatarMediaDownloadErrorPropagates(t *testing.T) {
 	}
 	if ok {
 		t.Fatal("Avatar() ok = true, want false on error")
+	}
+}
+
+func TestAvatarLegacyMediaFallback(t *testing.T) {
+	state := &avatarFakeState{
+		roomAvatarURL:   "mxc://matrix.example.org/roompic",
+		mediaByID:       map[string][]byte{"roompic": []byte("legacy-avatar-bytes")},
+		legacyMediaOnly: true,
+	}
+	srv := newAvatarFakeHomeserver(t, state)
+	a := newAvatarTestAdapter(t, srv)
+
+	src, ok, err := a.Avatar(t.Context(), "!room1:matrix.example.org")
+	if err != nil {
+		t.Fatalf("Avatar() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("Avatar() ok = false, want true")
+	}
+	if string(src.Data) != "legacy-avatar-bytes" {
+		t.Errorf("Data = %q, want %q", src.Data, "legacy-avatar-bytes")
 	}
 }
 

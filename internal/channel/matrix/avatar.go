@@ -17,7 +17,7 @@ import (
 // has none set and it looks like a plain DM (exactly one sync-summary
 // hero, the same heuristic resolveRoomNameLocked uses for a DM's
 // ThreadName) — that hero's own global profile avatar, then downloads it
-// with mautrix's authenticated media DownloadBytes. ok is false, err nil,
+// with downloadMedia (authenticated media, legacy fallback). ok is false, err nil,
 // when neither exists (mautrix.MNotFound on both lookups) — a
 // negative-cache miss for core.Service.Avatar, never a failure. Room
 // avatars are not part of Matrix's end-to-end encryption even in an
@@ -31,7 +31,7 @@ func (a *Adapter) Avatar(ctx context.Context, thread string) (core.AvatarSource,
 		return core.AvatarSource{}, false, err
 	}
 
-	data, err := a.client.DownloadBytes(ctx, contentURI)
+	data, err := a.downloadMedia(ctx, contentURI)
 	if err != nil {
 		return core.AvatarSource{}, false, fmt.Errorf("matrix: avatar: download: %w", err)
 	}
