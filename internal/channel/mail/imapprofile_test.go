@@ -198,10 +198,13 @@ func (s *profileServer) CreateMailbox(t *testing.T, name string, attrs ...imap.M
 // neutral defaults, so a test sets only what it asserts on.
 type seedMessage struct {
 	From, To, Subject, Body string
-	MessageID               string // with angle brackets, e.g. "<a@example.com>"
-	References              string
-	Date                    time.Time
-	Flags                   []imap.Flag
+	// ContentType overrides the default text/plain; charset=utf-8, e.g.
+	// a multipart type whose Body then carries the parts.
+	ContentType string
+	MessageID   string // with angle brackets, e.g. "<a@example.com>"
+	References  string
+	Date        time.Time
+	Flags       []imap.Flag
 }
 
 // seededMessage is where a seeded message landed.
@@ -237,7 +240,11 @@ func (s *profileServer) Seed(t *testing.T, mailbox string, m seedMessage) seeded
 	if m.References != "" {
 		fmt.Fprintf(&raw, "References: %s\r\n", m.References)
 	}
-	fmt.Fprintf(&raw, "Date: %s\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s", m.Date.Format(time.RFC1123Z), m.Body)
+	contentType := m.ContentType
+	if contentType == "" {
+		contentType = "text/plain; charset=utf-8"
+	}
+	fmt.Fprintf(&raw, "Date: %s\r\nContent-Type: %s\r\n\r\n%s", m.Date.Format(time.RFC1123Z), contentType, m.Body)
 
 	client := s.login(t)
 	defer client.Close()

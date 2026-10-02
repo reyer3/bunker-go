@@ -81,6 +81,20 @@ func demoAdapter(channel core.Channel, account string) *fake.Adapter {
 			})
 		}
 	}
+	switch channel {
+	case core.ChannelMail:
+		seed = append(seed, demoInvitations(account, now)...)
+	case core.ChannelWhatsApp:
+		// A call link shared in a chat, for the "Reuniones" section's
+		// link entries (no time, only listed for a day).
+		seed = append(seed, core.Item{
+			ID: fmt.Sprintf("%s:%s:meet1", channel, account), Channel: channel, Account: account,
+			Thread: "demo-team", ThreadName: "Demo equipo",
+			Body:      "Sala abierta para el repaso: https://meet.jit.si/bunker-demo",
+			From:      core.Address{ID: "demo-team", Name: "Demo Luis"},
+			Timestamp: now.Add(-10 * time.Minute),
+		})
+	}
 	demoVoice := oggfixture.Bytes(12 * time.Second)
 	voiceID := fmt.Sprintf("%s:%s:voice1", channel, account)
 	if channel == core.ChannelWhatsApp || channel == core.ChannelMatrix {
@@ -103,6 +117,39 @@ func demoAdapter(channel core.Channel, account string) *fake.Adapter {
 		a.SetAttachmentData(voiceID, 0, demoVoice)
 	}
 	return a
+}
+
+// demoInvitations are two already-read calendar invitations, so the
+// "Reuniones" section can be tried without real accounts: one starting in
+// 25 minutes (with a Meet link) and one tomorrow at 10:00 (Zoom).
+func demoInvitations(account string, now time.Time) []core.Item {
+	soon := now.Add(25 * time.Minute).Truncate(time.Minute)
+	day := now.AddDate(0, 0, 1)
+	tomorrow := time.Date(day.Year(), day.Month(), day.Day(), 10, 0, 0, 0, now.Location())
+	var items []core.Item
+	for i, m := range []core.Meeting{
+		{UID: "demo-weekly@bunker.invalid", Method: "REQUEST", Summary: "Revisión semanal",
+			Start: soon, End: soon.Add(time.Hour), Organizer: "Demo Ana <ana@example.com>",
+			URL: "https://meet.google.com/abc-defg-hij"},
+		{UID: "demo-product@bunker.invalid", Method: "REQUEST", Summary: "Demo de producto",
+			Start: tomorrow, End: tomorrow.Add(45 * time.Minute), Organizer: "Demo Luis <luis@example.com>",
+			URL: "https://us02web.zoom.us/j/123456789"},
+	} {
+		at := now.Add(time.Duration(-(i + 1)) * time.Hour)
+		meta, err := core.MeetingMeta(map[string]string{"folder": "INBOX"}, m, at)
+		if err != nil {
+			continue // a demo meeting that cannot be encoded is simply not shown
+		}
+		items = append(items, core.Item{
+			ID: fmt.Sprintf("mail:%s:invite%d", account, i+1), Channel: core.ChannelMail, Account: account,
+			Thread: fmt.Sprintf("invite%d", i+1), ThreadName: "Invitación: " + m.Summary,
+			Subject:   "Invitación: " + m.Summary,
+			Body:      "Te invitamos a " + m.Summary + ".",
+			From:      core.Address{ID: "ana@example.com", Name: "Demo Ana"},
+			Timestamp: at, Meta: meta,
+		})
+	}
+	return items
 }
 
 // demoRegistry wires one fake adapter per channel under the "demo"

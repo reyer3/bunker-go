@@ -368,6 +368,12 @@ type Model struct {
 	callNotified map[string]bool
 	callBusy     bool
 
+	// Meetings (meetings.go): the upcoming ones the last poll saw, shown
+	// in the "Reuniones" section under the list. openURL replaces the
+	// desktop opener in tests.
+	meetings []core.UpcomingMeeting
+	openURL  func(rawURL string) error
+
 	// updateNotice is the "nueva versión" line (issue #105, see
 	// update_notice.go), shown from updateNoticeAt for
 	// updateNoticeDuration; updateNoticed keeps it to once per session.

@@ -87,33 +87,34 @@ func (a *Adapter) Fetch(ctx context.Context, id string) (core.Item, error) {
 		raw = section.Bytes
 	}
 	if len(raw) > 0 {
-		body, attachments, err := parseBody(raw)
+		body, attachments, calendars, err := walkMessage(raw, false)
 		if err != nil {
 			return core.Item{}, fmt.Errorf("mail: fetch %s: parse body: %w", id, err)
 		}
 		item.Body = body
 		item.Attachments = attachments
+		setMeeting(&item, calendars)
 	}
 
 	return item, nil
 }
 
-// parseBody walks a raw RFC 5322 message and returns its best-effort
+// walkMessage walks a raw RFC 5322 message and returns its best-effort
 // plain-text body (text/plain preferred, text/html rendered via
-// HTMLToText as a fallback) plus metadata for every attachment part.
-func parseBody(raw []byte) (body string, attachments []core.Attachment, err error) {
-	return walkBody(raw, false)
-}
-
-// walkBody is parseBody's implementation. truncated says raw was cut
-// short on purpose (sync's bounded body fetch, bodytext.go): the MIME
-// structure then ends abruptly, so a read error stops the walk and keeps
-// the text gathered so far instead of failing, and the attachments are
-// meaningless (their sizes are cut too) and must not be used.
-func walkBody(raw []byte, truncated bool) (body string, attachments []core.Attachment, err error) {
+// HTMLToText as a fallback), metadata for every attachment part, and the
+// text of every calendar part (a text/calendar alternative or an .ics
+// attachment), which setMeeting turns into the invitation the message
+// carries.
+//
+// truncated says raw was cut short on purpose (sync's bounded body fetch,
+// bodytext.go): the MIME structure then ends abruptly, so a read error
+// stops the walk and keeps the text gathered so far instead of failing,
+// and the attachments are meaningless (their sizes are cut too) and must
+// not be used.
+func walkMessage(raw []byte, truncated bool) (body string, attachments []core.Attachment, calendars []string, err error) {
 	reader, err := gomail.CreateReader(bytes.NewReader(raw))
 	if err != nil && !gomessage.IsUnknownCharset(err) {
-		return "", nil, fmt.Errorf("read message: %w", err)
+		return "", nil, nil, fmt.Errorf("read message: %w", err)
 	}
 	defer reader.Close()
 
@@ -130,7 +131,7 @@ func walkBody(raw []byte, truncated bool) (body string, attachments []core.Attac
 			if truncated {
 				break
 			}
-			return "", nil, fmt.Errorf("read part: %w", err)
+			return "", nil, nil, fmt.Errorf("read part: %w", err)
 		}
 
 		switch h := part.Header.(type) {
@@ -138,9 +139,11 @@ func walkBody(raw []byte, truncated bool) (body string, attachments []core.Attac
 			contentType, _, _ := h.ContentType()
 			data, readErr := io.ReadAll(part.Body)
 			if readErr != nil && !truncated {
-				return "", nil, fmt.Errorf("read inline part: %w", readErr)
+				return "", nil, nil, fmt.Errorf("read inline part: %w", readErr)
 			}
 			switch {
+			case isCalendarType(contentType):
+				calendars = append(calendars, string(data))
 			case strings.EqualFold(contentType, "text/plain") && !haveText:
 				plainText = string(data)
 				haveText = true
@@ -159,7 +162,10 @@ func walkBody(raw []byte, truncated bool) (body string, attachments []core.Attac
 					stop = true
 					break
 				}
-				return "", nil, fmt.Errorf("read attachment part: %w", readErr)
+				return "", nil, nil, fmt.Errorf("read attachment part: %w", readErr)
+			}
+			if isCalendarType(contentType) || strings.HasSuffix(strings.ToLower(filename), ".ics") {
+				calendars = append(calendars, string(data))
 			}
 			attachments = append(attachments, core.Attachment{
 				Name: filename,
@@ -171,10 +177,10 @@ func walkBody(raw []byte, truncated bool) (body string, attachments []core.Attac
 	}
 
 	if haveText {
-		return plainText, attachments, nil
+		return plainText, attachments, calendars, nil
 	}
 	if htmlText != "" {
-		return HTMLToText(htmlText), attachments, nil
+		return HTMLToText(htmlText), attachments, calendars, nil
 	}
-	return "", attachments, nil
+	return "", attachments, calendars, nil
 }

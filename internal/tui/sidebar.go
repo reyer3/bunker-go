@@ -164,6 +164,10 @@ func sidebarRowLine(row navRow, selected, previews bool, width int, glyphs map[c
 // tall) rows are single lines, so previews give way before rows do.
 const sidebarPreviewMinBudget = 4
 
+// sidebarMeetingListMin is how many lines of the sidebar's row list the
+// meetings section leaves alone.
+const sidebarMeetingListMin = 3
+
 // sidebarLinesAndHits renders the sidebar and, line for line, what a
 // click on each does (the same contract as the full inbox's hits).
 func (m Model) sidebarLinesAndHits() (lines []string, hits []inboxHit) {
@@ -191,6 +195,16 @@ func (m Model) sidebarLinesAndHits() (lines []string, hits []inboxHit) {
 	budget := -1
 	if m.height > 0 {
 		budget = max(1, m.height-len(lines)-footerReservedLines)
+	}
+	// The meetings section sits under the list and only takes what the
+	// list can spare: it keeps at least sidebarMeetingListMin lines.
+	meetingAvail := 1 + meetingMaxRows
+	if budget > 0 {
+		meetingAvail = budget - sidebarMeetingListMin
+	}
+	meetingLines, meetingHits := m.meetingSection(styles, width, meetingAvail)
+	if budget > 0 {
+		budget = max(1, budget-len(meetingLines))
 	}
 	rows := m.visibleRows()
 	switch {
@@ -222,7 +236,10 @@ func (m Model) sidebarLinesAndHits() (lines []string, hits []inboxHit) {
 		}
 	}
 
+	for i, line := range meetingLines {
+		add(line, meetingHits[i])
+	}
 	add(separatorLine(styles, width), inboxHit{kind: hitNone})
-	add(styles.dim.Render(hintLine(width, m.withAskHint(sidebarHints, "a")...)), inboxHit{kind: hitNone})
+	add(styles.dim.Render(hintLine(width, m.withMeetingHint(m.withAskHint(sidebarHints, "a"))...)), inboxHit{kind: hitNone})
 	return lines, hits
 }

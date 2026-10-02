@@ -126,6 +126,15 @@ Commands:
                                                              first, read ones
                                                              too, with unread
                                                              counts
+  meetings [--days N] [--json]                             upcoming meetings
+                                                             from invitations
+                                                             and recent call
+                                                             links
+  meetings join <id|next> [--dry-run] [--json]             open a meeting's
+                                                             link on this
+                                                             machine
+                                                             ($BUNKER_OPEN_URL
+                                                             overrides xdg-open)
   counts [--json]                                          unread counts
   health [--json]                                          per-adapter connection
                                                              state, since when,
@@ -235,6 +244,8 @@ func runWithBackend(ctx context.Context, backend Backend, args []string, stdin i
 		return cmdContacts(ctx, backend, args[1:], stdout, stderr)
 	case "chats":
 		return cmdChats(ctx, backend, args[1:], stdout, stderr)
+	case "meetings":
+		return cmdMeetings(ctx, backend, args[1:], stdout, stderr)
 	case "unread":
 		return cmdUnread(ctx, backend, args[1:], stdout, stderr)
 	default:

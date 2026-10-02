@@ -74,7 +74,7 @@ func (a *Adapter) fillBodyText(item *core.Item, msg *imapclient.FetchMessageBuff
 	if header == nil || len(text) == 0 {
 		return
 	}
-	body, err := bodyTextFromPartial(header, text, limit)
+	body, calendars, err := bodyTextFromPartial(header, text, limit)
 	if err != nil {
 		// Indexing is best-effort: the message still syncs, and a read
 		// fetches and parses it whole, reporting any error then.
@@ -82,6 +82,7 @@ func (a *Adapter) fillBodyText(item *core.Item, msg *imapclient.FetchMessageBuff
 		return
 	}
 	item.Body = body
+	setMeeting(item, calendars)
 }
 
 // bodyTextFromPartial rebuilds a (possibly cut) message from its header
@@ -89,15 +90,15 @@ func (a *Adapter) fillBodyText(item *core.Item, msg *imapclient.FetchMessageBuff
 // parser a full read uses (text/plain preferred, HTML rendered to text),
 // and caps it at limit bytes. A text shorter than limit is the whole
 // text, so only a range that may have been cut is parsed tolerantly.
-func bodyTextFromPartial(header, text []byte, limit int) (string, error) {
+func bodyTextFromPartial(header, text []byte, limit int) (string, []string, error) {
 	raw := make([]byte, 0, len(header)+len(text))
 	raw = append(raw, header...)
 	raw = append(raw, text...)
-	body, _, err := walkBody(raw, len(text) >= limit)
+	body, _, calendars, err := walkMessage(raw, len(text) >= limit)
 	if err != nil {
-		return "", fmt.Errorf("parse body: %w", err)
+		return "", nil, fmt.Errorf("parse body: %w", err)
 	}
-	return truncateUTF8(body, limit), nil
+	return truncateUTF8(body, limit), calendars, nil
 }
 
 // truncateUTF8 cuts s to at most limit bytes without splitting a rune, and

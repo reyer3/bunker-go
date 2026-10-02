@@ -41,6 +41,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.chatTempFiles = append(m.chatTempFiles, msg.path)
 		return m.addChatAttachments(msg.path), nil
+	case meetingOpenedMsg:
+		return m.handleMeetingOpened(msg)
 	case callsLoadedMsg:
 		return m.handleCallsLoaded(msg)
 	case callTickMsg:
@@ -397,6 +399,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.groups = groupUnread(msg.items)
 		m.chats = mergeChatLists(m.chats, msg.chats)
 		m.counts = msg.counts
+		if msg.meetingsOK {
+			m.meetings = msg.meetings
+		}
 		if visible := len(m.visibleRows()); m.selected >= visible {
 			m.selected = max(0, visible-1)
 		}
@@ -606,6 +611,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "c":
 			if !m.detail {
 				return m.callSelectedRow()
+			}
+		case meetingJoinKey:
+			if !m.detail {
+				return m.joinNextMeeting()
 			}
 		case "u":
 			if !m.detail {

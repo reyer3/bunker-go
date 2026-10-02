@@ -111,9 +111,9 @@ func TestEndToEndCLIAgainstFakeDaemon(t *testing.T) {
 		} `json:"items"`
 		NextCursor string `json:"next_cursor"`
 	}
-	code, out = runCLI(t, []string{"find", "channel:mail", "--json"})
+	code, out = runCLI(t, []string{"find", "channel:mail is:unread", "--json"})
 	if err := json.Unmarshal([]byte(out), &page); code != 0 || err != nil || len(page.Items) != 1 || page.Items[0].ID != mailID || page.NextCursor != "" {
-		t.Fatalf("find channel:mail --json = %d %q (%v)", code, out, err)
+		t.Fatalf("find channel:mail is:unread --json = %d %q (%v)", code, out, err)
 	}
 	code, out = runCLI(t, []string{"list", "--query", "-channel:mail is:unread", "--limit", "1", "--json"})
 	if err := json.Unmarshal([]byte(out), &page); code != 0 || err != nil || len(page.Items) != 1 || page.NextCursor == "" {
@@ -146,6 +146,31 @@ func TestEndToEndCLIAgainstFakeDaemon(t *testing.T) {
 	}
 	if read := chatsResp.Conversations[2]; read.Unread != 0 {
 		t.Fatalf("oldest conversation = %+v, want a read one", read)
+	}
+
+	// meetings: the demo's two invitations (soonest first) and the chat's
+	// call link, and join --dry-run names the opener without running it.
+	var meetResp struct {
+		Meetings []struct {
+			ItemID  string `json:"item_id"`
+			Summary string `json:"summary"`
+			Link    bool   `json:"link"`
+			URL     string `json:"url"`
+		} `json:"meetings"`
+	}
+	code, out = runCLI(t, []string{"meetings", "--days", "3", "--json"})
+	if err := json.Unmarshal([]byte(out), &meetResp); code != 0 || err != nil || len(meetResp.Meetings) != 3 {
+		t.Fatalf("meetings --json = %d %q (%v), want 2 invitations and 1 link", code, out, err)
+	}
+	if m := meetResp.Meetings[0]; m.Summary != "Revisión semanal" || m.URL == "" || m.Link {
+		t.Fatalf("first meeting = %+v, want the one starting soonest", m)
+	}
+	if m := meetResp.Meetings[2]; !m.Link {
+		t.Fatalf("last meeting = %+v, want the chat link after the timed ones", m)
+	}
+	code, out = runCLI(t, []string{"meetings", "join", meetResp.Meetings[0].ItemID, "--dry-run"})
+	if code != 0 || !strings.Contains(out, "[dry-run]") || !strings.Contains(out, "https://meet.google.com/abc-defg-hij") {
+		t.Fatalf("meetings join --dry-run = %d %q", code, out)
 	}
 
 	// read <id> --json

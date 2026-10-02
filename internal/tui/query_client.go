@@ -283,6 +283,18 @@ func (c *queryClient) Conversations(ctx context.Context, filter core.Conversatio
 	})
 }
 
+// Meetings is an idempotent query (the "Reuniones" section); it errors
+// with core.ErrUnsupported when the connection underneath cannot list them.
+func (c *queryClient) Meetings(ctx context.Context, filter core.MeetingFilter) ([]core.UpcomingMeeting, error) {
+	return query(c, ctx, func(client Client) ([]core.UpcomingMeeting, error) {
+		lister, ok := client.(MeetingsClient)
+		if !ok {
+			return nil, fmt.Errorf("tui: meetings: %w", core.ErrUnsupported)
+		}
+		return lister.Meetings(ctx, filter)
+	})
+}
+
 func (c *queryClient) Presence(ctx context.Context, channel string, account, thread string) (core.Presence, error) {
 	return query(c, ctx, func(client Client) (core.Presence, error) { return client.Presence(ctx, channel, account, thread) })
 }

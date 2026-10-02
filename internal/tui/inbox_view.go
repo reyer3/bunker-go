@@ -64,17 +64,42 @@ func (m Model) inboxLinesAndHits() (lines []string, hits []inboxHit) {
 		bodyHeight = max(0, bodyHeight-len(lines))
 	}
 
-	var bodyLines []string
-	var bodyHits []inboxHit
-	if channel, focused := m.currentChannelFilter(); focused {
-		bodyLines, bodyHits = m.focusedSectionLines(channel, styles, glyphs, width, bodyHeight)
+	channel, focused := m.currentChannelFilter()
+	renderBody := func(height int) ([]string, []inboxHit) {
+		if focused {
+			return m.focusedSectionLines(channel, styles, glyphs, width, height)
+		}
+		return m.overviewLines(styles, glyphs, width, height)
+	}
+	bodyLines, bodyHits := renderBody(bodyHeight)
+
+	// The meetings section takes the most room the list can spare: at
+	// most a third of the pane, and only if the whole view still fits the
+	// height, so it never pushes a section or the footer off screen. An
+	// unknown height (0) shows it whole.
+	var meetingLines []string
+	var meetingHits []inboxHit
+	if bodyHeight > 0 {
+		for avail := min(bodyHeight/3, 1+meetingMaxRows); avail >= 2; avail-- {
+			ml, mh := m.meetingSection(styles, width, avail)
+			if len(ml) == 0 {
+				break
+			}
+			bl, bh := renderBody(bodyHeight - len(ml))
+			if len(lines)+len(bl)+len(ml)+footerReservedLines <= m.height {
+				bodyLines, bodyHits, meetingLines, meetingHits = bl, bh, ml, mh
+				break
+			}
+		}
 	} else {
-		bodyLines, bodyHits = m.overviewLines(styles, glyphs, width, bodyHeight)
+		meetingLines, meetingHits = m.meetingSection(styles, width, 1+meetingMaxRows)
 	}
 	lines = append(lines, bodyLines...)
 	hits = append(hits, bodyHits...)
+	lines = append(lines, meetingLines...)
+	hits = append(hits, meetingHits...)
 
-	lines = append(lines, separatorLine(styles, width), footerLine(styles, width))
+	lines = append(lines, separatorLine(styles, width), m.footerLine(styles, width))
 	hits = append(hits, repeatHit(inboxHit{kind: hitNone}, 2)...)
 	return lines, hits
 }

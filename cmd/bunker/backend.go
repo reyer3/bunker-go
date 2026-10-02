@@ -56,6 +56,9 @@ type Backend interface {
 	// Conversations lists conversations newest first with their unread
 	// counts, read ones included (`bunker chats`).
 	Conversations(ctx context.Context, filter core.ConversationFilter) ([]core.Conversation, error)
+	// Meetings lists the upcoming meetings from invitations and recent
+	// call links (`bunker meetings`).
+	Meetings(ctx context.Context, filter core.MeetingFilter) ([]core.UpcomingMeeting, error)
 	// MarkUnread puts an item back in the unread inbox (`bunker unread`);
 	// localOnly reports that only bunker's store changed.
 	MarkUnread(ctx context.Context, id string) (localOnly bool, err error)

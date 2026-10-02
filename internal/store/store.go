@@ -116,6 +116,7 @@ var migrations = []migration{
 	{version: 2, apply: migrateV2},
 	{version: 3, apply: migrateV3},
 	{version: 4, apply: migrateV4},
+	{version: 5, apply: migrateV5},
 }
 
 // CurrentSchemaVersion returns the latest schema version this binary
@@ -323,6 +324,28 @@ func migrateV4(db *sql.DB) error {
 	return nil
 }
 
+// migrateV5 adds meeting_end, the Unix second after which the meeting an
+// item carries (core.MetaMeeting) no longer matters, 0 for the vast
+// majority of items that carry none. The partial index holds only the
+// items with a meeting, so listing the upcoming ones never scans the rest.
+// Items stored before this version are not backfilled: they only gain a
+// meeting when mail is synced or read again.
+func migrateV5(db *sql.DB) error {
+	has, err := hasColumn(db, "items", "meeting_end")
+	if err != nil {
+		return fmt.Errorf("check meeting_end column: %w", err)
+	}
+	if !has {
+		if _, err := db.Exec(`ALTER TABLE items ADD COLUMN meeting_end INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add meeting_end column: %w", err)
+		}
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_items_meeting ON items(meeting_end) WHERE meeting_end > 0`); err != nil {
+		return fmt.Errorf("create meeting index: %w", err)
+	}
+	return nil
+}
+
 // migrate brings db up to the latest schema version this binary knows,
 // via PRAGMA user_version: a fresh database (version 0, no tables) runs
 // every migration in order; a legacy unversioned database is detected by
@@ -433,9 +456,9 @@ func (s *Store) Upsert(ctx context.Context, item core.Item) error {
 	if err != nil {
 		return fmt.Errorf("store: marshal attachments: %w", err)
 	}
-	meta := item.Meta
-	if meta == nil {
-		meta = map[string]string{}
+	meta, err := s.metaWithMeeting(ctx, tx, item)
+	if err != nil {
+		return err
 	}
 	metaJSON, err := json.Marshal(meta)
 	if err != nil {
@@ -445,8 +468,8 @@ func (s *Store) Upsert(ctx context.Context, item core.Item) error {
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO items (id, channel, account, thread, thread_name, from_id, from_name,
 			to_json, subject, body, attachments_json, unread, from_me, timestamp, meta_json,
-			edited, deleted)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			edited, deleted, meeting_end)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			channel=excluded.channel, account=excluded.account, thread=excluded.thread,
 			thread_name=excluded.thread_name, from_id=excluded.from_id, from_name=excluded.from_name,
@@ -457,12 +480,12 @@ func (s *Store) Upsert(ctx context.Context, item core.Item) error {
 				THEN items.attachments_json ELSE excluded.attachments_json END,
 			unread=excluded.unread,
 			from_me=excluded.from_me, timestamp=excluded.timestamp, meta_json=excluded.meta_json,
-			edited=excluded.edited, deleted=excluded.deleted
+			edited=excluded.edited, deleted=excluded.deleted, meeting_end=excluded.meeting_end
 	`,
 		item.ID, string(item.Channel), item.Account, item.Thread, item.ThreadName,
 		item.From.ID, item.From.Name, string(toJSON), item.Subject, item.Body,
 		string(attJSON), boolToInt(item.Unread), boolToInt(item.FromMe), item.Timestamp.UnixNano(), string(metaJSON),
-		boolToInt(item.Edited), boolToInt(item.Deleted),
+		boolToInt(item.Edited), boolToInt(item.Deleted), meetingEnd(meta),
 		string(core.ChannelMail), string(core.ChannelMail),
 	)
 	if err != nil {
@@ -559,7 +582,7 @@ func (s *Store) EditItem(ctx context.Context, id, body string) error {
 // pagination are undisturbed. It is a no-op error (core.ErrNotFound)
 // when id is unknown.
 func (s *Store) RevokeItem(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, `UPDATE items SET body = '', deleted = 1 WHERE id = ?`, id)
+	res, err := s.db.ExecContext(ctx, `UPDATE items SET body = '', deleted = 1, meeting_end = 0 WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("store: revoke %s: %w", id, err)
 	}

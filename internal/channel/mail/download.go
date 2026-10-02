@@ -79,7 +79,7 @@ func (a *Adapter) DownloadAttachment(ctx context.Context, item core.Item, index 
 	return io.NopCloser(bytes.NewReader(data)), nil
 }
 
-// attachmentPartAt walks raw's MIME parts in exactly the order parseBody
+// attachmentPartAt walks raw's MIME parts in exactly the order walkMessage
 // (fetch.go) builds Item.Attachments from — only counting
 // *gomail.AttachmentHeader parts — and returns the index-th one's raw
 // bytes, so an index taken from a stored Item.Attachments slice always

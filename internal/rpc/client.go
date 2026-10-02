@@ -287,6 +287,16 @@ func (c *Client) Conversations(ctx context.Context, filter core.ConversationFilt
 	return res.Conversations, nil
 }
 
+// Meetings lists the upcoming meetings from invitations and recent call
+// links, soonest first (see core.Service.Meetings).
+func (c *Client) Meetings(ctx context.Context, filter core.MeetingFilter) ([]core.UpcomingMeeting, error) {
+	var res meetingsResult
+	if err := c.call(ctx, MethodMeetings, meetingsParams{Filter: filter}, &res); err != nil {
+		return nil, err
+	}
+	return res.Meetings, nil
+}
+
 // PostStatus publishes a status/story on channel/account.
 func (c *Client) PostStatus(ctx context.Context, channel core.Channel, account string, status core.Status, dryRun bool) (core.Plan, core.Receipt, error) {
 	var res planReceiptResult
