@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.16.0](https://github.com/reyer3/bunker-go/compare/v0.15.0...v0.16.0) (2026-10-02)
+
+
+### Features
+
+* **herdr:** dock the bunker panel on the right edge ([#136](https://github.com/reyer3/bunker-go/issues/136)) ([39f235f](https://github.com/reyer3/bunker-go/commit/39f235f80728b008f32726f65e0244f725721eb1))
+* **tui:** copy messages, open attachments by double-click, send with one Enter ([#134](https://github.com/reyer3/bunker-go/issues/134)) ([544bcc9](https://github.com/reyer3/bunker-go/commit/544bcc9d370f19ec76c991226103b640d27d4b65))
+* upcoming meetings from invitations, with one-click join ([#135](https://github.com/reyer3/bunker-go/issues/135)) ([f153bb9](https://github.com/reyer3/bunker-go/commit/f153bb9ed29d23f7a02b7cd9c67b34a88cfe1f19))
+
+
+### Bug Fixes
+
+* send Office documents with their own MIME type, not application/zip ([#132](https://github.com/reyer3/bunker-go/issues/132)) ([2fa7fa1](https://github.com/reyer3/bunker-go/commit/2fa7fa1b0c11d20c5a96c698428fc3958b1fa466))
+
 ## [0.15.0](https://github.com/reyer3/bunker-go/compare/v0.14.0...v0.15.0) (2026-10-02)
 
 
