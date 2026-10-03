@@ -130,13 +130,22 @@ func NewFromAccount(acc config.Account) (core.Adapter, error) {
 
 // commandAudioFromOptions reads an account's call audio options.
 func commandAudioFromOptions(opts map[string]interface{}) commandAudio {
-	return commandAudio{
+	c := commandAudio{
 		capture:  stringSliceOption(opts, "call_capture_command", defaultCaptureCommand),
 		playback: stringSliceOption(opts, "call_playback_command", defaultPlaybackCommand),
 		// Gains above maxCallGain only add clipping, never loudness.
 		captureGain:  gainOption(opts, "call_capture_gain"),
 		playbackGain: gainOption(opts, "call_playback_gain"),
 	}
+	// Echo cancellation (on by default) only rewrites the built-in
+	// parec/pacat commands; a custom command is the user's own and is
+	// never touched.
+	_, customCapture := opts["call_capture_command"]
+	_, customPlayback := opts["call_playback_command"]
+	if boolOption(opts, "call_echo_cancel", true) && !customCapture && !customPlayback {
+		c.echoCancel = newPulseEchoCancel(nil)
+	}
+	return c
 }
 
 // Link runs the QR-pairing handshake for acc and renders each code to

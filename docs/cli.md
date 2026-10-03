@@ -1080,6 +1080,56 @@ escuchan"), go in this order:
 | `audio-test` ok, `first RTP decoded` missing, `sin medios` | the peer's audio never arrived: network/relay |
 | `first RTP decoded` present, `audio_error` empty, still silent | output device/volume (`pactl list short sinks`) |
 | `audio-test` mic peak 0 | muted or wrong input source |
+| the peer hears her own voice back | echo cancellation is off or could not load (see below) |
+
+### Echo cancellation in calls
+
+On laptop speakers and a built-in mic the peer would hear her own voice
+coming back. With the built-in `parec`/`pacat` commands, every call
+therefore gets its own WebRTC echo canceller, on by default per account:
+
+```toml
+[[account]]
+channel = "whatsapp"
+name = "personal"
+calls = true
+call_echo_cancel = true   # default; false turns it off
+```
+
+When the call's audio starts the daemon runs, with the default sink and
+source at that moment as masters:
+
+```
+pactl get-default-sink
+pactl get-default-source
+pactl load-module module-echo-cancel aec_method=webrtc \
+  source_master=<default source> sink_master=<default sink> \
+  source_name=bunker_call_aec_<pid>_<n>_source sink_name=bunker_call_aec_<pid>_<n>_sink
+```
+
+and adds `--device=bunker_call_aec_<pid>_<n>_source` to `parec` and
+`--device=bunker_call_aec_<pid>_<n>_sink` to `pacat`. The module is
+unloaded (`pactl unload-module <index>`) once both helpers are closed: when
+the call ends, when the daemon stops (it hangs up live calls), or when a
+helper fails to start. It is per call rather than per daemon so a change of
+default device (headphones plugged in) is picked up by the next call, and
+nothing stays loaded between calls. A daemon killed with SIGKILL can leave
+one loaded; `pactl list short modules | grep bunker_call_aec` finds it.
+
+If it cannot load (no `pactl`, no `module-echo-cancel`, no default
+device), the daemon logs a `WARN` (`call echo cancel unavailable`) and the
+call goes on exactly as without it: echo cancellation never makes a call
+fail. A custom `call_capture_command` or `call_playback_command` turns it
+off for that account: bunker never rewrites your own commands. `bunker call
+audio-test` does not use it, so the tone it plays still reaches the mic.
+
+EasyEffects: a stream whose PipeWire `target.object` names a device other
+than EasyEffects' own (or its configured input/output device) is ignored by
+EasyEffects 8, and `pacat`/`parec --device=` sets exactly that property
+through pipewire-pulse, so EasyEffects does not move the call's streams
+onto `easyeffects_sink`/`easyeffects_source`. When EasyEffects' virtual
+devices are themselves the defaults, they become the echo canceller's
+masters, which still works.
 
 ### Voice calls in the TUI
 

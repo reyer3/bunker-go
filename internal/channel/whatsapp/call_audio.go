@@ -51,6 +51,10 @@ type commandAudio struct {
 	playback     []string
 	captureGain  float32
 	playbackGain float32
+	// echoCancel, when not nil, routes each call through its own
+	// echo-cancel devices (see withEchoCancel); nil leaves the commands
+	// as they are.
+	echoCancel *pulseEchoCancel
 	// log receives the helpers' stderr and exit reports; nil means
 	// slog.Default().
 	log *slog.Logger
@@ -106,13 +110,28 @@ func missingHelperError(role, name string) error {
 // Open starts the capture and playback processes. problem, when not nil,
 // is told once per helper if it later fails or dies mid-call.
 func (c commandAudio) Open(problem func(short string, err error)) (meowcaller.AudioSource, meowcaller.AudioSink, error) {
+	helpers := 0
+	if len(c.capture) > 0 {
+		helpers++
+	}
+	if len(c.playback) > 0 {
+		helpers++
+	}
+	if helpers == 0 {
+		return nil, nil, nil
+	}
+	c, release := c.withEchoCancel()
+	// The echo canceller outlives both helpers: it goes once the last of
+	// them is closed (the call ended or Open failed).
+	done := releaseAfter(helpers, release)
 	var src meowcaller.AudioSource
 	if len(c.capture) > 0 {
 		h, out, err := startCapture(c.capture, c.logger(), problem)
 		if err != nil {
+			release()
 			return nil, nil, err
 		}
-		src = meowcaller.PCMStream(&procReader{ReadCloser: out, h: h})
+		src = meowcaller.PCMStream(&procReader{ReadCloser: out, h: h, onClose: done})
 		if g := c.captureGain; g > 0 && g != 1 {
 			src = gainSource{AudioSource: src, gain: g}
 		}
@@ -122,9 +141,10 @@ func (c commandAudio) Open(problem func(short string, err error)) (meowcaller.Au
 		h, in, err := startPlayback(c.playback, c.logger(), problem)
 		if err != nil {
 			closeAudio(src, nil)
+			release()
 			return nil, nil, err
 		}
-		sink = &pcmSink{w: in, h: h, gain: c.playbackGain}
+		sink = &pcmSink{w: in, h: h, gain: c.playbackGain, onClose: done}
 	}
 	return src, sink, nil
 }
@@ -254,12 +274,17 @@ type procReader struct {
 	io.ReadCloser
 	h    *helper
 	once sync.Once
+	// onClose, when set, runs once after the process is gone.
+	onClose func()
 }
 
 func (p *procReader) Close() error {
 	p.once.Do(func() {
 		p.h.close()
 		_ = p.ReadCloser.Close()
+		if p.onClose != nil {
+			p.onClose()
+		}
 	})
 	return nil
 }
@@ -273,6 +298,8 @@ type pcmSink struct {
 	gain   float32
 	closed bool
 	failed bool
+	// onClose, when set, runs once after the process is gone.
+	onClose func()
 }
 
 // WriteFrame feeds the playback process. When it fails (the process died,
@@ -314,6 +341,9 @@ func (s *pcmSink) Close() error {
 	s.closed = true
 	_ = s.w.Close()
 	s.h.close()
+	if s.onClose != nil {
+		s.onClose()
+	}
 	return nil
 }
 
