@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.0](https://github.com/reyer3/bunker-go/compare/v0.17.0...v0.18.0) (2026-10-03)
+
+
+### Features
+
+* **mcp:** attachments on send/reply and a download tool ([#140](https://github.com/reyer3/bunker-go/issues/140)) ([b3de1f5](https://github.com/reyer3/bunker-go/commit/b3de1f55085b178950c006bc8a6b0b77d989fdf7))
+* **whatsapp:** echo cancellation for calls ([#141](https://github.com/reyer3/bunker-go/issues/141)) ([b7c833c](https://github.com/reyer3/bunker-go/commit/b7c833cc3ee935e2addba3f02e2c808c4ee01602))
+
 ## [0.17.0](https://github.com/reyer3/bunker-go/compare/v0.16.0...v0.17.0) (2026-10-02)
 
 
