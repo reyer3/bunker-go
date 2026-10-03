@@ -719,14 +719,7 @@ func cmdDownload(ctx context.Context, backend Backend, args []string, stdout, st
 		return 2
 	}
 
-	// The daemon writes the file from its own working directory, so a
-	// relative -o is resolved here, against the caller's.
-	dest, err := filepath.Abs(*out)
-	if err != nil {
-		return fail(*jsonOut, stdout, stderr, fmt.Errorf("resolve output path: %w", err))
-	}
-
-	res, err := backend.Download(ctx, positionals[0], *index, dest, core.DownloadOptions{Force: *force})
+	res, err := saveAttachment(ctx, backend, positionals[0], *index, *out, *force)
 	if err != nil {
 		return fail(*jsonOut, stdout, stderr, err)
 	}
@@ -736,6 +729,20 @@ func cmdDownload(ctx context.Context, backend Backend, args []string, stdout, st
 	}
 	fmt.Fprintf(stdout, "saved %s (%s, %d bytes) to %s\n", res.Name, res.MIME, res.Bytes, res.Path)
 	return 0
+}
+
+// saveAttachment is the download path bunker download and the MCP
+// download tool share. The daemon writes the file from its own working
+// directory, so a relative dest is resolved here, against the caller's;
+// the overwrite refusal (unless force), the size cap and the 0600 write
+// live in core.Service.Download. A missing parent directory is an error,
+// never created.
+func saveAttachment(ctx context.Context, backend Backend, id string, index int, dest string, force bool) (core.DownloadResult, error) {
+	abs, err := filepath.Abs(dest)
+	if err != nil {
+		return core.DownloadResult{}, fmt.Errorf("resolve output path: %w", err)
+	}
+	return backend.Download(ctx, id, index, abs, core.DownloadOptions{Force: force})
 }
 
 // cmdAvatar prints the local PNG path for one conversation's avatar,
