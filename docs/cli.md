@@ -1904,8 +1904,8 @@ which answers `daemon_up: false` with a hint to run `bunker daemon`.
 | `contacts` | the same matches as `bunker contacts` |
 | `calls` | live voice calls |
 | `health` | whether the daemon is up and, per account, `channel`, `account`, `state`, `since`, `last_error`, `restarts` and `last_item` (the newest stored item's time); plus `update_available` and `latest_version` from the daemon's release check |
-| `send` | a new message; `to` takes an address or a contact name, resolved like the CLI |
-| `reply` | a reply to an item |
+| `send` | a new message (`channel`, `account`, `to`, `text`, `subject`, `attachments`); `to` takes an address or a contact name, resolved like the CLI |
+| `reply` | a reply to an item (`id`, `text`, `attachments`) |
 | `edit` | edit one of the user's own messages (`id`, `text`), like `bunker edit` |
 | `delete` | delete one of the user's own messages for everyone (`id`), like `bunker delete` |
 | `react` | react to any message (`id`, `emoji`; an empty `emoji` removes ours), like `bunker react` |
@@ -1970,14 +1970,25 @@ or `backfill` when the mail is not stored yet.
 - A real send needs the server started with `--allow-send` **and** the
   call to pass `confirm: true`. A confirm on a plans-only server returns
   the plan with an error saying nothing was sent.
+- `attachments` (optional on `send` and `reply`, like `--attach`) is a list
+  of local files as **absolute paths**: a relative path or `~` is
+  refused, because the server's working directory is whatever the host
+  launched it in and no shell expands `~`. Each file must exist and not
+  be a directory, checked before anything is planned. The plan's
+  `attachments` lists every file's `name`, `mime` and `size` (computed
+  and checked against the channel's attachment policy, as on
+  `--dry-run`), so the user sees what would leave the machine. `text`
+  may be empty when there are attachments.
 - The daemon's WhatsApp pacing and fan-out limits still apply. There is no
   bulk tool: one message per call.
 - A confirmed send has its own 5-minute timeout (reads keep 60 seconds),
   because pacing can take a while. It carries an idempotency key derived
   from the plan (channel, account, recipients or replied-to item, subject,
-  text and attachment paths), so retrying a confirm that timed out never
-  sends twice: the retry waits for, or replays, the first send's receipt
-  (`receipt.replayed: true`). The same text to the same person again
+  text, attachment paths and each attachment's name, MIME type and size),
+  so retrying a confirm that timed out never sends twice: the retry
+  waits for, or replays, the first send's receipt
+  (`receipt.replayed: true`). A file changed behind the same path is a
+  new send, not a retry. The same text to the same person again
   within 24 hours is answered the same way; change the text to send it
   anew.
 

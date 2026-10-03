@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -35,6 +36,8 @@ and free text; list and search page with cursor/next_cursor.
 When mail the user expects is not stored (old mail beyond the initial sync), search_remote asks the mail
 server and backfill fetches older mail since a date; both contact the server and add what they find to
 the store, never marking anything read. Prefer search first.
+send and reply take optional attachments (absolute local file paths); the plan lists each file's name,
+MIME type and size so the user sees what would leave the machine.
 send and reply return a plan (dry run) unless confirm is true; confirming only works when the user
 started the server with --allow-send. edit and delete (the user's own messages only) and react follow
 the same rule.
@@ -214,17 +217,19 @@ type (
 		Calls []core.Call `json:"calls"`
 	}
 	mcpSendIn struct {
-		Channel string `json:"channel" jsonschema:"mail, whatsapp or matrix"`
-		Account string `json:"account" jsonschema:"account to send from"`
-		To      string `json:"to" jsonschema:"an address, or a contact name resolved within that account"`
-		Text    string `json:"text" jsonschema:"the message"`
-		Subject string `json:"subject,omitempty" jsonschema:"mail only"`
-		Confirm bool   `json:"confirm,omitempty" jsonschema:"false (default) returns the plan only; true sends, and only works when the server runs with --allow-send"`
+		Channel     string   `json:"channel" jsonschema:"mail, whatsapp or matrix"`
+		Account     string   `json:"account" jsonschema:"account to send from"`
+		To          string   `json:"to" jsonschema:"an address, or a contact name resolved within that account"`
+		Text        string   `json:"text,omitempty" jsonschema:"the message; may be empty when attachments are given"`
+		Subject     string   `json:"subject,omitempty" jsonschema:"mail only"`
+		Attachments []string `json:"attachments,omitempty" jsonschema:"local files to attach, as absolute paths (no ~, no relative paths); the plan lists each one's name, MIME type and size"`
+		Confirm     bool     `json:"confirm,omitempty" jsonschema:"false (default) returns the plan only; true sends, and only works when the server runs with --allow-send"`
 	}
 	mcpReplyIn struct {
-		ID      string `json:"id" jsonschema:"the item to reply to"`
-		Text    string `json:"text" jsonschema:"the reply"`
-		Confirm bool   `json:"confirm,omitempty" jsonschema:"false (default) returns the plan only; true sends, and only works when the server runs with --allow-send"`
+		ID          string   `json:"id" jsonschema:"the item to reply to"`
+		Text        string   `json:"text,omitempty" jsonschema:"the reply; may be empty when attachments are given"`
+		Attachments []string `json:"attachments,omitempty" jsonschema:"local files to attach, as absolute paths (no ~, no relative paths); the plan lists each one's name, MIME type and size"`
+		Confirm     bool     `json:"confirm,omitempty" jsonschema:"false (default) returns the plan only; true sends, and only works when the server runs with --allow-send"`
 	}
 	mcpHealthOut struct {
 		DaemonUp bool               `json:"daemon_up" jsonschema:"whether the bunker daemon answered"`
@@ -403,22 +408,28 @@ func newMCPServer(dial mcpDialer, allowSend bool) *mcp.Server {
 			return mcpHealth(ctx, dial)
 		})
 
-	mcp.AddTool(server, &mcp.Tool{Name: "send", Description: "Send a new message. Returns the plan only unless confirm is true and the server allows sending.", Annotations: outbound},
+	mcp.AddTool(server, &mcp.Tool{Name: "send", Description: "Send a new message, optionally with attachments (absolute local paths). Returns the plan only, listing each attachment, unless confirm is true and the server allows sending.", Annotations: outbound},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in mcpSendIn) (*mcp.CallToolResult, mcpPlanOut, error) {
+			if err := mcpCheckOutgoing("send", in.Text, in.Attachments); err != nil {
+				return nil, mcpPlanOut{}, err
+			}
 			return mcpOutbound(ctx, dial, allowSend, in.Confirm, func(ctx context.Context, b Backend, dryRun bool) (core.Plan, core.Receipt, error) {
 				channel := core.Channel(in.Channel)
 				to, err := resolveRecipient(ctx, b, channel, in.Account, in.To, io.Discard, true)
 				if err != nil {
 					return core.Plan{}, core.Receipt{}, err
 				}
-				return b.Send(ctx, core.Outgoing{Channel: channel, Account: in.Account, To: []string{to}, Subject: in.Subject, Body: in.Text}, dryRun)
+				return b.Send(ctx, core.Outgoing{Channel: channel, Account: in.Account, To: []string{to}, Subject: in.Subject, Body: in.Text, Attachments: in.Attachments}, dryRun)
 			})
 		})
 
-	mcp.AddTool(server, &mcp.Tool{Name: "reply", Description: "Reply to an item. Returns the plan only unless confirm is true and the server allows sending.", Annotations: outbound},
+	mcp.AddTool(server, &mcp.Tool{Name: "reply", Description: "Reply to an item, optionally with attachments (absolute local paths). Returns the plan only, listing each attachment, unless confirm is true and the server allows sending.", Annotations: outbound},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in mcpReplyIn) (*mcp.CallToolResult, mcpPlanOut, error) {
+			if err := mcpCheckOutgoing("reply", in.Text, in.Attachments); err != nil {
+				return nil, mcpPlanOut{}, err
+			}
 			return mcpOutbound(ctx, dial, allowSend, in.Confirm, func(ctx context.Context, b Backend, dryRun bool) (core.Plan, core.Receipt, error) {
-				return b.Reply(ctx, in.ID, in.Text, nil, nil, dryRun)
+				return b.Reply(ctx, in.ID, in.Text, nil, in.Attachments, dryRun)
 			})
 		})
 
@@ -427,6 +438,30 @@ func newMCPServer(dial mcpDialer, allowSend bool) *mcp.Server {
 	addMCPAttachmentTool(server, dial)
 
 	return server
+}
+
+// mcpCheckOutgoing validates a send or reply before anything is planned:
+// there must be text or an attachment, and every attachment must be an
+// absolute path to a readable file. The CLI resolves relative paths
+// against the user's shell, but the MCP server's working directory is
+// whatever the host launched it in, and no shell expands ~, so either
+// would silently pick the wrong file; absolute paths say exactly what
+// leaves the machine. The file checks are the CLI's own
+// (validateAttachmentPaths); MIME and size rules stay in core.Service,
+// which applies them to the plan.
+func mcpCheckOutgoing(tool, text string, attachments []string) error {
+	if text == "" && len(attachments) == 0 {
+		return fmt.Errorf("%s: text is required unless attachments are given", tool)
+	}
+	for _, p := range attachments {
+		if !filepath.IsAbs(p) {
+			return fmt.Errorf("%s: attachment %q must be an absolute path (no ~ and no relative paths)", tool, p)
+		}
+	}
+	if err := validateAttachmentPaths(attachments); err != nil {
+		return fmt.Errorf("%s: %w", tool, err)
+	}
+	return nil
 }
 
 // mcpPage runs one ListPage for list and search.
