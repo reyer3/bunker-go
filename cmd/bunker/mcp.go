@@ -30,6 +30,8 @@ const mcpInstructions = `bunker is the user's inbox: mail, WhatsApp and Matrix i
 Use counts and list to see what is new, read or thread to open it (reading never marks anything read),
 and contacts to find someone's address by name. health says whether the daemon and each account are connected.
 attachment returns the text of an item's attachment (id, index from 0), to read invoices, contracts and other documents.
+download saves an attachment's bytes to a local file (id, index, an absolute path; force to overwrite): it only
+writes on this machine, so it needs no confirm or --allow-send.
 search finds stored items with a query language: from:, to:, subject:, is:unread|read, has:attachment,
 in:<folder>, channel:, account:, label:, before:/after: (YYYY-MM-DD or 7d/2w/3m), "phrases", -negation
 and free text; list and search page with cursor/next_cursor.
@@ -436,6 +438,7 @@ func newMCPServer(dial mcpDialer, allowSend bool) *mcp.Server {
 	addMCPOrganizeTools(server, dial, allowSend)
 	addMCPMessageTools(server, dial, allowSend)
 	addMCPAttachmentTool(server, dial)
+	addMCPDownloadTool(server, dial)
 
 	return server
 }

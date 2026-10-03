@@ -1900,6 +1900,7 @@ which answers `daemon_up: false` with a hint to run `bunker daemon`.
 | `backfill` | `bunker backfill mail`: fetch older mail into the store (`account`, `since`, `folder` = `INBOX`, `dry_run`); returns `dry_run`, `count`, `first_id`, `last_id` |
 | `read` | one item with its body (capped at 20,000 characters); **never marks it read** |
 | `attachment` | the text of one attachment (`id`, `index` from 0), downloaded like `bunker download` into a temp dir that is removed afterwards; see below; **never marks anything read** |
+| `download` | save one attachment to a local file (`id`, `index` from 0, `path`, `force`), like `bunker download`; returns `path`, `name`, `mime`, `size`; see below |
 | `thread` | a conversation's newest messages, oldest first |
 | `contacts` | the same matches as `bunker contacts` |
 | `calls` | live voice calls |
@@ -1942,6 +1943,22 @@ It returns `id`, `index`, `name`, `mime`, `size`, `format`, `has_text`,
   out of range.
 - The text is capped at 100 KB; a longer one is cut and says
   `truncated: true`.
+
+`download` saves an attachment's bytes where the agent says, for a
+file it must hand on (re-attach, open, archive) rather than read:
+- `path` must be an **absolute path** whose directory exists: a relative
+  path or `~` is refused (the server's working directory is whatever the
+  host launched it in), and a missing directory is an error, never
+  created.
+- An existing file at `path` is refused unless `force: true`, exactly
+  like `bunker download --force`. The same daemon call writes it (0600,
+  via a temp file and a rename, with the same size cap).
+- An index out of range is an error.
+- It writes only on this machine and sends nothing, so it is **not**
+  gated by `--allow-send` and needs no `confirm`. It is annotated
+  neither read-only (it writes a file) nor destructive, and open-world
+  (the daemon may fetch the bytes from the channel's server). It never
+  marks anything read.
 
 `search_remote` and `backfill` sit in between, and are annotated
 neither read-only nor destructive (idempotent, open-world):
