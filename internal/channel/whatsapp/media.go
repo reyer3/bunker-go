@@ -107,6 +107,7 @@ func (a *Adapter) SendMedia(ctx context.Context, out core.Outgoing) (core.Receip
 	// once: a caption is typed once, then every image goes out, not one
 	// composing/paused cycle per image.
 	var receipt core.Receipt
+	var sent []*waE2E.Message
 	err = a.withHumanEmulation(ctx, jid, out.Body, true, func() error {
 		for i, path := range out.Attachments {
 			caption := ""
@@ -127,6 +128,7 @@ func (a *Adapter) SendMedia(ctx context.Context, out core.Outgoing) (core.Receip
 			if err != nil {
 				return fmt.Errorf("whatsapp: send media: %w", err)
 			}
+			sent = append(sent, msg)
 			receipt = core.Receipt{
 				ID:      itemID(a.account, jid.String(), string(resp.ID)),
 				Channel: core.ChannelWhatsApp,
@@ -148,5 +150,6 @@ func (a *Adapter) SendMedia(ctx context.Context, out core.Outgoing) (core.Receip
 	if err != nil {
 		return core.Receipt{}, err
 	}
+	a.persistSentDescriptors(ctx, receipt.ID, sent)
 	return receipt, nil
 }

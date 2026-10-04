@@ -72,6 +72,7 @@ func (a *Adapter) SendVoice(ctx context.Context, out core.Outgoing) (core.Receip
 		}
 	}
 	var receipt core.Receipt
+	var sent *waE2E.Message
 	err = a.withHumanEmulationAs(ctx, jid, "", true, types.ChatPresenceMediaAudio, func() error {
 		msg, err := a.buildVoiceMessage(ctx, out.Attachments[0])
 		if err != nil {
@@ -87,6 +88,7 @@ func (a *Adapter) SendVoice(ctx context.Context, out core.Outgoing) (core.Receip
 		if err != nil {
 			return fmt.Errorf("whatsapp: send voice note: %w", err)
 		}
+		sent = msg
 		receipt = core.Receipt{
 			ID:      itemID(a.account, jid.String(), string(resp.ID)),
 			Channel: core.ChannelWhatsApp,
@@ -97,5 +99,6 @@ func (a *Adapter) SendVoice(ctx context.Context, out core.Outgoing) (core.Receip
 	if err != nil {
 		return core.Receipt{}, err
 	}
+	a.persistSentDescriptors(ctx, receipt.ID, []*waE2E.Message{sent})
 	return receipt, nil
 }
