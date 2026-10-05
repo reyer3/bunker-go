@@ -178,10 +178,12 @@ an older daemon without it, these tabs keep listing unread items only.
 **Reuniones.** Under the conversation list (inbox and sidebar) a compact
 "Reuniones" section lists the next meetings from calendar invitations and
 recent call links, as listed by
-[`bunker meetings`](#bunker-meetings---days-n---json): `📅 10:30 Revisión
-semanal · en 25 min`, with `ahora` while it is on, `en N min` or `en N h`
-within the day, then `hoy`, `mañana`, `jue 8`, `15 oct`; a bare link shows
-`🔗 Equipo · enlace`. A click on a row, or `J` (the first meeting with a
+[`bunker meetings`](#bunker-meetings---days-n---json), each on one line
+with the event's day and time in the local zone, its title and who invites:
+`📅 hoy 10:30 Revisión semanal · Ana` (the day is `hoy`, `mañana`, `jue 8`
+or `15 oct`; an all-day event has no time, and the row of a meeting in
+progress is highlighted). A bare call link carries no title or time, only
+who sent it: `🔗 Equipo · enlace`. A click on a row, or `J` (the first meeting with a
 link; also "Unirse a la próxima reunión" in the palette), opens its link
 with `xdg-open` (or `$BUNKER_OPEN_URL`) and says "Abriendo reunión…" on the
 status line; a meeting without a link, or an opener that is missing, says so

@@ -64,47 +64,68 @@ func runCmd(t *testing.T, m Model, cmd tea.Cmd) Model {
 	return next.(Model)
 }
 
-func TestMeetingWhenSpanishLabels(t *testing.T) {
+func TestMeetingDaySpanishLabels(t *testing.T) {
 	cases := []struct {
 		name  string
 		start time.Duration
-		len   time.Duration
 		want  string
 	}{
-		{"in progress", -10 * time.Minute, time.Hour, "ahora"},
-		{"minutes", 25 * time.Minute, time.Hour, "en 25 min"},
-		{"hours", 2*time.Hour + 30*time.Minute, time.Hour, "en 2 h 30 min"},
-		{"whole hours", 3 * time.Hour, time.Hour, "en 3 h"},
-		{"later today", 7 * time.Hour, time.Hour, "hoy"},
-		{"tomorrow", 24 * time.Hour, time.Hour, "mañana"},
-		{"weekday", 3 * 24 * time.Hour, time.Hour, "jue 8"},
-		{"far", 10 * 24 * time.Hour, time.Hour, "15 oct"},
+		{"earlier today", -10 * time.Minute, "hoy"},
+		{"later today", 7 * time.Hour, "hoy"},
+		{"tomorrow", 24 * time.Hour, "mañana"},
+		{"weekday", 3 * 24 * time.Hour, "jue 8"},
+		{"far", 10 * 24 * time.Hour, "15 oct"},
+		{"started yesterday", -24 * time.Hour, "dom 4"},
 	}
 	for _, c := range cases {
-		if got := meetingWhen(upcoming("x", "t", c.start, c.len, ""), meetNow); got != c.want {
-			t.Errorf("%s: meetingWhen = %q, want %q", c.name, got, c.want)
+		if got := meetingDay(meetNow.Add(c.start), meetNow); got != c.want {
+			t.Errorf("%s: meetingDay = %q, want %q", c.name, got, c.want)
 		}
 	}
-	link := core.UpcomingMeeting{Meeting: core.Meeting{Link: true, Summary: "Equipo"}}
-	if got := meetingWhen(link, meetNow); got != "enlace" {
-		t.Errorf("link = %q", got)
+}
+
+func TestMeetingOrganizerName(t *testing.T) {
+	for in, want := range map[string]string{
+		"Ana <ana@example.com>": "Ana",
+		"ana@example.com":       "ana@example.com",
+		"":                      "",
+		"  Equipo  ":            "Equipo",
+	} {
+		if got := meetingOrganizer(in); got != want {
+			t.Errorf("meetingOrganizer(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 
 func TestMeetingRowText(t *testing.T) {
-	got := meetingRowText(upcoming("a", "Revisión semanal", 35*time.Minute, time.Hour, "u"), meetNow, 60)
-	if got != "📅 10:30 Revisión semanal · en 35 min" {
+	// Day and time of the event, its title, and who invites.
+	weekly := upcoming("a", "Revisión semanal", 35*time.Minute, time.Hour, "u")
+	weekly.Organizer = "Ana <ana@example.com>"
+	if got := meetingRowText(weekly, meetNow, 60); got != "📅 hoy 10:30 Revisión semanal · Ana" {
 		t.Errorf("row = %q", got)
 	}
-	// A long title is cut, the relative label stays.
-	long := meetingRowText(upcoming("a", "Una reunión con un título larguísimo que no cabe", 35*time.Minute, time.Hour, "u"), meetNow, 34)
-	if !strings.HasSuffix(long, "· en 35 min") || runewidth.StringWidth(long) > 33 || !strings.Contains(long, "…") {
-		t.Errorf("long row = %q (%d cells)", long, runewidth.StringWidth(long))
+	// Without an organizer the row ends at the title.
+	demo := upcoming("b", "Demo", 3*24*time.Hour, time.Hour, "u")
+	if got := meetingRowText(demo, meetNow, 60); got != "📅 jue 8 09:55 Demo" {
+		t.Errorf("row without organizer = %q", got)
 	}
+	// A long title is cut; the day, time and organizer stay.
+	long := upcoming("a", "Una reunión con un título larguísimo que no cabe", 35*time.Minute, time.Hour, "u")
+	long.Organizer = "Ana <ana@example.com>"
+	got := meetingRowText(long, meetNow, 34)
+	if !strings.HasPrefix(got, "📅 hoy 10:30 ") || !strings.HasSuffix(got, "· Ana") || runewidth.StringWidth(got) > 33 || !strings.Contains(got, "…") {
+		t.Errorf("long row = %q (%d cells)", got, runewidth.StringWidth(got))
+	}
+	// An all-day event has a day but no time.
 	allDay := upcoming("d", "Retiro", 0, 24*time.Hour, "")
 	allDay.AllDay = true
-	if got := meetingRowText(allDay, meetNow, 60); got != "📅 Retiro · ahora" {
+	if got := meetingRowText(allDay, meetNow, 60); got != "📅 hoy Retiro" {
 		t.Errorf("all-day row = %q", got)
+	}
+	// A bare link only knows who sent it.
+	link := core.UpcomingMeeting{Meeting: core.Meeting{Link: true, Summary: "Equipo"}}
+	if got := meetingRowText(link, meetNow, 60); got != "🔗 Equipo · enlace" {
+		t.Errorf("link row = %q", got)
 	}
 }
 
@@ -117,7 +138,7 @@ func TestInboxShowsReunionesSectionUnderTheList(t *testing.T) {
 		t.Fatalf("Meetings filters = %+v", client.filters)
 	}
 	view := m.View()
-	for _, want := range []string{"Reuniones", "📅 10:30 Revisión semanal · en 35 min", "📅 09:55 Demo de producto · mañana", "J unirse"} {
+	for _, want := range []string{"Reuniones", "📅 hoy 10:30 Revisión semanal", "📅 mañana 09:55 Demo de producto", "J unirse"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view lacks %q:\n%s", want, view)
 		}
@@ -222,7 +243,7 @@ func TestSidebarShowsSectionAndKeepsRows(t *testing.T) {
 	m, _, _ := meetingModel(t, 36, 18, upcoming("a", "Revisión semanal", 35*time.Minute, time.Hour, "u"))
 	m.sidebar = true
 	view := m.View()
-	if !strings.Contains(view, "📅 10:30 Revisión") || !strings.Contains(view, "· en 35 min") || !strings.Contains(view, "Factura") {
+	if !strings.Contains(view, "📅 hoy 10:30 Revisión") || !strings.Contains(view, "Factura") {
 		t.Errorf("sidebar view:\n%s", view)
 	}
 	for _, l := range strings.Split(view, "\n") {
