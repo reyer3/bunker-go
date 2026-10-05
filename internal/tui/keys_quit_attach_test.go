@@ -161,7 +161,7 @@ func TestReplyComposerPastesClipboardImage(t *testing.T) {
 	_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlV})
 	msg = cmd().(clipboardImageMsg)
 	updated, _ = model.Update(msg)
-	updated, _ = updated.(Model).Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = updated.(Model).Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if _, err := os.Stat(msg.path); !os.IsNotExist(err) {
 		t.Error("closing the composer should delete pasted temp images")
 	}
