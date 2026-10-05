@@ -240,6 +240,15 @@ type Model struct {
 	// highlighted one.
 	chatLinks   []string
 	chatLinkSel int
+	// forwardPick is the message Alt+F forwards while its target picker
+	// is open; nil otherwise. chatForward is the forward being composed
+	// in the open chat (chat_forward.go): the composer holds its text and
+	// chatAttachments its downloaded files; nil for an ordinary draft.
+	// chatForwardToken drops a download that finishes after the forward
+	// was cancelled.
+	forwardPick      *core.Item
+	chatForward      *chatForwardState
+	chatForwardToken uint64
 	// selectMode is true while the mouse is released so the terminal
 	// selects text natively (F7/Alt+S).
 	selectMode bool

@@ -124,13 +124,17 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.picker = nil
+		m.forwardPick = nil
 		return m, nil
 	case "enter":
 		if p.selected >= 0 && p.selected < len(p.results) {
-			return m.pickContact(p.results[p.selected])
+			return m.pickTarget(p.results[p.selected])
 		}
 		return m, nil
 	case callPlaceKey:
+		if m.forwardPick != nil {
+			return m, nil
+		}
 		return m.callPickedContact()
 	case "up", "ctrl+p", "shift+tab":
 		p.notice = ""
@@ -183,7 +187,7 @@ func (m Model) updatePickerMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 		i := msg.Y - pickerHeaderLines + m.pickerOffset()
 		if msg.Y >= pickerHeaderLines && i >= 0 && i < len(p.results) {
-			return m.pickContact(p.results[i])
+			return m.pickTarget(p.results[i])
 		}
 	}
 	m.picker = &p
@@ -209,6 +213,15 @@ func (m Model) callPickedContact() (tea.Model, tea.Cmd) {
 	next, open := m.pickContact(c)
 	after, call := next.(Model).startChatCall()
 	return after, tea.Batch(open, call)
+}
+
+// pickTarget is a pick in the picker: the forward's target while Alt+F
+// is choosing one, else the contact to open.
+func (m Model) pickTarget(c core.Contact) (tea.Model, tea.Cmd) {
+	if m.forwardPick != nil {
+		return m.pickForwardTarget(c)
+	}
+	return m.pickContact(c)
 }
 
 // pickContact opens the chosen contact: the chat view for chat channels,
@@ -313,7 +326,11 @@ func (m Model) pickerView() string {
 	if p.notice != "" {
 		lines = append(lines, "No se puede llamar: "+p.notice)
 	}
-	lines = append(lines, "↵ abrir · ↑/↓ elegir · Esc cancelar · Alt+C llamar")
+	if m.forwardPick != nil {
+		lines = append(lines, "↵ reenviar · ↑/↓ elegir · Esc cancelar")
+	} else {
+		lines = append(lines, "↵ abrir · ↑/↓ elegir · Esc cancelar · Alt+C llamar")
+	}
 	if m.width > 0 {
 		for i, line := range lines {
 			lines[i] = runewidth.Truncate(line, m.width, "…")

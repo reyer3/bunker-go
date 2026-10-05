@@ -285,11 +285,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.chatConfirm = false
 		m.chatPlan = core.Plan{}
 		m.chatSendErr = nil
+		m.chatForward = nil
 		m = m.clearChatAttachments()
 		if m.chatOptimistic != nil {
 			m.chatOptimistic.id = msg.receipt.ID
 		}
 		return m, reloadChatAfterSend(m.client, m.chatChannel, m.chatAccount, m.chatThread, msg.receipt.ID, m.chatReplyToken)
+	case forwardMediaMsg:
+		return m.handleForwardMedia(msg)
 	case chatSendReloadMsg:
 		if msg.token != m.chatReplyToken {
 			return m, nil

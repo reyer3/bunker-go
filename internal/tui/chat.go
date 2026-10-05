@@ -173,8 +173,27 @@ type chatSendReloadMsg struct {
 
 // chatSendCmd previews (dryRun) or sends the chat draft: a reply to the
 // conversation's newest item, or, for a chat opened from the contact
-// picker (no item to reply to), a fresh send to its thread and address.
+// picker (no item to reply to) and for a forward, a fresh send to its
+// thread and address.
 func (m Model) chatSendCmd(body string, dryRun bool) tea.Cmd {
+	if m.chatForward != nil {
+		// A forward is a fresh send to the chat, never a reply quoting
+		// its newest message.
+		to := m.chatNewTo
+		if to == "" {
+			to = m.chatThread
+		}
+		return chatOutgoingCmd(m.client, core.Outgoing{
+			Channel:     m.chatChannel,
+			Account:     m.chatAccount,
+			To:          []string{to},
+			Thread:      m.chatThread,
+			Body:        body,
+			Attachments: append([]string(nil), m.chatAttachments...),
+			Voice:       m.chatVoice,
+			Forward:     true,
+		}, m.chatReplyToken, dryRun)
+	}
 	if m.chatDraftID != "" || m.chatNewTo == "" {
 		if dryRun {
 			return previewChatReply(m.client, m.chatDraftID, body, m.chatAttachments, m.chatReplyToken, m.chatVoice)
@@ -190,7 +209,12 @@ func (m Model) chatSendCmd(body string, dryRun bool) tea.Cmd {
 		Attachments: append([]string(nil), m.chatAttachments...),
 		Voice:       m.chatVoice,
 	}
-	client, token := m.client, m.chatReplyToken
+	return chatOutgoingCmd(m.client, out, m.chatReplyToken, dryRun)
+}
+
+// chatOutgoingCmd previews (dryRun) or sends out as a fresh message from
+// the chat composer.
+func chatOutgoingCmd(client Client, out core.Outgoing, token uint64, dryRun bool) tea.Cmd {
 	return func() tea.Msg {
 		timeout := sendTimeout
 		if dryRun {

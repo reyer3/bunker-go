@@ -462,7 +462,8 @@ message and `Alt+Down` the next one. With nothing selected, `Alt+Up`
 selects the newest; `Alt+Down` past the newest drops the selection. The
 selected bubble is scrolled into view, and `Esc` drops the selection
 before it would leave the chat. The message actions below (`Alt+Y`,
-`Alt+O`) act on the selected message, or on the newest when none is.
+`Alt+O`, `Alt+L`, `Alt+F`) act on the selected message, or on the newest
+when none is.
 
 **Selecting and copying text.** The panel captures the mouse, which is
 what keeps the terminal from selecting text. Three ways around it:
@@ -500,6 +501,22 @@ with `xdg-open` (`open` on macOS) or `$BUNKER_OPEN_URL`, and says
 (at most nine): `1`-`9`, or `Up`/`Down` and `Enter`, open one and `Esc`
 closes it. A message without links says "El mensaje no tiene enlaces".
 Only http(s) links are ever passed to the opener.
+
+**Forwarding a chat message.** `Alt+F` forwards the selected message:
+a "Reenviar a…" contact picker opens, scoped to the chat's channel (it
+lists existing chats and contacts alike); `Enter` or a click picks one
+target and `Esc` cancels. The source chat's draft is kept, and the
+target chat opens with the composer holding the message's text, which
+can be edited, and a "↪ Reenviando" line. The message's attachments are
+downloaded first (into the media cache, under their own names); until
+they are on disk `Enter` sends nothing, and a failed download cancels
+the forward and says "no se pudo descargar el adjunto para reenviar". A
+voice note is forwarded as a voice note. `Enter` then shows the usual
+dry-run preview ("¿Reenviar a …?") and a second `Enter` (or `Ctrl+S`)
+sends it as a fresh message with `--forward` semantics: WhatsApp shows
+the native "Reenviado" label, Matrix gets a normal message. `Esc` while
+composing a forward drops it (text and files) and gives back the target
+chat's own draft. One target per forward: there is no bulk forwarding.
 
 Opening a mail item now opens its thread view instead of the plain
 single-item detail: the Subject renders as a bold title, every message in

@@ -29,9 +29,9 @@ import (
 
 const (
 	// selectModeKey and selectModeAltKey toggle the selection mode. F7
-	// and Alt+S are unused elsewhere (Alt+A/C/E/L/P/V/X, Alt+↑/↓ and
+	// and Alt+S are unused elsewhere (Alt+A/C/E/F/L/P/V/X, Alt+↑/↓ and
 	// Alt++ are taken, see voice.go, calls.go, chat_actions.go,
-	// chat_links.go, chat_select.go and herdr.go).
+	// chat_forward.go, chat_links.go, chat_select.go and herdr.go).
 	selectModeKey    = "f7"
 	selectModeAltKey = "alt+s"
 	// copyKey copies the selected message (a chat: the one a click
@@ -529,11 +529,13 @@ func (m Model) chatIsNewConversation() bool {
 
 // chatSendsOnOneEnter reports whether Enter sends the draft without a
 // second confirming Enter: only a plain text message in an existing
-// conversation. Attachments, voice notes, a new conversation and edits
-// keep the explicit preview and confirm, as does confirm_chat_send.
+// conversation. Attachments, voice notes, a new conversation, forwards
+// and edits keep the explicit preview and confirm, as does
+// confirm_chat_send.
 func (m Model) chatSendsOnOneEnter() bool {
 	return !m.confirmChatSend &&
 		m.chatEditID == "" &&
+		m.chatForward == nil &&
 		len(m.chatAttachments) == 0 &&
 		!m.chatVoice &&
 		!m.chatIsNewConversation()
