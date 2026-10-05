@@ -420,6 +420,19 @@ func (s *Server) call(ctx context.Context, req Request) (any, error) {
 		}
 		return todoResult{Todo: todo}, nil
 
+	case MethodAwaiting:
+		var p awaitingParams
+		if len(req.Params) > 0 {
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				return nil, fmt.Errorf("rpc: bad params: %w", err)
+			}
+		}
+		awaiting, err := s.svc.AwaitingReply(ctx, p.Filter)
+		if err != nil {
+			return nil, err
+		}
+		return awaitingResult{Awaiting: awaiting}, nil
+
 	case MethodHealth:
 		report, err := s.svc.HealthReport(ctx)
 		if err != nil {

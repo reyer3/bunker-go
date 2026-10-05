@@ -65,6 +65,9 @@ type Backend interface {
 	Todos(ctx context.Context, filter core.TodoFilter) ([]core.Todo, error)
 	CompleteTodo(ctx context.Context, id string) (core.Todo, error)
 	ReopenTodo(ctx context.Context, id string) (core.Todo, error)
+	// AwaitingReply lists the conversations where the user wrote last and
+	// nobody has answered for days (`bunker awaiting`). It only reads.
+	AwaitingReply(ctx context.Context, filter core.AwaitingFilter) ([]core.Awaiting, error)
 	// MarkUnread puts an item back in the unread inbox (`bunker unread`);
 	// localOnly reports that only bunker's store changed.
 	MarkUnread(ctx context.Context, id string) (localOnly bool, err error)

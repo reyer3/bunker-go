@@ -33,6 +33,10 @@ type fakeBackend struct {
 	todoAddCalls []core.Todo
 	todosCalls   []core.TodoFilter
 
+	awaiting      []core.Awaiting
+	awaitingErr   error
+	awaitingCalls []core.AwaitingFilter
+
 	conversations      []core.Conversation
 	conversationsErr   error
 	conversationsCalls []core.ConversationFilter
@@ -238,6 +242,11 @@ func (f *fakeBackend) setTodo(id string, status core.TodoStatus) (core.Todo, err
 		}
 	}
 	return core.Todo{}, fmt.Errorf("todo %s: %w", id, core.ErrTodoNotFound)
+}
+
+func (f *fakeBackend) AwaitingReply(ctx context.Context, filter core.AwaitingFilter) ([]core.Awaiting, error) {
+	f.awaitingCalls = append(f.awaitingCalls, filter)
+	return f.awaiting, f.awaitingErr
 }
 
 func (f *fakeBackend) Contacts(ctx context.Context, filter core.ContactFilter) ([]core.Contact, error) {

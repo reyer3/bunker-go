@@ -47,6 +47,25 @@ type (
 		Created   string `json:"created"`
 		Done      string `json:"done,omitempty" jsonschema:"when it was completed"`
 	}
+	mcpAwaitingIn struct {
+		Days   int  `json:"days,omitempty" jsonschema:"only conversations unanswered for at least this many days (default 3)"`
+		Groups bool `json:"groups,omitempty" jsonschema:"include groups, left out by default"`
+		Limit  int  `json:"limit,omitempty" jsonschema:"at most this many conversations (default 50, max 100)"`
+	}
+	// mcpAwaiting is core.Awaiting with its time as RFC 3339 text.
+	mcpAwaiting struct {
+		ItemID  string `json:"item_id" jsonschema:"the user's last message in the conversation"`
+		Channel string `json:"channel"`
+		Account string `json:"account"`
+		Thread  string `json:"thread"`
+		Person  string `json:"person" jsonschema:"who the user is waiting on: the chat's name or a mail's first recipient"`
+		Preview string `json:"preview" jsonschema:"the start of the user's last message (a mail's subject)"`
+		Sent    string `json:"sent" jsonschema:"when the user's last message was sent, RFC 3339"`
+		Days    int    `json:"days" jsonschema:"whole days without an answer"`
+	}
+	mcpAwaitingOut struct {
+		Awaiting []mcpAwaiting `json:"awaiting" jsonschema:"newest first"`
+	}
 	mcpTodoOut struct {
 		Todo mcpTodo `json:"todo"`
 	}
@@ -68,6 +87,41 @@ func toMCPTodo(t core.Todo) mcpTodo {
 		out.Done = t.Done.Format(time.RFC3339)
 	}
 	return out
+}
+
+// addMCPAwaitingTool registers awaiting_reply, the MCP twin of bunker
+// awaiting. It only reads the store.
+func addMCPAwaitingTool(server *mcp.Server, dial mcpDialer) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "awaiting_reply",
+		Description: "List the conversations awaiting a reply, like bunker awaiting: where the user wrote last and nobody " +
+			"has answered for at least days days (default 3), newest first. Groups are left out unless groups is set. " +
+			"bunker derives the list on every call, so an answer makes a conversation drop off by itself. " +
+			"Use it to answer who has not replied to the user; read or thread opens the conversation.",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpAwaitingIn) (*mcp.CallToolResult, mcpAwaitingOut, error) {
+		if in.Days < 0 {
+			return nil, mcpAwaitingOut{}, fmt.Errorf("awaiting_reply: days %d: want 1 or more", in.Days)
+		}
+		filter := core.AwaitingFilter{Days: in.Days, Groups: in.Groups, Limit: mcpTodoListDefault}
+		if in.Limit > 0 {
+			filter.Limit = min(in.Limit, mcpListMax)
+		}
+		rows, err := withBackend(ctx, dial, func(ctx context.Context, b Backend) ([]core.Awaiting, error) {
+			return b.AwaitingReply(ctx, filter)
+		})
+		if err != nil {
+			return nil, mcpAwaitingOut{}, err
+		}
+		out := mcpAwaitingOut{Awaiting: make([]mcpAwaiting, 0, len(rows))}
+		for _, a := range rows {
+			out.Awaiting = append(out.Awaiting, mcpAwaiting{
+				ItemID: a.ItemID, Channel: string(a.Channel), Account: a.Account, Thread: a.Thread,
+				Person: a.Person, Preview: a.Preview, Sent: a.Sent.Format(time.RFC3339), Days: a.Days,
+			})
+		}
+		return nil, out, nil
+	})
 }
 
 // addMCPTodoTools registers todo_add, todo_list and todo_done, the MCP

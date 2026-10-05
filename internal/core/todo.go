@@ -174,9 +174,8 @@ func (s *Service) AddTodo(ctx context.Context, t Todo) (Todo, error) {
 }
 
 // fillTodoFromItem sets the conversation fields t leaves empty from the
-// message it came from. The person is the other side of that message:
-// its sender, or for one the user sent, the chat's name or the mail's
-// first recipient (a mail's thread name is its subject, not a person).
+// message it came from. The person is the other side of that message
+// (otherSide).
 func fillTodoFromItem(t *Todo, item Item) {
 	if t.Channel == "" {
 		t.Channel = item.Channel
@@ -187,17 +186,24 @@ func fillTodoFromItem(t *Todo, item Item) {
 	if t.Thread == "" {
 		t.Thread = item.Thread
 	}
-	if t.Person != "" {
-		return
+	if t.Person == "" {
+		t.Person = otherSide(item)
 	}
+}
+
+// otherSide is who a message is with: its sender, or for one the user
+// sent, the chat's name or the mail's first recipient (a mail's thread
+// name is its subject, not a person). "" when unknown.
+func otherSide(item Item) string {
 	switch {
 	case !item.FromMe:
-		t.Person = firstNonEmpty(item.From.Name, item.From.ID)
+		return firstNonEmpty(item.From.Name, item.From.ID)
 	case item.Channel == ChannelMail && len(item.To) > 0:
-		t.Person = firstNonEmpty(item.To[0].Name, item.To[0].ID)
+		return firstNonEmpty(item.To[0].Name, item.To[0].ID)
 	case item.Channel != ChannelMail:
-		t.Person = item.ThreadName
+		return item.ThreadName
 	}
+	return ""
 }
 
 func firstNonEmpty(values ...string) string {
