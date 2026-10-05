@@ -117,6 +117,7 @@ var migrations = []migration{
 	{version: 3, apply: migrateV3},
 	{version: 4, apply: migrateV4},
 	{version: 5, apply: migrateV5},
+	{version: 6, apply: migrateV6},
 }
 
 // CurrentSchemaVersion returns the latest schema version this binary
