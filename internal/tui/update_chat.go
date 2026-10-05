@@ -71,12 +71,22 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startChatDelete()
 	case chatReactKey, chatReactKeyAlt:
 		return m.startChatReact()
+	case chatSelectPrevKey:
+		return m.moveChatFocus(-1), nil
+	case chatSelectNextKey:
+		return m.moveChatFocus(+1), nil
 	case "esc":
 		if m.voicePlay != nil {
 			return m.stopVoicePlay(), nil
 		}
 		if m.chatEditID != "" {
 			return m.cancelChatEdit(), nil
+		}
+		// A selection is dropped first, so Esc never leaves the chat
+		// while a message is still highlighted.
+		if m.chatFocus != "" {
+			m.chatFocus = ""
+			return m, nil
 		}
 		if m.openID != "" {
 			return m, m.quitOpenChat()

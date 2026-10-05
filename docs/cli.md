@@ -456,6 +456,14 @@ the mail reply composer). `Up` at the top of an empty draft loads an
 older page of the conversation instead of moving the cursor. `Esc` leaves
 the chat view and returns to the inbox.
 
+**Selecting a message.** A click on a bubble selects it (it is
+highlighted); from the keyboard, `Alt+Up` selects the previous (older)
+message and `Alt+Down` the next one. With nothing selected, `Alt+Up`
+selects the newest; `Alt+Down` past the newest drops the selection. The
+selected bubble is scrolled into view, and `Esc` drops the selection
+before it would leave the chat. The message actions below (`Alt+Y`,
+`Alt+O`) act on the selected message, or on the newest when none is.
+
 **Selecting and copying text.** The panel captures the mouse, which is
 what keeps the terminal from selecting text. Three ways around it:
 `F7` (or `Alt+S`) enters the *selection mode*: the mouse goes back to the
