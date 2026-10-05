@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/reyer3/bunker-go/internal/core"
 )
@@ -99,5 +100,102 @@ func TestServiceSendKeepsEchoThatArrivedFirst(t *testing.T) {
 	}
 	if got := store.items["sent-1"]; got.ThreadName != "Sala" || got.From.Name != "Yo" {
 		t.Errorf("stored item = %+v, want the synced echo kept", got)
+	}
+}
+
+// TestServiceReplyStoresSentItemWithOriginalThreadName: a reply's stored
+// item carries the replied item's chat name, so a conversation whose
+// newest message was sent from bunker is still titled by the contact's
+// name instead of the bare thread id.
+func TestServiceReplyStoresSentItemWithOriginalThreadName(t *testing.T) {
+	item := core.Item{
+		ID: "whatsapp:personal:1", Channel: core.ChannelWhatsApp, Account: "personal",
+		Thread: "5511999@s.whatsapp.net", ThreadName: "Ana Ejemplo",
+		From: core.Address{ID: "5511999@s.whatsapp.net", Name: "Ana Ejemplo"},
+	}
+	store := newMemStore(item)
+	reg := core.NewRegistry()
+	reg.Register(&spyAdapter{channel: core.ChannelWhatsApp, account: "personal"})
+	svc := core.NewService(store, reg)
+
+	_, receipt, err := svc.Reply(context.Background(), item.ID, "hola", nil, nil, false)
+	if err != nil {
+		t.Fatalf("Reply: %v", err)
+	}
+	if got := store.items[receipt.ID].ThreadName; got != "Ana Ejemplo" {
+		t.Errorf("stored ThreadName = %q, want %q", got, "Ana Ejemplo")
+	}
+}
+
+// TestServiceSendStoresSentItemWithLastKnownThreadName: a fresh send has
+// no original item, so the stored item takes the newest non-empty chat
+// name already stored for the same channel/account/thread. Items of
+// another thread or account never lend their name.
+func TestServiceSendStoresSentItemWithLastKnownThreadName(t *testing.T) {
+	thread := "5511999@s.whatsapp.net"
+	tests := []struct {
+		name  string
+		items []core.Item
+		want  string
+	}{
+		{
+			name: "newest non-empty name wins",
+			items: []core.Item{
+				{ID: "a", Channel: core.ChannelWhatsApp, Account: "personal", Thread: thread, ThreadName: "Nombre viejo", Timestamp: time.Unix(10, 0)},
+				{ID: "b", Channel: core.ChannelWhatsApp, Account: "personal", Thread: thread, ThreadName: "Ana Ejemplo", Timestamp: time.Unix(20, 0)},
+				{ID: "c", Channel: core.ChannelWhatsApp, Account: "personal", Thread: thread, FromMe: true, Timestamp: time.Unix(30, 0)},
+			},
+			want: "Ana Ejemplo",
+		},
+		{
+			name: "other threads and accounts are ignored",
+			items: []core.Item{
+				{ID: "a", Channel: core.ChannelWhatsApp, Account: "personal", Thread: "other@s.whatsapp.net", ThreadName: "Otro", Timestamp: time.Unix(10, 0)},
+				{ID: "b", Channel: core.ChannelWhatsApp, Account: "work", Thread: thread, ThreadName: "Trabajo", Timestamp: time.Unix(20, 0)},
+			},
+			want: "",
+		},
+		{name: "empty thread stays unnamed", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newMemStore(tt.items...)
+			reg := core.NewRegistry()
+			reg.Register(&spyAdapter{channel: core.ChannelWhatsApp, account: "personal"})
+			svc := core.NewService(store, reg)
+
+			out := core.Outgoing{Channel: core.ChannelWhatsApp, Account: "personal", To: []string{thread}, Body: "hola"}
+			_, receipt, err := svc.Send(context.Background(), out, false)
+			if err != nil {
+				t.Fatalf("Send: %v", err)
+			}
+			stored, ok := store.items[receipt.ID]
+			if !ok {
+				t.Fatalf("sent item %q not stored", receipt.ID)
+			}
+			if stored.ThreadName != tt.want {
+				t.Errorf("stored ThreadName = %q, want %q", stored.ThreadName, tt.want)
+			}
+		})
+	}
+}
+
+// TestServiceSendStoresSentItemWhenNameLookupFails: the name lookup is
+// best effort; a store failure there still stores the sent item (unnamed)
+// and never fails the send that already happened.
+func TestServiceSendStoresSentItemWhenNameLookupFails(t *testing.T) {
+	store := newMemStore()
+	store.threadErr = errors.New("database is locked")
+	reg := core.NewRegistry()
+	reg.Register(&spyAdapter{channel: core.ChannelWhatsApp, account: "personal"})
+	svc := core.NewService(store, reg)
+
+	out := core.Outgoing{Channel: core.ChannelWhatsApp, Account: "personal", To: []string{"5511999"}, Body: "hola"}
+	_, receipt, err := svc.Send(context.Background(), out, false)
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if _, ok := store.items[receipt.ID]; !ok {
+		t.Fatalf("sent item %q not stored after a failed name lookup", receipt.ID)
 	}
 }

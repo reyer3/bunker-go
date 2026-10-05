@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -103,9 +104,38 @@ func (s *Store) Conversations(ctx context.Context, filter core.ConversationFilte
 		if err != nil {
 			return nil, fmt.Errorf("store: conversations last item of %s/%s/%s: %w", g.channel, g.account, g.thread, err)
 		}
+		if last.ThreadName == "" && g.single == "" {
+			name, err := s.lastThreadName(ctx, g.channel, g.account, g.thread)
+			if err != nil {
+				return nil, err
+			}
+			last.ThreadName = name
+		}
 		out = append(out, core.Conversation{Last: last, Unread: g.unread})
 	}
 	return out, nil
+}
+
+// lastThreadName is the newest non-empty thread_name of one thread, or ""
+// when it was never named. The chat list titles a row from its newest
+// item, and an item sent from bunker may carry no name (rows stored
+// before sent items kept it, or a thread whose name was never learned);
+// falling back here keeps the contact's name instead of the bare number.
+// idx_items_thread walks the thread newest-first, so the scan stops at
+// the first named item (no id tie-break: it would add a temp sort).
+func (s *Store) lastThreadName(ctx context.Context, channel, account, thread string) (string, error) {
+	var name string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT thread_name FROM items
+		WHERE channel = ? AND account = ? AND thread = ? AND thread_name <> ''
+		ORDER BY timestamp DESC LIMIT 1`, channel, account, thread).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("store: conversations name of %s/%s/%s: %w", channel, account, thread, err)
+	}
+	return name, nil
 }
 
 // convGroups runs one aggregate query and collects its rows (closing the

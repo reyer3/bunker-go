@@ -53,7 +53,13 @@ type NameResolver interface {
 // choice, a push name is whatever the other side typed into their own
 // profile. With no resolver, no mapping or no contact at all, it falls
 // back to the event's own PushName, then the bare JID user part.
+//
+// A device JID (number:device@server, as a call offer or a sender carries
+// it) is reduced to the person first: contacts and LID mappings are kept
+// per person, so a device lookup would always miss and fall back to the
+// number.
 func (a *Adapter) resolveContactName(ctx context.Context, jid types.JID, pushName string) (types.JID, string) {
+	jid = jid.ToNonAD()
 	resolved := jid
 	if a.names != nil {
 		lookup := jid

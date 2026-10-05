@@ -240,9 +240,12 @@ func (a *Adapter) handleIncomingCall(live liveCall) {
 }
 
 // trackCall registers live, wires its lifecycle callbacks and writes its
-// conversation item.
+// conversation item. The peer arrives as a device JID
+// (number:device@server); the item is keyed on the person so the call
+// lands in their existing chat and resolves their saved name, instead of
+// starting a separate, number-named conversation per device.
 func (a *Adapter) trackCall(ctx context.Context, live liveCall, direction, state string) core.Call {
-	peer := live.Peer()
+	peer := live.Peer().ToNonAD()
 	item := core.Item{
 		ID:        itemID(a.account, peer.String(), "call-"+live.ID()),
 		Channel:   core.ChannelWhatsApp,

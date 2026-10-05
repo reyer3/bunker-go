@@ -643,7 +643,7 @@ func (s *Service) reply(ctx context.Context, id string, body string, cc []string
 
 	if IsVoice(ctx) {
 		out.Voice = true
-		return s.deliverVoice(ctx, adapter, plan, out, item.Thread, item.From.ID, "reply", dryRun)
+		return s.deliverVoice(ctx, adapter, plan, out, item.Thread, item.ThreadName, item.From.ID, "reply", dryRun)
 	}
 
 	if len(attachments) > 0 {
@@ -663,7 +663,7 @@ func (s *Service) reply(ctx context.Context, id string, body string, cc []string
 		if err != nil {
 			return Plan{}, Receipt{}, fmt.Errorf("core: reply send failed: %w", err)
 		}
-		s.storeSentItem(ctx, item.Channel, item.Account, item.Thread, item.From.ID, plan.Subject, body, plan.Attachments, receipt)
+		s.storeSentItem(ctx, item.Channel, item.Account, item.Thread, item.ThreadName, item.From.ID, plan.Subject, body, plan.Attachments, receipt)
 		return plan, receipt, nil
 	}
 
@@ -678,7 +678,7 @@ func (s *Service) reply(ctx context.Context, id string, body string, cc []string
 	if err != nil {
 		return Plan{}, Receipt{}, fmt.Errorf("core: reply send failed: %w", err)
 	}
-	s.storeSentItem(ctx, item.Channel, item.Account, item.Thread, item.From.ID, plan.Subject, body, nil, receipt)
+	s.storeSentItem(ctx, item.Channel, item.Account, item.Thread, item.ThreadName, item.From.ID, plan.Subject, body, nil, receipt)
 	return plan, receipt, nil
 }
 
@@ -735,7 +735,7 @@ func (s *Service) send(ctx context.Context, out Outgoing, dryRun bool) (Plan, Re
 		if len(out.To) > 0 {
 			to = out.To[0]
 		}
-		return s.deliverVoice(ctx, adapter, plan, out, outgoingThread(out.Thread, to), to, "send", dryRun)
+		return s.deliverVoice(ctx, adapter, plan, out, outgoingThread(out.Thread, to), "", to, "send", dryRun)
 	}
 
 	if _, native := adapter.(MultiRecipientSender); !native && len(out.To) > 1 {
@@ -760,7 +760,7 @@ func (s *Service) send(ctx context.Context, out Outgoing, dryRun bool) (Plan, Re
 			return Plan{}, Receipt{}, fmt.Errorf("core: send media failed: %w", err)
 		}
 		if len(out.To) > 0 {
-			s.storeSentItem(ctx, out.Channel, out.Account, outgoingThread(out.Thread, out.To[0]), out.To[0], out.Subject, out.Body, plan.Attachments, receipt)
+			s.storeSentItem(ctx, out.Channel, out.Account, outgoingThread(out.Thread, out.To[0]), "", out.To[0], out.Subject, out.Body, plan.Attachments, receipt)
 		}
 		return plan, receipt, nil
 	}
@@ -778,7 +778,7 @@ func (s *Service) send(ctx context.Context, out Outgoing, dryRun bool) (Plan, Re
 		return Plan{}, Receipt{}, fmt.Errorf("core: send failed: %w", err)
 	}
 	if len(out.To) > 0 {
-		s.storeSentItem(ctx, out.Channel, out.Account, outgoingThread(out.Thread, out.To[0]), out.To[0], out.Subject, out.Body, nil, receipt)
+		s.storeSentItem(ctx, out.Channel, out.Account, outgoingThread(out.Thread, out.To[0]), "", out.To[0], out.Subject, out.Body, nil, receipt)
 	}
 	return plan, receipt, nil
 }
@@ -888,7 +888,7 @@ func (s *Service) sendFanout(ctx context.Context, adapter Adapter, plan Plan, ou
 			if firstReceipt.ID == "" {
 				firstReceipt = receipt
 			}
-			s.storeSentItem(ctx, out.Channel, out.Account, outgoingThread(out.Thread, to), to, out.Subject, out.Body, plan.Attachments, receipt)
+			s.storeSentItem(ctx, out.Channel, out.Account, outgoingThread(out.Thread, to), "", to, out.Subject, out.Body, plan.Attachments, receipt)
 		}
 		results = append(results, result)
 	}

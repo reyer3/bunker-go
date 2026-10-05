@@ -379,3 +379,34 @@ func TestCallGain(t *testing.T) {
 		}
 	}
 }
+
+// TestIncomingCallFromDeviceUsesPersonJID: a call offer arrives from the
+// caller's device JID (number:device@server). The call item must key the
+// person's chat, not the device, and resolve the person's saved name, so
+// it lands in the existing conversation instead of creating a separate,
+// number-named chat and contact.
+func TestIncomingCallFromDeviceUsesPersonJID(t *testing.T) {
+	a, engine, _, sink := newCallAdapter(t)
+	names := newFakeNameResolver()
+	names.contacts[callPeer] = types.ContactInfo{Found: true, FullName: "Ana Ejemplo"}
+	a.SetNameResolver(names)
+
+	device := callPeer
+	device.Device = 16
+	engine.incoming(&fakeLiveCall{id: "IN1", peer: device})
+
+	item := lastUpsert(t, sink)
+	if item.Thread != callPeer.String() || item.From.ID != callPeer.String() {
+		t.Errorf("call item Thread=%q From=%q, want both %q", item.Thread, item.From.ID, callPeer.String())
+	}
+	if item.ID != itemID("personal", callPeer.String(), "call-IN1") {
+		t.Errorf("call item ID = %q, want it keyed on the person's JID", item.ID)
+	}
+	if item.ThreadName != "Ana Ejemplo" {
+		t.Errorf("call item ThreadName = %q, want %q", item.ThreadName, "Ana Ejemplo")
+	}
+	calls := a.ActiveCalls()
+	if len(calls) != 1 || calls[0].Peer != callPeer.String() || calls[0].PeerName != "Ana Ejemplo" {
+		t.Errorf("ActiveCalls = %+v, want peer %q named %q", calls, callPeer.String(), "Ana Ejemplo")
+	}
+}
