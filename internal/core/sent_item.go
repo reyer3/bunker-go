@@ -1,6 +1,10 @@
 package core
 
-import "context"
+import (
+	"context"
+	"log/slog"
+	"time"
+)
 
 // storeSentItem persists a successful (non-dry-run) send/reply as a
 // FromMe item immediately (K7b, conversation-view.md's Usability pass): a
@@ -27,18 +31,27 @@ import "context"
 // upsert it before Send returns here. That row is the richer one (room
 // name, sender, server timestamp, attachment refs), so an existing row
 // is kept rather than overwritten with this optimistic sketch.
-func (s *Service) storeSentItem(ctx context.Context, channel Channel, account, thread, to, subject, body string, attachments []AttachmentInfo, receipt Receipt) {
+//
+// threadName is the chat's display name when the caller knows it (a reply
+// passes the replied item's). Otherwise it falls back to the newest name
+// already stored for the thread: the TUI titles a conversation from its
+// newest item, so an unnamed sent item would show the bare number.
+func (s *Service) storeSentItem(ctx context.Context, channel Channel, account, thread, threadName, to, subject, body string, attachments []AttachmentInfo, receipt Receipt) {
 	if channel == ChannelMail || receipt.ID == "" {
 		return
 	}
 	if _, err := s.store.Get(ctx, receipt.ID); err == nil {
 		return
 	}
+	if threadName == "" {
+		threadName = s.lastThreadName(ctx, channel, account, thread)
+	}
 	item := Item{
 		ID:          receipt.ID,
 		Channel:     channel,
 		Account:     account,
 		Thread:      thread,
+		ThreadName:  threadName,
 		To:          []Address{{ID: to}},
 		Subject:     subject,
 		Body:        body,
@@ -50,6 +63,32 @@ func (s *Service) storeSentItem(ctx context.Context, channel Channel, account, t
 	if err := s.store.Upsert(ctx, item); err != nil {
 		LogSinkError(channel, account, "upsert", err)
 	}
+}
+
+// threadNameWindow bounds how many of a thread's newest items
+// lastThreadName scans: received items always carry the name, so one is
+// almost always among the newest few.
+const threadNameWindow = 50
+
+// lastThreadName returns the newest non-empty ThreadName stored for
+// channel/account/thread, or "" when none is known. It is best effort: a
+// lookup failure only costs the name, never the send that already
+// happened, so it is logged and swallowed.
+func (s *Service) lastThreadName(ctx context.Context, channel Channel, account, thread string) string {
+	if thread == "" {
+		return ""
+	}
+	items, err := s.store.Thread(ctx, Filter{Channel: channel, Account: account, Thread: thread}, time.Time{}, threadNameWindow)
+	if err != nil {
+		slog.Warn("thread name lookup failed", "channel", string(channel), "account", account, "error", err)
+		return ""
+	}
+	for i := len(items) - 1; i >= 0; i-- {
+		if items[i].ThreadName != "" {
+			return items[i].ThreadName
+		}
+	}
+	return ""
 }
 
 // attachmentsFromInfo converts a Plan's validated AttachmentInfo (name/

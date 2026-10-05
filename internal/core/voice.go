@@ -72,7 +72,7 @@ func prepareVoice(policy AttachmentPolicy, out Outgoing) ([]AttachmentInfo, erro
 
 // deliverVoice is the voice branch of send and reply: validate, build the
 // plan, and (unless dryRun) send through the adapter's VoiceSender.
-func (s *Service) deliverVoice(ctx context.Context, adapter Adapter, plan Plan, out Outgoing, thread, to, verb string, dryRun bool) (Plan, Receipt, error) {
+func (s *Service) deliverVoice(ctx context.Context, adapter Adapter, plan Plan, out Outgoing, thread, threadName, to, verb string, dryRun bool) (Plan, Receipt, error) {
 	vs, ok := adapter.(VoiceSender)
 	if !ok {
 		return Plan{}, Receipt{}, fmt.Errorf("core: adapter %s/%s cannot send voice notes: %w", out.Channel, out.Account, ErrUnsupported)
@@ -90,7 +90,7 @@ func (s *Service) deliverVoice(ctx context.Context, adapter Adapter, plan Plan, 
 	if err != nil {
 		return Plan{}, Receipt{}, fmt.Errorf("core: %s voice note failed: %w", verb, err)
 	}
-	s.storeSentItem(ctx, out.Channel, out.Account, thread, to, out.Subject, "", plan.Attachments, receipt)
+	s.storeSentItem(ctx, out.Channel, out.Account, thread, threadName, to, out.Subject, "", plan.Attachments, receipt)
 	return plan, receipt, nil
 }
 

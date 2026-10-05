@@ -161,6 +161,9 @@ type memStore struct {
 	// for tests proving a failed sent-item write (R3) is logged rather
 	// than silently dropped.
 	upsertErr error
+	// threadErr, when set, makes every Thread call fail, for tests proving
+	// a failed best-effort lookup never fails the send itself.
+	threadErr error
 }
 
 func newMemStore(items ...core.Item) *memStore {
@@ -292,6 +295,9 @@ func (m *memStore) List(ctx context.Context, filter core.Filter) ([]core.Item, e
 // before, most recent limit items within that window), and returns
 // oldest→newest.
 func (m *memStore) Thread(ctx context.Context, filter core.Filter, before time.Time, limit int) ([]core.Item, error) {
+	if m.threadErr != nil {
+		return nil, m.threadErr
+	}
 	var matched []core.Item
 	for _, it := range m.items {
 		if it.Channel != filter.Channel || it.Account != filter.Account || it.Thread != filter.Thread {
