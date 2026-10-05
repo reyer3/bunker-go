@@ -2070,6 +2070,9 @@ which answers `daemon_up: false` with a hint to run `bunker daemon`.
 | `read` | one item with its body (capped at 20,000 characters); **never marks it read** |
 | `attachment` | the text of one attachment (`id`, `index` from 0), downloaded like `bunker download` into a temp dir that is removed afterwards; see below; **never marks anything read** |
 | `download` | save one attachment to a local file (`id`, `index` from 0, `path`, `force`), like `bunker download`; returns `path`, `name`, `mime`, `size`; see below |
+| `todo_add` | record a to-do (`text`, `direction` = `mine` for a promise the user made or `theirs` for something owed to the user, `due` as YYYY-MM-DD or `2d`/`1w`, `item_id` of the source message, `person`), like `bunker todo add`; idempotent; returns `todo` |
+| `todo_list` | the to-dos (`status` = `open` by default, `done` or `all`; `direction`; `limit` ≤ 100, default 50), open first and soonest due first; returns `todos` |
+| `todo_done` | mark a to-do done (`id`), or open again with `reopen`, like `bunker todo done`; returns `todo` |
 | `thread` | a conversation's newest messages, oldest first |
 | `contacts` | the same matches as `bunker contacts` |
 | `calls` | live voice calls |
@@ -2084,6 +2087,14 @@ which answers `daemon_up: false` with a hint to run `bunker daemon`.
 | `archive` | move a mail to the archive (`id`), like `bunker organize --move Archive`; mail only |
 | `move` | move a mail to another folder (`id`, `folder`); mail only |
 | `label` | add or remove labels on a mail (`id`, `add`, `remove`); mail only |
+
+The to-do tools return each to-do as `id`, `text`, `direction`, `status`,
+`due` (a date), `item_id`, `channel`, `account`, `thread`, `person`,
+`created` and `done` (RFC 3339). `todo_add` and `todo_done` only write
+bunker's local store, so like `download` they work without `--allow-send`
+or `confirm`; they are annotated idempotent, not destructive and
+closed-world. Spotting the to-do in a message is the agent's job: bunker
+runs no model.
 
 Reads are annotated read-only; `send`, `reply`, `edit`, `delete`,
 `react` and the organize tools are annotated destructive. `edit`,
