@@ -78,9 +78,10 @@ func (a *Adapter) buildImageMessage(ctx context.Context, path, caption string) (
 // would split the caption from what it describes. When out.ReplyTo is set
 // (a reply carrying attachments), the same first attachment also carries
 // the ContextInfo quoting the original message (setContextInfo), built the
-// same way a plain text reply does (buildQuoteContext) — quoting every
+// same way a plain text reply does (outgoingContext) — quoting every
 // attachment would repeat the quote the way a caption on every one would
-// repeat the caption. Each attachment still observes the adapter's send
+// repeat the caption. A forward (out.Forward) labels every attachment as
+// forwarded. Each attachment still observes the adapter's send
 // pacing (see waitForPacing), so multiple attachments are not a bulk API
 // either. core.Service picks this method over plain Send whenever
 // out.Attachments is non-empty; a direct call with none falls back to
@@ -95,12 +96,9 @@ func (a *Adapter) SendMedia(ctx context.Context, out core.Outgoing) (core.Receip
 		return core.Receipt{}, err
 	}
 
-	var quoteCtx *waE2E.ContextInfo
-	if out.ReplyTo != "" {
-		quoteCtx, err = a.buildQuoteContext(out.ReplyTo)
-		if err != nil {
-			return core.Receipt{}, fmt.Errorf("whatsapp: send media: %w", err)
-		}
+	firstCtx, err := a.outgoingContext(out)
+	if err != nil {
+		return core.Receipt{}, fmt.Errorf("whatsapp: send media: %w", err)
 	}
 
 	// The human-emulation choreography (T13b) brackets the WHOLE batch
@@ -118,8 +116,13 @@ func (a *Adapter) SendMedia(ctx context.Context, out core.Outgoing) (core.Receip
 			if err != nil {
 				return fmt.Errorf("whatsapp: send media: %w", err)
 			}
-			if i == 0 && quoteCtx != nil {
-				setContextInfo(msg, quoteCtx)
+			switch {
+			case i == 0 && firstCtx != nil:
+				setContextInfo(msg, firstCtx)
+			case i > 0 && out.Forward:
+				// Every attachment of a forward is forwarded content, so
+				// each carries the label; only the quote stays on the first.
+				setContextInfo(msg, forwardedContext())
 			}
 			if err := a.waitForPacing(ctx); err != nil {
 				return fmt.Errorf("whatsapp: send media: %w", err)

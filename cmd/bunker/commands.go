@@ -83,10 +83,12 @@ Commands:
   reply <id> --voice <file.ogg> [--dry-run] [--json]       reply with a voice note
   send <channel> <account> <to> <text|->
        [--cc addr]... [--subject s]
-       [--attach path]... [--media path]...
+       [--attach path]... [--media path]... [--forward]
        [--dry-run] [--json]                                 send a fresh message
                                                              (<to> and each --cc
-                                                             may be a comma list)
+                                                             may be a comma list;
+                                                             --forward marks it
+                                                             forwarded, one <to>)
   send <channel> <account> <to> --voice <file.ogg>
        [--dry-run] [--json]                                 send an Ogg Opus file
                                                              as a voice note
@@ -543,6 +545,7 @@ func cmdSend(ctx context.Context, backend Backend, args []string, stdin io.Reade
 	fs.Var(&media, "media", "alias of --attach, kept for compatibility (repeatable)")
 	fs.Var(&cc, "cc", "additional recipient, comma-separated values allowed (repeatable)")
 	voice := fs.String("voice", "", "send this Ogg Opus file as a voice note (no text)")
+	forward := fs.Bool("forward", false, "mark the message as forwarded (WhatsApp shows its native label; one recipient only)")
 	dryRun := fs.Bool("dry-run", false, "plan the send without delivering it")
 	idemKey := fs.String("idempotency-key", "", "send at most once per key: a repeat returns the first receipt")
 	jsonOut := fs.Bool("json", false, "emit JSON")
@@ -552,7 +555,7 @@ func cmdSend(ctx context.Context, backend Backend, args []string, stdin io.Reade
 		return 2
 	}
 	if len(positionals) < 4 && !(*voice != "" && len(positionals) == 3) {
-		fmt.Fprintln(stderr, "usage: bunker send <channel> <account> <to> <text|-> [--cc addr]... [--subject s] [--attach path]... [--media path]... [--idempotency-key k] [--dry-run] [--json]")
+		fmt.Fprintln(stderr, "usage: bunker send <channel> <account> <to> <text|-> [--cc addr]... [--subject s] [--attach path]... [--media path]... [--forward] [--idempotency-key k] [--dry-run] [--json]")
 		fmt.Fprintln(stderr, "       bunker send <channel> <account> <to> --voice <file.ogg> [--idempotency-key k] [--dry-run] [--json]")
 		return 2
 	}
@@ -588,6 +591,7 @@ func cmdSend(ctx context.Context, backend Backend, args []string, stdin io.Reade
 		Body:        body,
 		Attachments: attachments,
 		Voice:       *voice != "",
+		Forward:     *forward,
 	}
 	plan, receipt, err := backend.Send(core.WithIdempotencyKey(ctx, *idemKey), out, *dryRun)
 	if err != nil {
@@ -884,6 +888,9 @@ func printPlanResult(jsonOut, dryRun bool, plan core.Plan, receipt core.Receipt,
 		if receipt.Replayed {
 			fmt.Fprintln(stdout, "  already sent with this idempotency key: nothing was sent again")
 		}
+	}
+	if plan.Forward {
+		fmt.Fprintln(stdout, "  as a forward")
 	}
 	for _, att := range plan.Attachments {
 		if att.Voice {

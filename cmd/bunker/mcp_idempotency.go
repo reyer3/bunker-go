@@ -38,8 +38,8 @@ func withBackendTimeout[T any](ctx context.Context, dial mcpDialer, timeout time
 // plan (issue #67). An agent whose confirm timed out cannot tell whether
 // the daemon went on to deliver, and will simply call again: deriving
 // the key from what is being sent (channel, account, recipients or the
-// replied-to item, subject, text, attachment paths and each attachment's
-// name, MIME type and size) makes that retry find the first send instead
+// replied-to item, subject, text, attachment paths, each attachment's
+// name, MIME type and size, and whether it is a forward) makes that retry find the first send instead
 // of repeating it, with no state in the MCP server. The price is that the same text to the same person within
 // core.IdempotencyTTL is answered with the first receipt (marked
 // replayed) rather than sent again.
@@ -61,6 +61,7 @@ func mcpIdempotencyKey(plan core.Plan) string {
 		infos = append(infos, fmt.Sprintf("%s|%s|%d|%t", a.Name, a.MIME, a.Size, a.Voice))
 	}
 	writeKeyParts(h, "attachment-info", infos)
+	writeKeyPart(h, fmt.Sprint("forward=", plan.Forward))
 	return "mcp-" + hex.EncodeToString(h.Sum(nil))
 }
 

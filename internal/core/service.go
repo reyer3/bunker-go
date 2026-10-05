@@ -706,7 +706,7 @@ func (s *Service) Send(ctx context.Context, out Outgoing, dryRun bool) (Plan, Re
 	parts = append(parts, out.Cc...)
 	parts = append(parts, "attachments")
 	parts = append(parts, out.Attachments...)
-	parts = append(parts, fmt.Sprint("voice=", out.Voice))
+	parts = append(parts, fmt.Sprint("voice=", out.Voice), fmt.Sprint("forward=", out.Forward))
 	return s.idempotency.do(ctx, key, requestFingerprint(parts...), func() (Plan, Receipt, error) {
 		return s.send(ctx, out, false)
 	})
@@ -723,6 +723,14 @@ func (s *Service) send(ctx context.Context, out Outgoing, dryRun bool) (Plan, Re
 		Preview:    out.Body,
 		Media:      out.Attachments,
 		Recipients: append([]string{}, out.To...),
+		Forward:    out.Forward,
+	}
+
+	// A forward goes to one target at a time (human pacing on chat
+	// channels): forwarding the same message to several people at once is
+	// exactly the bulk sending bunker never does.
+	if out.Forward && len(out.To) > 1 {
+		return Plan{}, Receipt{}, fmt.Errorf("core: send: a forward goes to one recipient, not %d: %w", len(out.To), ErrUnsupported)
 	}
 
 	adapter, err := s.adapterFor(out.Channel, out.Account)

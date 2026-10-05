@@ -420,6 +420,9 @@ func (m Model) chatTailLines() []string {
 	} else {
 		lines = append(lines, strings.Split(m.composerBox(), "\n")...)
 	}
+	if forward, ok := m.chatForwardLine(); ok {
+		lines = append(lines, forward)
+	}
 	if attach, ok := m.chatAttachLine(); ok {
 		lines = append(lines, attach)
 	}
@@ -445,7 +448,12 @@ func (m Model) chatTailLines() []string {
 			}
 			what += " "
 		}
-		lines = append(lines, fmt.Sprintf("¿Enviar %sa %s? ↵ enviar · Esc cancelar", what, safeLine(strings.Join(m.chatPlan.Recipients, ", "))))
+		verb, key := "Enviar", "enviar"
+		if m.chatPlan.Forward {
+			// The recipient sees the message labeled as forwarded.
+			verb, key = "Reenviar", "reenviar"
+		}
+		lines = append(lines, fmt.Sprintf("¿%s %sa %s? ↵ %s · Esc cancelar", verb, what, safeLine(strings.Join(m.chatPlan.Recipients, ", ")), key))
 	case m.chatSending:
 		lines = append(lines, "Enviando…")
 	case m.chatSendErr != nil:

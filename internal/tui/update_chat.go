@@ -33,7 +33,11 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "esc":
 			m.chatConfirm = false
-			m = m.dropChatVoice()
+			// A forwarded voice note is the forward itself: only a
+			// second Esc drops it (cancelChatForward).
+			if m.chatForward == nil {
+				m = m.dropChatVoice()
+			}
 			return m, nil
 		case "enter", "ctrl+s":
 			return m.confirmChatSendNow()
@@ -76,6 +80,8 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startChatReact()
 	case chatLinkKey:
 		return m.openChatLink()
+	case chatForwardKey:
+		return m.startChatForward()
 	case chatSelectPrevKey:
 		return m.moveChatFocus(-1), nil
 	case chatSelectNextKey:
@@ -86,6 +92,11 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.chatEditID != "" {
 			return m.cancelChatEdit(), nil
+		}
+		// A forward being composed is dropped before anything else, and
+		// Esc stays in the chat it was going to.
+		if m.chatForward != nil {
+			return m.cancelChatForward(), nil
 		}
 		// A selection is dropped first, so Esc never leaves the chat
 		// while a message is still highlighted.
@@ -103,6 +114,10 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter", "ctrl+s":
 		if m.chatEditID != "" {
 			return m.previewChatEdit()
+		}
+		if m.chatForward != nil && m.chatForward.loading {
+			// Sending now would drop the attachment still downloading.
+			return m.withFlash("Esperando el adjunto a reenviar…"), nil
 		}
 		body := strings.TrimSpace(m.composer.Value())
 		if body == "" && len(m.chatAttachments) == 0 {

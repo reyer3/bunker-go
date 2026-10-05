@@ -64,12 +64,9 @@ func (a *Adapter) SendVoice(ctx context.Context, out core.Outgoing) (core.Receip
 	if err != nil {
 		return core.Receipt{}, err
 	}
-	var quoteCtx *waE2E.ContextInfo
-	if out.ReplyTo != "" {
-		quoteCtx, err = a.buildQuoteContext(out.ReplyTo)
-		if err != nil {
-			return core.Receipt{}, fmt.Errorf("whatsapp: send voice note: %w", err)
-		}
+	ctxInfo, err := a.outgoingContext(out)
+	if err != nil {
+		return core.Receipt{}, fmt.Errorf("whatsapp: send voice note: %w", err)
 	}
 	var receipt core.Receipt
 	var sent *waE2E.Message
@@ -78,8 +75,8 @@ func (a *Adapter) SendVoice(ctx context.Context, out core.Outgoing) (core.Receip
 		if err != nil {
 			return err
 		}
-		if quoteCtx != nil {
-			setContextInfo(msg, quoteCtx)
+		if ctxInfo != nil {
+			setContextInfo(msg, ctxInfo)
 		}
 		if err := a.waitForPacing(ctx); err != nil {
 			return fmt.Errorf("whatsapp: send voice note: %w", err)

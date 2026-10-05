@@ -165,6 +165,12 @@ type Outgoing struct {
 	// recipient) and routes it to VoiceSender; a channel without that
 	// capability reports ErrUnsupported rather than sending a plain file.
 	Voice bool `json:"voice,omitempty"`
+	// Forward marks the message as forwarded from another conversation.
+	// WhatsApp labels it natively ("Reenviado"); Matrix and mail have no
+	// such label and send it as a normal message. Service refuses a
+	// forward to more than one recipient: forwarding is one target at a
+	// time, never a broadcast.
+	Forward bool `json:"forward,omitempty"`
 }
 
 // Receipt confirms a write op actually reached the channel.
@@ -524,6 +530,9 @@ type Plan struct {
 	Attachments []AttachmentInfo `json:"attachments,omitempty"`
 	// Voice reports that the attachment goes out as a voice note.
 	Voice bool `json:"voice,omitempty"`
+	// Forward reports that the message goes out marked as forwarded
+	// (see Outgoing.Forward).
+	Forward bool `json:"forward,omitempty"`
 	// Recipients lists every To address this send/reply reaches, in
 	// order — one entry whether the adapter addressed everyone with a
 	// single native call (mail) or Service fanned out N sequential
