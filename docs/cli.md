@@ -692,11 +692,23 @@ on the first image only.
 `receipt` is the zero value (`{"id":"","channel":"","at":"0001-01-01T00:00:00Z"}`)
 when `dryRun` is `true`.
 
-## `bunker send <channel> <account> <to> <text|-> [--cc addr]... [--subject s] [--attach path]... [--media path]... [--idempotency-key k] [--dry-run] [--json]`
+## `bunker send <channel> <account> <to> <text|-> [--cc addr]... [--subject s] [--attach path]... [--media path]... [--forward] [--idempotency-key k] [--dry-run] [--json]`
 
 `bunker send <channel> <account> <to> --voice <file.ogg>` sends an Ogg
 Opus file as a voice note (no text; see
 [Voice notes](#voice-notes-notas-de-voz)).
+
+`--forward` marks the message as forwarded from another conversation.
+On WhatsApp it carries the native label (the recipient sees
+"Reenviado"): the text, every attachment and a voice note each get
+`ContextInfo{IsForwarded: true, ForwardingScore: 1}`. bunker does not
+record whether the original was itself a forward, so the score never
+claims more than one hop. Matrix and mail have no such label and send
+it as a normal message. A forward goes to exactly one `<to>`: several
+recipients is an error, since forwarding to
+many at once is bulk sending. The plan carries `"forward": true`, and
+the human output adds an `as a forward` line. The MCP `send` tool takes
+the same `forward` flag.
 
 Sends a fresh message, not tied to any existing item. Same `--dry-run`,
 `--idempotency-key` and JSON shape as `reply`, plus new
@@ -2546,7 +2558,7 @@ before this release they were the Go field names (`Action`, `Recipients`,
 when empty: `cc`, `subject`, `media`, `attachments`, `recipients`, the
 two `fanout_pause_*` fields (integer nanoseconds), `voice` (true for a
 voice note, whose attachment also carries `"voice": true` and
-`"duration_ms"`), `receipt.recipients` (fan-out only), `receipt.replayed` (true for an idempotent replay) and a
+`"duration_ms"`), `forward` (true for a forward), `receipt.recipients` (fan-out only), `receipt.replayed` (true for an idempotent replay) and a
 recipient's `error`. The envelope keys (`dryRun`, `call`, `result`) are
 unchanged.
 

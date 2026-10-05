@@ -225,6 +225,7 @@ type (
 		Text        string   `json:"text,omitempty" jsonschema:"the message; may be empty when attachments are given"`
 		Subject     string   `json:"subject,omitempty" jsonschema:"mail only"`
 		Attachments []string `json:"attachments,omitempty" jsonschema:"local files to attach, as absolute paths (no ~, no relative paths); the plan lists each one's name, MIME type and size"`
+		Forward     bool     `json:"forward,omitempty" jsonschema:"mark the message as forwarded (WhatsApp shows its native label; Matrix and mail send it as a normal message)"`
 		Confirm     bool     `json:"confirm,omitempty" jsonschema:"false (default) returns the plan only; true sends, and only works when the server runs with --allow-send"`
 	}
 	mcpReplyIn struct {
@@ -421,7 +422,7 @@ func newMCPServer(dial mcpDialer, allowSend bool) *mcp.Server {
 				if err != nil {
 					return core.Plan{}, core.Receipt{}, err
 				}
-				return b.Send(ctx, core.Outgoing{Channel: channel, Account: in.Account, To: []string{to}, Subject: in.Subject, Body: in.Text, Attachments: in.Attachments}, dryRun)
+				return b.Send(ctx, core.Outgoing{Channel: channel, Account: in.Account, To: []string{to}, Subject: in.Subject, Body: in.Text, Attachments: in.Attachments, Forward: in.Forward}, dryRun)
 			})
 		})
 
