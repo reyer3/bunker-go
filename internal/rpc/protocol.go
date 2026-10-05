@@ -33,6 +33,11 @@ type Response struct {
 const (
 	errCodeNotFound    = "not_found"
 	errCodeUnsupported = "unsupported"
+	// errCodeTodoNotFound and errCodeInvalidTodo carry core.ErrTodoNotFound
+	// and core.ErrInvalidTodo, so the MCP to-do tools can tell a bad
+	// argument from a daemon failure.
+	errCodeTodoNotFound = "todo_not_found"
+	errCodeInvalidTodo  = "invalid_todo"
 )
 
 // Method names understood by the server.
@@ -63,6 +68,9 @@ const (
 	MethodContacts          = "contacts"
 	MethodConversations     = "conversations"
 	MethodMeetings          = "meetings"
+	MethodTodoAdd           = "todo_add"
+	MethodTodos             = "todos"
+	MethodTodoSet           = "todo_set"
 	MethodMarkUnread        = "mark_unread"
 	MethodEdit              = "edit"
 	MethodDelete            = "delete"
@@ -230,6 +238,25 @@ type meetingsParams struct {
 }
 type meetingsResult struct {
 	Meetings []core.UpcomingMeeting `json:"meetings"`
+}
+
+type todoAddParams struct {
+	Todo core.Todo `json:"todo"`
+}
+type todoResult struct {
+	Todo core.Todo `json:"todo"`
+}
+type todosParams struct {
+	Filter core.TodoFilter `json:"filter"`
+}
+type todosResult struct {
+	Todos []core.Todo `json:"todos"`
+}
+
+// todoSetParams completes (status done) or reopens (status open) a to-do.
+type todoSetParams struct {
+	ID     string          `json:"id"`
+	Status core.TodoStatus `json:"status"`
 }
 
 type planResult struct {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -150,6 +151,33 @@ func demoInvitations(account string, now time.Time) []core.Item {
 		})
 	}
 	return items
+}
+
+// demoTodos are the to-dos "bunker daemon --fake" starts with, one each
+// way, linked to the demo chats. Their fixed ids make seeding them again
+// on every start a no-op (AddTodo is idempotent by id).
+func demoTodos(now time.Time) []core.Todo {
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	return []core.Todo{
+		{ID: "demo1", Text: "Mandar las notas de la reunión", Direction: core.TodoMine, Status: core.TodoOpen,
+			Due: today.AddDate(0, 0, 1), ItemID: "whatsapp:demo:chat1", Channel: core.ChannelWhatsApp,
+			Account: "demo", Thread: "demo-ana", Person: "Demo Ana", Created: now.Add(-time.Hour)},
+		{ID: "demo2", Text: "Confirmar la sala para el repaso", Direction: core.TodoTheirs, Status: core.TodoOpen,
+			ItemID: "matrix:demo:chat2", Channel: core.ChannelMatrix, Account: "demo", Thread: "demo-team",
+			Person: "Demo Luis", Created: now.Add(-2 * time.Hour)},
+	}
+}
+
+// seedDemoTodos stores demoTodos straight into the store: through
+// Service.AddTodo they would need their chat items stored first, and the
+// fake adapters only push those once they run.
+func seedDemoTodos(ctx context.Context, st core.TodoStore, now time.Time) error {
+	for _, t := range demoTodos(now) {
+		if _, err := st.AddTodo(ctx, t); err != nil {
+			return fmt.Errorf("daemon: seed demo to-dos: %w", err)
+		}
+	}
+	return nil
 }
 
 // demoRegistry wires one fake adapter per channel under the "demo"

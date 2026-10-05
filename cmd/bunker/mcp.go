@@ -32,6 +32,10 @@ and contacts to find someone's address by name. health says whether the daemon a
 attachment returns the text of an item's attachment (id, index from 0), to read invoices, contracts and other documents.
 download saves an attachment's bytes to a local file (id, index, an absolute path; force to overwrite): it only
 writes on this machine, so it needs no confirm or --allow-send.
+todo_add, todo_list and todo_done keep the user's to-do list: todo_add records a promise the user made
+(direction mine) or something someone owes the user (theirs), with the item_id of the message it came from;
+todo_list shows what is pending; todo_done completes one. They only write bunker's local store, so like
+download they need no confirm or --allow-send, and adding the same to-do again never duplicates it.
 search finds stored items with a query language: from:, to:, subject:, is:unread|read, has:attachment,
 in:<folder>, channel:, account:, label:, before:/after: (YYYY-MM-DD or 7d/2w/3m), "phrases", -negation
 and free text; list and search page with cursor/next_cursor.
@@ -440,6 +444,7 @@ func newMCPServer(dial mcpDialer, allowSend bool) *mcp.Server {
 	addMCPMessageTools(server, dial, allowSend)
 	addMCPAttachmentTool(server, dial)
 	addMCPDownloadTool(server, dial)
+	addMCPTodoTools(server, dial)
 
 	return server
 }

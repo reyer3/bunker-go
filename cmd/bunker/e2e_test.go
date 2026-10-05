@@ -173,6 +173,32 @@ func TestEndToEndCLIAgainstFakeDaemon(t *testing.T) {
 		t.Fatalf("meetings join --dry-run = %d %q", code, out)
 	}
 
+	// todo: --fake seeds two demo to-dos; add is idempotent, done hides
+	// one from the open list.
+	var todoResp struct {
+		Todos []struct {
+			ID     string `json:"id"`
+			Text   string `json:"text"`
+			Person string `json:"person"`
+		} `json:"todos"`
+	}
+	code, out = runCLI(t, []string{"todo", "list", "--json"})
+	if err := json.Unmarshal([]byte(out), &todoResp); code != 0 || err != nil || len(todoResp.Todos) != 2 {
+		t.Fatalf("todo list --json = %d %q (%v), want the 2 demo to-dos", code, out, err)
+	}
+	for range 2 {
+		if code, out = runCLI(t, []string{"todo", "add", "Revisar el presupuesto", "--item", "whatsapp:demo:chat1", "--due", "2d"}); code != 0 || !strings.Contains(out, "Demo Ana") {
+			t.Fatalf("todo add = %d %q, want the person from the item", code, out)
+		}
+	}
+	if code, out = runCLI(t, []string{"todo", "done", todoResp.Todos[0].ID}); code != 0 || !strings.Contains(out, "hecho") {
+		t.Fatalf("todo done = %d %q", code, out)
+	}
+	code, out = runCLI(t, []string{"todo", "list", "--json"})
+	if err := json.Unmarshal([]byte(out), &todoResp); code != 0 || err != nil || len(todoResp.Todos) != 2 {
+		t.Fatalf("todo list after add twice and done = %d %q (%v), want 2", code, out, err)
+	}
+
 	// read <id> --json
 	code, out = runCLI(t, []string{"read", mailID, "--json"})
 	if code != 0 {

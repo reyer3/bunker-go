@@ -63,6 +63,12 @@ func runDaemon(ctx context.Context, stateDir, avatarCacheDir, socketPath string,
 		return err
 	}
 
+	if fakeMode {
+		if err := seedDemoTodos(ctx, st, time.Now()); err != nil {
+			return err
+		}
+	}
+
 	svc := core.NewService(st, reg)
 	svc.SetAvatarCacheDir(avatarCacheDir)
 	health := core.NewHealthTracker()
