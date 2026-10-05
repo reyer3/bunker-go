@@ -427,9 +427,9 @@ func (m Model) updateViewer(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // centered in the remaining space.
 func (m Model) viewerView() string {
 	v := m.viewer
-	header := fmt.Sprintf("Imagen %d/%d · ←/→ anterior/siguiente · Esc cerrar", v.index+1, len(v.keys))
+	header := fmt.Sprintf("Imagen %d/%d · ←/→ anterior/siguiente · Esc/q/v cerrar", v.index+1, len(v.keys))
 	if _, _, a, ok := m.chatAttachment(v.keys[v.index]); ok && isVideoAttachment(a) {
-		header = fmt.Sprintf("Video %d/%d · Enter reproducir · ←/→ anterior/siguiente · Esc cerrar", v.index+1, len(v.keys))
+		header = fmt.Sprintf("Video %d/%d · ↵ reproducir · ←/→ anterior/siguiente · Esc/q/v cerrar", v.index+1, len(v.keys))
 	}
 	lines := []string{safeLine(header)}
 	if m.mediaErr != nil {

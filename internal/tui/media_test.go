@@ -149,6 +149,9 @@ func TestImageViewerKeysAndClose(t *testing.T) {
 	if !strings.Contains(model.View(), "Imagen 1/1") {
 		t.Fatalf("viewer header missing: %q", model.View())
 	}
+	if header := strings.Split(model.View(), "\n")[0]; !strings.Contains(header, "Esc/q/v cerrar") || strings.Contains(header, "Enter") {
+		t.Errorf("viewer header %q should name every close key in the ↵ notation", header)
+	}
 	for _, m := range runCmds(cmd) {
 		updated, upload := model.Update(m)
 		model = updated.(Model)

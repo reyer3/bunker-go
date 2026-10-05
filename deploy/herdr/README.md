@@ -30,7 +30,7 @@ Bind it to a key in herdr's config:
 
 ```toml
 [[keys.command]]
-key = "prefix+b"
+key = "prefix+i"
 type = "plugin_action"
 command = "bunker.toggle"
 ```
