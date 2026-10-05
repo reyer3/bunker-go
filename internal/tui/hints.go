@@ -103,7 +103,7 @@ var chatHints = []keyHint{
 // confirmed with ↵ (or Ctrl+S again) from its preview.
 var composeHints = []keyHint{
 	{"Ctrl+S", "enviar", false},
-	{"Ctrl+A", "adjuntar", false},
+	{"Ctrl+R", "adjuntar", false},
 	{"Ctrl+X", "quitar adjunto", false},
 	{"Esc", "cerrar", true},
 }
@@ -132,6 +132,7 @@ var threadHints = []keyHint{
 	{"F7", "seleccionar", false},
 	{"Alt+O", "abrir adjunto", false},
 	{"Esc", "volver", true},
+	{"q", "salir", false},
 	{"?", "ayuda", true},
 }
 
@@ -148,6 +149,10 @@ type helpSection struct {
 	keys      [][2]string
 }
 
+// helpSections are the help overlay's pages: one per view, shown alone
+// (plus the calls block during a call, see helpBody), so a key is
+// explained once on the page where it works. The help, palette and quit
+// keys are not listed here: helpFooter adds them once, as they apply.
 var helpSections = []helpSection{
 	{"inbox", "Bandeja", [][2]string{
 		{"j/k, ↑/↓", "mover selección"},
@@ -157,7 +162,7 @@ var helpSections = []helpSection{
 		{"@", "buscar contacto (en la pestaña WhatsApp o Matrix, solo de ese canal)"},
 		{"c", "llamar a la conversación de WhatsApp seleccionada (vista previa y confirmación)"},
 		{"J", "unirse a la próxima reunión con enlace (o clic en su fila de Reuniones)"},
-		{"/", "filtrar por texto o consultar (ver Consultas)"},
+		{"/", "filtrar por texto o consultar (F1 en el filtro lista los operadores)"},
 		{"r", "responder"},
 		{"m", "marcar leído (envía confirmación de lectura)"},
 		{"u", "deshacer el último leído (vuelve a sin leer)"},
@@ -165,7 +170,6 @@ var helpSections = []helpSection{
 		{"1/2/3", "enfocar Mail/WhatsApp/Matrix"},
 		{"0", "volver a la vista general"},
 		{"Tab/⇧Tab", "siguiente/anterior sección"},
-		{"Ctrl+K o F2", "paleta de comandos"},
 		{"q", "salir"},
 	}},
 	{"query", "Consultas (/)", [][2]string{
@@ -197,16 +201,15 @@ var helpSections = []helpSection{
 		{"c", "llamar: en herdr avisa de usar Alt+C en el panel de la conversación"},
 		{"J", "unirse a la próxima reunión (o clic en su fila de Reuniones)"},
 		{"g", "refrescar"},
-		{"? o F1", "esta ayuda"},
-		{"Ctrl+K o F2", "paleta de comandos"},
 		{"q", "salir"},
 	}},
 	{"chat", "En un chat", [][2]string{
 		{"↵ o Ctrl+S", "enviar: un texto se envía con un solo ↵ (antes pasa la vista previa); adjuntos, notas de voz, chats nuevos y ediciones piden un segundo ↵"},
 		{"Alt+↵", "salto de línea"},
 		{"PgUp/PgDn", "ver mensajes anteriores/siguientes"},
-		{"Ctrl+O", "ver imagen / reproducir video"},
-		{"clic", "abrir la imagen o video bajo el cursor"},
+		{"clic", "sobre una imagen o video lo abre, sobre una nota de voz la reproduce, sobre otro mensaje lo selecciona (resaltado)"},
+		{"doble clic", "abrir el adjunto con el programa del sistema (BUNKER_OPEN_FILE)"},
+		{"Ctrl+O", "ver la imagen / reproducir el video más reciente"},
 		{"Ctrl+V", "adjuntar imagen del portapapeles"},
 		{"arrastrar", "soltar archivos para adjuntarlos"},
 		{"⌫ vacío", "quitar el último adjunto"},
@@ -217,33 +220,13 @@ var helpSections = []helpSection{
 		{"Alt++", "reaccionar al último mensaje recibido (0 quita)"},
 		{"Alt+C", "llamar por voz (vista previa y confirmación; requiere calls = true)"},
 		{"Alt+V", "grabar una nota de voz (↵ la envía tras la vista previa, Esc cancela)"},
-		{"Alt+P", "reproducir la última nota de voz (Esc detiene); clic en la nota la reproduce"},
-		{"clic", "seleccionar el mensaje (resaltado); Alt+Y lo copia, Alt+O abre su adjunto"},
-		{"doble clic", "abrir el adjunto con el programa del sistema (BUNKER_OPEN_FILE)"},
-		{"Alt+Y", "copiar el mensaje seleccionado (o el último) al portapapeles"},
-		{"Alt+O", "abrir el adjunto del mensaje seleccionado (o del último con adjunto)"},
-		{"F7 o Alt+S", "modo selección: suelta el ratón para seleccionar texto (Esc/F7 vuelve)"},
+		{"Alt+P", "reproducir la última nota de voz (Esc detiene)"},
+		{"Alt+Y", "copiar el mensaje seleccionado al portapapeles (wl-copy, xclip, xsel u OSC 52)"},
+		{"Alt+O", "abrir el adjunto del mensaje seleccionado"},
+		{"F7 o Alt+S", "modo selección: suelta el ratón para seleccionar texto (Esc/F7 vuelve; Shift+arrastrar también suele servir)"},
 		{"", "sin mensaje seleccionado, las acciones actúan sobre el último"},
-		{"F1", "esta ayuda (? se escribe en el mensaje)"},
-		{"F2", "paleta de comandos (Ctrl+K borra hasta el final de la línea)"},
+		{"", "? y Ctrl+K se escriben en el mensaje: la ayuda es F1 y la paleta F2"},
 		{"Esc", "volver a la bandeja"},
-	}},
-	{"select", "Seleccionar y copiar", [][2]string{
-		{"F7 o Alt+S", "modo selección: el ratón vuelve a la terminal para seleccionar con él; Esc o F7 salen"},
-		{"Shift+arrastrar", "muchas terminales seleccionan así aunque el ratón esté capturado"},
-		{"Alt+Y", "copiar un mensaje (chat, hilo o detalle); usa wl-copy, xclip o xsel y, si no hay, OSC 52"},
-		{"", "OSC 52 funciona por SSH y en tmux con set-clipboard on"},
-		{"doble clic", "abrir un adjunto con xdg-open (o BUNKER_OPEN_FILE) en un chat o un hilo de correo"},
-	}},
-	{"calls", "Llamadas de voz", [][2]string{
-		{"Alt+C", "llamar desde un chat de WhatsApp (vista previa y confirmación)"},
-		{"c", "llamar a la conversación seleccionada de la bandeja o del panel lateral"},
-		{"a / x", "contestar / rechazar la llamada que suena"},
-		{"h", "colgar la llamada en curso"},
-		{"Alt+A/X/H", "lo mismo donde se escribe (chat, editores, filtro)"},
-		{"", "la franja de llamada ocupa la última línea de cualquier vista"},
-		{"", "mientras suena, a y x (y Alt+A/X) tienen prioridad sobre sus otros usos"},
-		{"", "cada cuenta la activa con calls = true; sin eso Alt+C avisa"},
 	}},
 	{"thread", "Hilo de correo", [][2]string{
 		{"j/k", "mover entre mensajes"},
@@ -251,19 +234,38 @@ var helpSections = []helpSection{
 		{"r / R", "responder / responder a todos"},
 		{"f", "reenviar"},
 		{"d", "descargar adjunto"},
-		{"Alt+O", "abrir el adjunto (doble clic en su línea)"},
+		{"Alt+O", "abrir el adjunto (o doble clic en su línea)"},
 		{"Alt+Y", "copiar el cuerpo del mensaje al portapapeles"},
 		{"F7 o Alt+S", "modo selección: suelta el ratón para seleccionar texto"},
 		{"PgUp/PgDn", "desplazar"},
-		{"Ctrl+K o F2", "paleta de comandos"},
 		{"Esc", "volver"},
+		{"q", "salir"},
+	}},
+	{"detail", "Mensaje", [][2]string{
+		{"j/k, ↑/↓", "desplazar"},
+		{"PgUp/PgDn", "desplazar una página"},
+		{"G", "ir al final"},
+		{"r", "responder"},
+		{"m", "marcar leído (envía confirmación de lectura)"},
+		{"Alt+Y", "copiar el mensaje al portapapeles"},
+		{"F7 o Alt+S", "modo selección: suelta el ratón para seleccionar texto"},
+		{"g", "refrescar la bandeja"},
+		{"Esc", "volver a la bandeja"},
+		{"q", "salir"},
 	}},
 	{"editor", "Redactar (correo o respuesta)", [][2]string{
-		{"Tab/⇧Tab", "siguiente/anterior campo"},
-		{"Ctrl+S", "enviar (primero la vista previa)"},
-		{"↵ o Ctrl+S", "confirmar el envío en la vista previa"},
-		{"Ctrl+A/X", "adjuntar / quitar adjunto (respuesta)"},
+		{"Tab/⇧Tab", "siguiente/anterior campo (correo)"},
+		{"Ctrl+S", "enviar: primero la vista previa, que ↵ o Ctrl+S confirman"},
+		{"Ctrl+R / Ctrl+X", "adjuntar una ruta / quitar el último adjunto (respuesta)"},
+		{"Ctrl+V", "adjuntar imagen del portapapeles (respuesta)"},
+		{"arrastrar", "soltar archivos para adjuntarlos (respuesta)"},
+		{"PgUp/PgDn", "desplazar el borrador"},
 		{"Esc", "cerrar y guardar el borrador"},
+	}},
+	{"preview", "Vista previa del envío", [][2]string{
+		{"↵ o Ctrl+S", "enviar de verdad"},
+		{"Esc", "volver a editar (no envía)"},
+		{"q", "dos veces: salir sin enviar (respuesta)"},
 	}},
 	{"picker", "Nuevo mensaje (n) y buscar contacto (@)", [][2]string{
 		{"escribir", "filtrar contactos"},
@@ -273,8 +275,8 @@ var helpSections = []helpSection{
 		{"Esc", "cancelar"},
 	}},
 	{"palette", "Paleta de comandos (Ctrl+K)", [][2]string{
-		{"Ctrl+K o F2", "abrir desde la bandeja, un hilo o el panel lateral"},
-		{"F2", "abrir desde un chat (allí Ctrl+K borra la línea)"},
+		{"Ctrl+K o F2", "abrir desde la bandeja, un mensaje, un hilo o el panel lateral"},
+		{"", "desde un chat solo F2 (allí Ctrl+K borra la línea)"},
 		{"escribir", "filtrar comandos y conversaciones (sin acentos)"},
 		{"↑/↓", "elegir (también Ctrl+P/Ctrl+N)"},
 		{"↵", "ejecutar, como su tecla, o abrir la conversación"},
@@ -284,8 +286,9 @@ var helpSections = []helpSection{
 	}},
 }
 
-// helpKeyColumn is the width of the help overlay's key column.
-const helpKeyColumn = 12
+// helpKeyColumn is the width of the help overlay's key column; a longer
+// key still keeps two spaces before its description.
+const helpKeyColumn = 13
 
 // helpContext names the help section for what is on screen.
 func (m Model) helpContext() string {
@@ -294,7 +297,9 @@ func (m Model) helpContext() string {
 		return "palette"
 	case m.chatMode:
 		return "chat"
-	case m.mailComposing, m.composing, m.previewing:
+	case m.previewing, m.mailComposing && m.mailPreviewing:
+		return "preview"
+	case m.mailComposing, m.composing:
 		return "editor"
 	case m.threadMode:
 		return "thread"
@@ -302,7 +307,9 @@ func (m Model) helpContext() string {
 		return "picker"
 	case m.filtering:
 		return "query"
-	case m.sidebar && !m.detail:
+	case m.detail:
+		return "detail"
+	case m.sidebar:
 		return "sidebar"
 	}
 	return "inbox"
@@ -311,51 +318,110 @@ func (m Model) helpContext() string {
 // askHelpKeys are the ask key's help lines per section (issue #82),
 // shown only when an agent asker is wired.
 var askHelpKeys = map[string][2]string{
+	"inbox":   {"a", "preguntar a Claude (herdr) por la conversación"},
 	"sidebar": {"a", "preguntar a Claude (herdr) por la conversación"},
 	"chat":    {"Alt+A", "preguntar a Claude (herdr) por la conversación"},
 	"thread":  {"a", "preguntar a Claude (herdr) por el mensaje"},
+	"detail":  {"a", "preguntar a Claude (herdr) por el mensaje"},
 }
 
-// helpSectionsFor is helpSections plus the ask key's lines when ask.
-func helpSectionsFor(ask bool) []helpSection {
-	if !ask {
-		return helpSections
-	}
-	out := make([]helpSection, len(helpSections))
-	for i, s := range helpSections {
-		if k, ok := askHelpKeys[s.id]; ok {
-			s.keys = append(append([][2]string(nil), s.keys...), k)
-		}
-		out[i] = s
-	}
-	return out
+// helpPlainKeys are the sections where plain keys are commands, so ? opens
+// the help and Ctrl+K the palette; elsewhere a text field takes them.
+var helpPlainKeys = map[string]bool{"inbox": true, "sidebar": true, "thread": true, "detail": true}
+
+// helpOptions is what a help page depends on besides its section.
+type helpOptions struct {
+	ask bool
+	// call is the call block's answer, reject and hang-up keys, empty
+	// with no call ringing or live.
+	answer, reject, hangup string
+	ringing, live          bool
 }
 
-// helpBody renders every help section and reports where the section for
-// ctx starts, so the overlay can open on it. ask adds the "a" key's lines.
-func helpBody(ctx string, ask bool) ([]string, int) {
-	var lines []string
-	start := 0
-	for i, s := range helpSectionsFor(ask) {
-		if i > 0 {
-			lines = append(lines, "")
-		}
+// helpFooter is the page's help, palette and quit keys, listed once.
+func helpFooter(ctx string) [][2]string {
+	quit := [2]string{"Ctrl+C", "salir de bunker desde cualquier vista"}
+	switch {
+	case helpPlainKeys[ctx]:
+		return [][2]string{{"? o F1", "esta ayuda"}, {"Ctrl+K o F2", "paleta de comandos"}, quit}
+	case ctx == "chat":
+		return [][2]string{{"F1", "esta ayuda"}, {"F2", "paleta de comandos"}, quit}
+	}
+	return [][2]string{{"F1", "esta ayuda"}, quit}
+}
+
+// helpCallKeys is the calls block for a ringing or live call: only its
+// keys in the view under the help (plain or Alt), joined so they never
+// read as a second meaning of the view's own a, x or Alt+A.
+func helpCallKeys(o helpOptions) [][2]string {
+	var keys [][2]string
+	if o.ringing {
+		keys = append(keys, [2]string{o.answer + "/" + strings.TrimPrefix(o.reject, "Alt+"), "contestar/rechazar la llamada que suena (prioridad sobre sus otros usos)"})
+	}
+	if o.live {
+		keys = append(keys, [2]string{o.hangup, "colgar la llamada en curso"})
+	}
+	return append(keys, [2]string{"", "la franja de llamada ocupa la última línea de cualquier vista"})
+}
+
+func helpSectionFor(ctx string) helpSection {
+	for _, s := range helpSections {
 		if s.id == ctx {
-			start = len(lines)
-		}
-		lines = append(lines, s.title)
-		for _, k := range s.keys {
-			pad := max(1, helpKeyColumn-runewidth.StringWidth(k[0]))
-			lines = append(lines, "  "+k[0]+strings.Repeat(" ", pad)+k[1])
+			return s
 		}
 	}
-	return lines, start
+	return helpSections[0]
 }
 
-// openHelp shows the overlay on the current view's section.
+// helpBody renders the page for ctx: its section (with the ask key when
+// o.ask), the calls block during a call, and the help/palette footer.
+func helpBody(ctx string, o helpOptions) []string {
+	s := helpSectionFor(ctx)
+	keys := append([][2]string(nil), s.keys...)
+	if k, ok := askHelpKeys[s.id]; ok && o.ask {
+		keys = append(keys, k)
+	}
+	lines := append([]string{s.title}, helpKeyLines(keys)...)
+	if o.ringing || o.live {
+		lines = append(lines, "", "Llamadas de voz")
+		lines = append(lines, helpKeyLines(helpCallKeys(o))...)
+	}
+	lines = append(lines, "")
+	return append(lines, helpKeyLines(helpFooter(s.id))...)
+}
+
+func helpKeyLines(keys [][2]string) []string {
+	lines := make([]string, len(keys))
+	for i, k := range keys {
+		pad := max(2, helpKeyColumn-runewidth.StringWidth(k[0]))
+		lines[i] = "  " + k[0] + strings.Repeat(" ", pad) + k[1]
+	}
+	return lines
+}
+
+// helpOptions reads the page's options from the view under the help.
+func (m Model) helpOptions() helpOptions {
+	under := m
+	under.helpOpen = false
+	o := helpOptions{ask: m.agentAsk != nil}
+	o.answer, o.reject, o.hangup = under.callKeyNames()
+	o.ringing = m.ringingCall() != nil
+	o.live = m.liveCall() != nil
+	return o
+}
+
+func (m Model) helpPage() []string {
+	ctx := m.helpCtx
+	if ctx == "" {
+		ctx = m.helpContext()
+	}
+	return helpBody(ctx, m.helpOptions())
+}
+
+// openHelp shows the overlay with the current view's page, from its top.
 func (m Model) openHelp() Model {
 	m.helpCtx = m.helpContext()
-	_, m.helpScroll = helpBody(m.helpCtx, m.agentAsk != nil)
+	m.helpScroll = 0
 	m.helpOpen = true
 	return m.clampHelpScroll()
 }
@@ -368,7 +434,7 @@ func (m Model) helpBodyHeight() int {
 }
 
 func (m Model) clampHelpScroll() Model {
-	body, _ := helpBody(m.helpCtx, m.agentAsk != nil)
+	body := m.helpPage()
 	h := m.helpBodyHeight()
 	if h == 0 {
 		m.helpScroll = 0
@@ -397,15 +463,18 @@ func (m Model) updateHelp(key string) Model {
 	return m.clampHelpScroll()
 }
 
+// helpTitle is the overlay's fixed first line: how to scroll and close.
+const helpTitle = "Ayuda · j/k, PgUp/PgDn desplazar · Esc, q o ? cerrar"
+
 // helpView renders the overlay: a fixed title line, then a window of
-// the sections that scrolls to fit the pane.
+// the page that scrolls to fit the pane.
 func (m Model) helpView() string {
-	body, _ := helpBody(m.helpCtx, m.agentAsk != nil)
+	body := m.helpPage()
 	if h := m.helpBodyHeight(); h > 0 && len(body) > h {
 		start := min(m.helpScroll, len(body)-h)
 		body = body[start : start+h]
 	}
-	lines := append([]string{"Ayuda · j/k desplazar · Esc cerrar"}, body...)
+	lines := append([]string{helpTitle}, body...)
 	if m.width > 0 {
 		for i, line := range lines {
 			lines[i] = runewidth.Truncate(line, m.width, "…")

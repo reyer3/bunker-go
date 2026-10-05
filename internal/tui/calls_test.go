@@ -506,11 +506,19 @@ func TestPaletteChatListsCallAndReasons(t *testing.T) {
 }
 
 func TestHelpDescribesCalls(t *testing.T) {
-	body, _ := helpBody("inbox", false)
-	help := strings.Join(body, "\n")
-	for _, want := range []string{"Llamadas de voz", "Alt+C", "contestar", "colgar", "calls = true"} {
-		if !strings.Contains(help, want) {
-			t.Errorf("help does not mention %q", want)
+	chat := strings.Join(helpBody("chat", helpOptions{}), "\n")
+	for _, want := range []string{"Alt+C", "calls = true"} {
+		if !strings.Contains(chat, want) {
+			t.Errorf("chat help does not mention %q", want)
+		}
+	}
+	ringing := strings.Join(helpBody("inbox", helpOptions{answer: "a", reject: "x", hangup: "h", ringing: true}), "\n")
+	live := strings.Join(helpBody("chat", helpOptions{answer: "Alt+A", reject: "Alt+X", hangup: "Alt+H", live: true}), "\n")
+	for help, wants := range map[string][]string{ringing: {"Llamadas de voz", "a/x", "contestar"}, live: {"Llamadas de voz", "Alt+H", "colgar"}} {
+		for _, want := range wants {
+			if !strings.Contains(help, want) {
+				t.Errorf("help during a call does not mention %q:\n%s", want, help)
+			}
 		}
 	}
 }

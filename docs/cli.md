@@ -196,11 +196,17 @@ label`, joined by ` · `). When it does not fit the width, the
 lowest-priority keys are dropped instead of wrapping, and how to leave
 and how to get help always stay.
 
-`?` (or `F1`, which also works in a chat, where `?` is text) opens the
-help overlay on the section for the current view: inbox, chat, mail
-thread, mail editor, contact picker or command palette. It scrolls
-with `j`/`k`, the arrows, `PgUp`/`PgDn` or the wheel. `Esc`, `?` or `F1`
-close it. At
+`?` (or `F1`, which also works where `?` is text: a chat, an editor,
+the filter, the contact picker) opens the help overlay for the current
+view only: inbox, side panel, message detail, chat, mail thread, editor,
+send preview, filter, contact picker or command palette. Each key is
+explained once, on the page where it works; the voice-call keys join the
+page only while a call rings or is live, and the page ends with the help,
+palette and quit keys that apply there. It scrolls with `j`/`k`, the
+arrows, `PgUp`/`PgDn`, `Space`, `g`/`Home` or the wheel. `Esc`, `q`, `?`
+or `F1` close it. `Ctrl+C` quits bunker from any view (an open chat is
+left first, so its presence and typing go away); like `q`, it never hangs
+up a call, which lives in the daemon. At
 terminal widths under ~30 columns the two-line row
 collapses to one line (no preview). Setting `NO_COLOR` disables all
 color, same as everywhere else in bunker.
@@ -327,7 +333,9 @@ undoes the last mark-read, including opening a chat or mail thread (see
 `bunker unread`), `n` starts a new conversation and `@` searches a contact
 (see below), `c` calls the selected WhatsApp conversation (see Voice calls),
 `g`
-refreshes the inbox now, `?` opens the help overlay, `q`
+refreshes the inbox now, `a` asks Claude about the selected
+conversation when bunker runs inside herdr (see `deploy/herdr`), `?` opens
+the help overlay, `q`
 quits (asks again first if a reply preview/send is in flight). A directly
 opened single-item detail view (kept for parity; every current channel
 instead opens its own chat/thread view below) scrolls a long body with
@@ -387,9 +395,12 @@ Composing a reply: the draft is a real multi-line text editor (a shared
 Home/End, word motions and paste move and edit the cursor position instead
 of only ever appending at the end; `PgUp`/`PgDown` and the mouse wheel
 page through a long draft the same way, since every letter (including
-`j`/`k`) is literal draft text here. `Ctrl+A` adds a local file attachment
-by path (spaces allowed; never a shell), `Ctrl+X` drops the most recently
-added attachment, `Ctrl+S` requests the dry-run preview, and `Enter`
+`j`/`k`) is literal draft text here. Files dropped on the terminal attach
+themselves (as in a chat), `Ctrl+V` attaches an image from the clipboard,
+`Ctrl+R` adds a local file attachment by path (spaces allowed; never a
+shell; not `Ctrl+A`, which stays line start and which multiplexers such
+as herdr often take as their prefix), `Ctrl+X` drops the most recently
+added attachment (deleting a pasted image's private temp file), `Ctrl+S` requests the dry-run preview, and `Enter`
 inserts a newline rather than sending — no key sends without that explicit
 preview-then-confirm step, sending never double-fires, and an error keeps
 the draft exactly as typed with no automatic retry. Terminal control
@@ -493,7 +504,8 @@ all open the same full editor: editable `To`/`Cc`/`Subject` fields (`Tab`/
 original. `Ctrl+S` requests a dry-run preview; `Enter` there sends for
 real (no double send, no auto-retry), and `Esc` at any stage returns to
 editing/the thread without ever sending. `Esc` from the thread view
-returns to the inbox.
+returns to the inbox, and `q` there quits, as in the inbox (in the editor
+it is typed text).
 
 ## `bunker list [flags]`
 
@@ -1718,8 +1730,8 @@ contract, over `rpc.Client`:
 ## Attachment download in the TUI's chat and mail thread views (`d` / `Ctrl+D`)
 
 Both K5's chat view (WhatsApp/Matrix) and K6's mail thread view let
-the user save an attachment straight from the conversation with `d`,
-without leaving to the CLI's `bunker download`. No CLI subcommand exposes
+the user save an attachment straight from the conversation (`d` in a
+mail thread, `Ctrl+D` in a chat, where `d` is text), without leaving to the CLI's `bunker download`. No CLI subcommand exposes
 this either — it is the interactive TUI's own `Client.Download`, the
 exact `rpc.Client.Download(ctx, id string, index int, destPath string,
 opts core.DownloadOptions) (core.DownloadResult, error)` signature above,

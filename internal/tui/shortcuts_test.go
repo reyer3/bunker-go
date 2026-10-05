@@ -337,7 +337,7 @@ func TestShortcutHintsAreDroppedFirstAndHelpDescribesThem(t *testing.T) {
 		t.Errorf("narrow hints %q should drop the new hints first", narrow)
 	}
 	for _, ctx := range []string{"inbox", "sidebar", "picker", "calls"} {
-		body, _ := helpBody(ctx, false)
+		body := helpBody(ctx, helpOptions{})
 		text := strings.Join(body, "\n")
 		switch ctx {
 		case "inbox", "sidebar":

@@ -31,6 +31,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case clipboardImageMsg:
+		if m.composing {
+			return m.addReplyClipboardImage(msg), nil
+		}
 		if msg.err != nil {
 			m.chatAttachErr = msg.err
 			return m, nil
@@ -331,7 +334,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.previewing = false
 		m.draftID = ""
 		m.composer.Reset()
-		m.attachments = nil
+		m = m.clearReplyAttachments()
 		m.previewPlan = core.Plan{}
 		m.replyErr = nil
 		return m, nil
@@ -422,6 +425,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case openAttachMsg:
 		return m.handleOpenAttach(msg)
 	case tea.KeyMsg:
+		if msg.String() == "ctrl+c" {
+			return m, m.quitCmd()
+		}
 		if next, cmd, ok := m.selectModeToggle(msg.String()); ok {
 			return next, cmd
 		}

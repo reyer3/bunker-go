@@ -141,3 +141,13 @@ func (m Model) handleExternalOpenDone(msg externalOpenDoneMsg) (tea.Model, tea.C
 	}
 	return m, nil
 }
+
+// quitCmd quits bunker, as Ctrl+C does from any view: a chat is left
+// first (presence and typing), like Esc in a "bunker open" pane. Like q,
+// it never touches a call: calls live in the daemon.
+func (m Model) quitCmd() tea.Cmd {
+	if m.chatMode {
+		return m.quitOpenChat()
+	}
+	return tea.Quit
+}

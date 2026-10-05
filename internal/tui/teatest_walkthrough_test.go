@@ -204,7 +204,7 @@ func TestWalkthroughWideListReadReplySend(t *testing.T) {
 	rec.waitForText(t, "abrir", 3*time.Second)
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}}) // reply directly from the list
 	rec.typeSettled(tm, "see attached notes")
-	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlA}) // attach
+	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlR}) // attach
 	rec.typeSettled(tm, path)
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter}) // confirm the attachment path
 	rec.waitForText(t, "notes.txt", 3*time.Second)

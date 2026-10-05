@@ -204,6 +204,7 @@ func (m Model) paletteCommands() []paletteEntry {
 		ask("a", paletteRune('a'))
 		add(back, "Esc", esc, "")
 		add("Ayuda", "?", paletteRune('?'), "")
+		add("Salir", "q", paletteRune('q'), "")
 	case "chat":
 		actions := ""
 		if _, ok := m.client.(MessageClient); !ok {
