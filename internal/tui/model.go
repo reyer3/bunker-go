@@ -235,6 +235,11 @@ type Model struct {
 	// chatFocus is the ID of the message a click selected (Alt+Y copies
 	// it, Alt+O opens its attachment); "" selects the newest.
 	chatFocus string
+	// chatLinks is the Alt+L picker on screen (the selected message's
+	// links, when it has several); nil when none is. chatLinkSel is the
+	// highlighted one.
+	chatLinks   []string
+	chatLinkSel int
 	// selectMode is true while the mouse is released so the terminal
 	// selects text natively (F7/Alt+S).
 	selectMode bool

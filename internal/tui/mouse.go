@@ -118,6 +118,7 @@ func (m Model) openChat(item core.Item) (Model, tea.Cmd) {
 	m.chatDraftID = item.ID
 	m.chatNewTo = ""
 	m.chatFocus = ""
+	m.chatLinks, m.chatLinkSel = nil, 0
 	m.chatAutoSend = false
 	m.unreadOnOpen = ""
 	if item.Unread {
@@ -170,6 +171,7 @@ func (m Model) leaveChat() (Model, tea.Cmd) {
 	m.chatPreviewPending = false
 	m.chatAutoSend = false
 	m.chatFocus = ""
+	m.chatLinks, m.chatLinkSel = nil, 0
 	m.chatOptimistic = nil
 	m = m.cancelVoiceRecording().stopVoicePlay()
 	m = m.clearChatAttachments()

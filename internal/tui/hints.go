@@ -95,6 +95,7 @@ var chatHints = []keyHint{
 	{"Alt+Y", "copiar", false},
 	{"F7", "seleccionar", false},
 	{"Alt+O", "abrir adjunto", false},
+	{"Alt+L", "abrir enlace", false},
 	{"Esc", "volver", true},
 	{"F1", "ayuda", true},
 }
@@ -225,6 +226,7 @@ var helpSections = []helpSection{
 		{"Alt+P", "reproducir la última nota de voz (Esc detiene)"},
 		{"Alt+Y", "copiar el mensaje seleccionado al portapapeles (wl-copy, xclip, xsel u OSC 52)"},
 		{"Alt+O", "abrir el adjunto del mensaje seleccionado"},
+		{"Alt+L", "abrir el enlace del mensaje seleccionado (con varios, elige con 1-9 o ↑/↓ y ↵); los enlaces también se abren con clic en terminales con OSC 8"},
 		{"F7 o Alt+S", "modo selección: suelta el ratón para seleccionar texto (Esc/F7 vuelve; Shift+arrastrar también suele servir)"},
 		{"", "sin mensaje seleccionado, las acciones actúan sobre el último"},
 		{"", "? y Ctrl+K se escriben en el mensaje: la ayuda es F1 y la paleta F2"},

@@ -26,6 +26,9 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.chatAction != nil {
 		return m.updateChatAction(msg)
 	}
+	if m.chatLinks != nil {
+		return m.updateChatLinks(msg)
+	}
 	if m.chatConfirm {
 		switch msg.String() {
 		case "esc":
@@ -71,6 +74,8 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startChatDelete()
 	case chatReactKey, chatReactKeyAlt:
 		return m.startChatReact()
+	case chatLinkKey:
+		return m.openChatLink()
 	case chatSelectPrevKey:
 		return m.moveChatFocus(-1), nil
 	case chatSelectNextKey:

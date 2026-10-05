@@ -491,6 +491,16 @@ their single click to play; on an image thumbnail the first click still
 opens the viewer and the second opens the file; on a video the first
 click plays it as before. All of these are also in the command palette.
 
+**Links in a chat.** The http(s) URLs in chat bubbles are OSC 8
+hyperlinks, so a terminal that supports them opens one on click (a URL
+wrapped across lines links the whole URL on every line). `Alt+L` opens
+the selected message's link (or the newest message's, as with `Alt+Y`)
+with `xdg-open` (`open` on macOS) or `$BUNKER_OPEN_URL`, and says
+"Abriendo enlace…". A message with several links shows a numbered picker
+(at most nine): `1`-`9`, or `Up`/`Down` and `Enter`, open one and `Esc`
+closes it. A message without links says "El mensaje no tiene enlaces".
+Only http(s) links are ever passed to the opener.
+
 Opening a mail item now opens its thread view instead of the plain
 single-item detail: the Subject renders as a bold title, every message in
 the conversation stacks, the newest expanded with full headers

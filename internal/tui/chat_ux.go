@@ -29,8 +29,9 @@ import (
 
 const (
 	// selectModeKey and selectModeAltKey toggle the selection mode. F7
-	// and Alt+S are unused elsewhere (Alt+A/C/E/P/V/X and Alt++ are
-	// taken, see voice.go, calls.go, chat_actions.go and herdr.go).
+	// and Alt+S are unused elsewhere (Alt+A/C/E/L/P/V/X, Alt+↑/↓ and
+	// Alt++ are taken, see voice.go, calls.go, chat_actions.go,
+	// chat_links.go, chat_select.go and herdr.go).
 	selectModeKey    = "f7"
 	selectModeAltKey = "alt+s"
 	// copyKey copies the selected message (a chat: the one a click
