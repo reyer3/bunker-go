@@ -137,6 +137,14 @@ Commands:
                                                              machine
                                                              ($BUNKER_OPEN_URL
                                                              overrides xdg-open)
+  todo add <text> [--theirs] [--due YYYY-MM-DD|2d]
+       [--item id] [--person name] [--json]                 record a to-do (mine
+                                                             by default; --theirs
+                                                             is owed to me)
+  todo [list] [--all] [--mine|--theirs] [--json]           open to-dos, by due
+                                                             date (--all adds
+                                                             the done ones)
+  todo done|reopen <id> [--json]                           complete or reopen
   counts [--json]                                          unread counts
   health [--json]                                          per-adapter connection
                                                              state, since when,
@@ -248,6 +256,8 @@ func runWithBackend(ctx context.Context, backend Backend, args []string, stdin i
 		return cmdChats(ctx, backend, args[1:], stdout, stderr)
 	case "meetings":
 		return cmdMeetings(ctx, backend, args[1:], stdout, stderr)
+	case "todo":
+		return cmdTodo(ctx, backend, args[1:], stdout, stderr)
 	case "unread":
 		return cmdUnread(ctx, backend, args[1:], stdout, stderr)
 	default:

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sort"
 	"time"
@@ -26,6 +27,11 @@ type fakeBackend struct {
 	meetings      []core.UpcomingMeeting
 	meetingsErr   error
 	meetingsCalls []core.MeetingFilter
+
+	todos        []core.Todo
+	todoErr      error
+	todoAddCalls []core.Todo
+	todosCalls   []core.TodoFilter
 
 	conversations      []core.Conversation
 	conversationsErr   error
@@ -186,6 +192,52 @@ func (f *fakeBackend) Conversations(ctx context.Context, filter core.Conversatio
 func (f *fakeBackend) Meetings(ctx context.Context, filter core.MeetingFilter) ([]core.UpcomingMeeting, error) {
 	f.meetingsCalls = append(f.meetingsCalls, filter)
 	return f.meetings, f.meetingsErr
+}
+
+func (f *fakeBackend) AddTodo(ctx context.Context, todo core.Todo) (core.Todo, error) {
+	f.todoAddCalls = append(f.todoAddCalls, todo)
+	if f.todoErr != nil {
+		return core.Todo{}, f.todoErr
+	}
+	todo.ID = fmt.Sprintf("t%d", len(f.todos)+1)
+	todo.Status = core.TodoOpen
+	f.todos = append(f.todos, todo)
+	return todo, nil
+}
+
+func (f *fakeBackend) Todos(ctx context.Context, filter core.TodoFilter) ([]core.Todo, error) {
+	f.todosCalls = append(f.todosCalls, filter)
+	if f.todoErr != nil {
+		return nil, f.todoErr
+	}
+	var out []core.Todo
+	for _, t := range f.todos {
+		if (filter.Status == "" || t.Status == filter.Status) && (filter.Direction == "" || t.Direction == filter.Direction) {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeBackend) CompleteTodo(ctx context.Context, id string) (core.Todo, error) {
+	return f.setTodo(id, core.TodoDone)
+}
+
+func (f *fakeBackend) ReopenTodo(ctx context.Context, id string) (core.Todo, error) {
+	return f.setTodo(id, core.TodoOpen)
+}
+
+func (f *fakeBackend) setTodo(id string, status core.TodoStatus) (core.Todo, error) {
+	if f.todoErr != nil {
+		return core.Todo{}, f.todoErr
+	}
+	for i, t := range f.todos {
+		if t.ID == id {
+			f.todos[i].Status = status
+			return f.todos[i], nil
+		}
+	}
+	return core.Todo{}, fmt.Errorf("todo %s: %w", id, core.ErrTodoNotFound)
 }
 
 func (f *fakeBackend) Contacts(ctx context.Context, filter core.ContactFilter) ([]core.Contact, error) {

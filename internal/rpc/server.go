@@ -376,6 +376,50 @@ func (s *Server) call(ctx context.Context, req Request) (any, error) {
 		}
 		return meetingsResult{Meetings: meetings}, nil
 
+	case MethodTodoAdd:
+		var p todoAddParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		todo, err := s.svc.AddTodo(ctx, p.Todo)
+		if err != nil {
+			return nil, err
+		}
+		return todoResult{Todo: todo}, nil
+
+	case MethodTodos:
+		var p todosParams
+		if len(req.Params) > 0 {
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				return nil, fmt.Errorf("rpc: bad params: %w", err)
+			}
+		}
+		todos, err := s.svc.Todos(ctx, p.Filter)
+		if err != nil {
+			return nil, err
+		}
+		return todosResult{Todos: todos}, nil
+
+	case MethodTodoSet:
+		var p todoSetParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		var todo core.Todo
+		var err error
+		switch p.Status {
+		case core.TodoDone:
+			todo, err = s.svc.CompleteTodo(ctx, p.ID)
+		case core.TodoOpen:
+			todo, err = s.svc.ReopenTodo(ctx, p.ID)
+		default:
+			err = fmt.Errorf("rpc: to-do status %q: %w", p.Status, core.ErrInvalidTodo)
+		}
+		if err != nil {
+			return nil, err
+		}
+		return todoResult{Todo: todo}, nil
+
 	case MethodHealth:
 		report, err := s.svc.HealthReport(ctx)
 		if err != nil {
@@ -416,6 +460,10 @@ func errResponse(id string, err error) Response {
 		resp.ErrCode = errCodeNotFound
 	case errors.Is(err, core.ErrUnsupported):
 		resp.ErrCode = errCodeUnsupported
+	case errors.Is(err, core.ErrTodoNotFound):
+		resp.ErrCode = errCodeTodoNotFound
+	case errors.Is(err, core.ErrInvalidTodo):
+		resp.ErrCode = errCodeInvalidTodo
 	}
 	return resp
 }

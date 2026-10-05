@@ -59,6 +59,12 @@ type Backend interface {
 	// Meetings lists the upcoming meetings from invitations and recent
 	// call links (`bunker meetings`).
 	Meetings(ctx context.Context, filter core.MeetingFilter) ([]core.UpcomingMeeting, error)
+	// AddTodo, Todos, CompleteTodo and ReopenTodo keep the local to-do
+	// list (`bunker todo`): writes touch only bunker's store.
+	AddTodo(ctx context.Context, todo core.Todo) (core.Todo, error)
+	Todos(ctx context.Context, filter core.TodoFilter) ([]core.Todo, error)
+	CompleteTodo(ctx context.Context, id string) (core.Todo, error)
+	ReopenTodo(ctx context.Context, id string) (core.Todo, error)
 	// MarkUnread puts an item back in the unread inbox (`bunker unread`);
 	// localOnly reports that only bunker's store changed.
 	MarkUnread(ctx context.Context, id string) (localOnly bool, err error)

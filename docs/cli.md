@@ -10,9 +10,9 @@ compact plain text for a human at a terminal.
 
 | Command | `--json` |
 |---|---|
-| `list`, `find`, `read`, `thread`, `search`, `counts`, `health`, `contacts`, `chats`, `meetings`, `calls`, `avatar`, `download` | yes: data |
+| `list`, `find`, `read`, `thread`, `search`, `counts`, `health`, `contacts`, `chats`, `meetings`, `todo list`, `calls`, `avatar`, `download` | yes: data |
 | `reply`, `send`, `edit`, `delete`, `react`, `organize`, `status post`, `call`, `call answer\|reject\|hangup`, `backfill` | yes: `{"dryRun", "plan", ...}` with the [`core.Plan`/`core.Receipt` shape](#coreplan-and-corereceipt-json-shape) |
-| `unread`, `read-thread`, `meetings join` | yes: the result of the change |
+| `unread`, `read-thread`, `meetings join`, `todo add`, `todo done\|reopen` | yes: the result of the change |
 | `version`, `update`, `render`, `herdr toggle` | yes |
 | `import-keys matrix` | yes: `{"new", "already_known", "failed", "total"}` |
 | `daemon`, `mcp`, `bunker` (no arguments), `sidebar`, `open`, `app`, `link`, `help` | exempt: interactive, long-running or setup commands with no data result |
@@ -1467,6 +1467,62 @@ a silent no-op.
 In the TUI the same link opens with a click on a row of the "Reuniones"
 section, `J` (the next meeting with a link) or the palette's "Unirse a la
 próxima reunión"; a meeting without a link says so on the status line.
+
+## `bunker todo add <text> [--theirs] [--due YYYY-MM-DD|2d] [--item id] [--person name] [--json]`
+
+Records a to-do in bunker's store: something I promised (`mine`, the
+default) or, with `--theirs`, something someone owes me. Nothing reaches a
+channel, so there is no `--dry-run`. Deciding that a message holds a to-do
+is left to the agent (the MCP [`todo_add`](#bunker-mcp---allow-send) tool);
+bunker only keeps the list.
+
+- `<text>` is one line, at most 500 characters; several words need no
+  quotes (`bunker todo add Llamar al banco`).
+- `--due` takes a date (`2026-10-09`) or days/weeks from today (`0d`,
+  `2d`, `1w`); the to-do is due on that day.
+- `--item` links the message it came from: its channel, account,
+  conversation and person fill the to-do (the sender, or for a message I
+  sent, the chat or the mail's first recipient). An unknown item id is an
+  error. `--person` overrides the person.
+- Adding is idempotent: the same `--item`, direction and text (case and
+  spacing aside) returns the stored to-do instead of a duplicate, even
+  once it is done. Without `--item`, only an open to-do with the same text
+  counts as the same.
+
+Prints the to-do as one line (see `todo list`); `--json` returns
+`{"todo": {...}}`.
+
+## `bunker todo [list] [--all] [--mine|--theirs] [--json]`
+
+Lists the open to-dos, soonest due first, those without a due date after
+them (oldest first). `--all` adds the done ones after the open ones;
+`--mine` and `--theirs` keep one direction.
+
+```
+3f9a1c22d0	2026-10-09	debo	Mandar el informe	Demo Ana
+b71e04a9c5	-	me deben	Confirmar la sala	Demo Luis
+```
+
+Columns: id (what `todo done` takes), due date or `-`, `debo` (mine) or
+`me deben` (theirs), the text and the person; a done to-do adds `hecho`.
+`--json` returns `{"todos": [...]}`, each:
+
+```json
+{"id": "3f9a1c22d0", "text": "Mandar el informe", "direction": "mine", "status": "open",
+ "due": "2026-10-09T00:00:00-05:00", "item_id": "whatsapp:personal:3EB0A1",
+ "channel": "whatsapp", "account": "personal", "thread": "51900000000@s.whatsapp.net",
+ "person": "Demo Ana", "created": "2026-10-05T12:00:00-05:00"}
+```
+
+`due`, `item_id`, `channel`, `account`, `thread`, `person` and `done` (when
+it was completed) appear only when set. To-dos live in the `todos` table
+added by schema migration 6 and outlive the message they came from.
+
+## `bunker todo done|reopen <id> [--json]`
+
+Marks a to-do done, or open again. Completing a done one changes nothing
+(it keeps its first completion time); an unknown id is an error. Prints
+the to-do; `--json` returns `{"todo": {...}}`.
 
 ## `bunker counts [--json]`
 

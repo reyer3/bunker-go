@@ -96,6 +96,10 @@ func (c *Client) call(ctx context.Context, method string, params any, result any
 			return &remoteError{msg: resp.Error, wrapped: core.ErrNotFound}
 		case errCodeUnsupported:
 			return &remoteError{msg: resp.Error, wrapped: core.ErrUnsupported}
+		case errCodeTodoNotFound:
+			return &remoteError{msg: resp.Error, wrapped: core.ErrTodoNotFound}
+		case errCodeInvalidTodo:
+			return &remoteError{msg: resp.Error, wrapped: core.ErrInvalidTodo}
 		default:
 			return fmt.Errorf("%s", resp.Error)
 		}
@@ -295,6 +299,43 @@ func (c *Client) Meetings(ctx context.Context, filter core.MeetingFilter) ([]cor
 		return nil, err
 	}
 	return res.Meetings, nil
+}
+
+// AddTodo stores a to-do, or returns the one already stored for the
+// same message, direction and text (see core.Service.AddTodo).
+func (c *Client) AddTodo(ctx context.Context, todo core.Todo) (core.Todo, error) {
+	var res todoResult
+	if err := c.call(ctx, MethodTodoAdd, todoAddParams{Todo: todo}, &res); err != nil {
+		return core.Todo{}, err
+	}
+	return res.Todo, nil
+}
+
+// Todos lists the stored to-dos, open first (see core.Service.Todos).
+func (c *Client) Todos(ctx context.Context, filter core.TodoFilter) ([]core.Todo, error) {
+	var res todosResult
+	if err := c.call(ctx, MethodTodos, todosParams{Filter: filter}, &res); err != nil {
+		return nil, err
+	}
+	return res.Todos, nil
+}
+
+// CompleteTodo marks a to-do done.
+func (c *Client) CompleteTodo(ctx context.Context, id string) (core.Todo, error) {
+	return c.setTodo(ctx, id, core.TodoDone)
+}
+
+// ReopenTodo marks a done to-do open again.
+func (c *Client) ReopenTodo(ctx context.Context, id string) (core.Todo, error) {
+	return c.setTodo(ctx, id, core.TodoOpen)
+}
+
+func (c *Client) setTodo(ctx context.Context, id string, status core.TodoStatus) (core.Todo, error) {
+	var res todoResult
+	if err := c.call(ctx, MethodTodoSet, todoSetParams{ID: id, Status: status}, &res); err != nil {
+		return core.Todo{}, err
+	}
+	return res.Todo, nil
 }
 
 // PostStatus publishes a status/story on channel/account.
