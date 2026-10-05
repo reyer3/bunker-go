@@ -99,13 +99,15 @@ func TestAwaitingReplyRules(t *testing.T) {
 		q    core.AwaitingQuery
 		want []string
 	}{
-		{"default", core.AwaitingQuery{}, []string{"wa:tie2:b", "wa:ana:2", "mx:dm:2", "mail:cl:1"}},
+		// mail:cl:1 informs (no question): only with Mail.
+		{"default", core.AwaitingQuery{}, []string{"wa:tie2:b", "wa:ana:2", "mx:dm:2"}},
 		{"with groups", core.AwaitingQuery{Groups: true},
-			[]string{"wa:grp:1", "wa:tie2:b", "wa:ana:2", "mx:room:3", "mx:dm:2", "mail:cl:1"}},
-		{"one channel", core.AwaitingQuery{Channel: core.ChannelMail}, []string{"mail:cl:1"}},
+			[]string{"wa:grp:1", "wa:tie2:b", "wa:ana:2", "mx:room:3", "mx:dm:2"}},
+		{"with mail", core.AwaitingQuery{Mail: true}, []string{"wa:tie2:b", "wa:ana:2", "mx:dm:2", "mail:cl:1"}},
+		{"one channel", core.AwaitingQuery{Channel: core.ChannelMail, Mail: true}, []string{"mail:cl:1"}},
 		{"one account", core.AwaitingQuery{Account: "mx", Groups: true}, []string{"mx:room:3", "mx:dm:2"}},
 		{"limit", core.AwaitingQuery{Limit: 2}, []string{"wa:tie2:b", "wa:ana:2"}},
-		{"older cutoff", core.AwaitingQuery{Before: ago(6, 0)}, []string{"mx:dm:2", "mail:cl:1"}},
+		{"older cutoff", core.AwaitingQuery{Before: ago(6, 0), Mail: true}, []string{"mx:dm:2", "mail:cl:1"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := awaitIDs(t, s, ctx, tc.q); fmt.Sprint(got) != fmt.Sprint(tc.want) {
@@ -130,4 +132,77 @@ func TestAwaitingReplyFillsThreadName(t *testing.T) {
 		}
 	}
 	t.Fatalf("wa:ana:2 missing from %+v", got)
+}
+
+// TestAwaitingReplyMailAsksQuestion: by default a mail thread counts only
+// when the user's last mail asks something in its own text (quoted
+// history does not count), and the limit counts kept rows only.
+func TestAwaitingReplyMailAsksQuestion(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	mail := func(id, thread, body string, at time.Time) core.Item {
+		it := awaitItem(id, core.ChannelMail, "cl", thread, "me@example.com", true, at)
+		it.Body = body
+		it.To = []core.Address{{ID: "ventas@example.com"}}
+		return it
+	}
+	for _, it := range []core.Item{
+		mail("mail:cl:inv", "t-inv", "Te envié la factura.", ago(4, 0)),
+		mail("mail:cl:ask", "t-ask", "¿Me confirmas el pedido?", ago(5, 0)),
+		mail("mail:cl:quoted", "t-quoted", "Adjunto.\n\nOn Mon, Oct 5, 2026 at 10:00 AM Ventas <ventas@example.com> wrote:\n> ¿Me lo mandas?", ago(6, 0)),
+		mail("mail:cl:ask2", "t-ask2", "Could you check it?", ago(7, 0)),
+	} {
+		if err := s.Upsert(ctx, it); err != nil {
+			t.Fatalf("Upsert %s: %v", it.ID, err)
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		q    core.AwaitingQuery
+		want []string
+	}{
+		{"questions only", core.AwaitingQuery{}, []string{"mail:cl:ask", "mail:cl:ask2"}},
+		{"limit counts kept rows", core.AwaitingQuery{Limit: 2}, []string{"mail:cl:ask", "mail:cl:ask2"}},
+		{"every mail", core.AwaitingQuery{Mail: true}, []string{"mail:cl:inv", "mail:cl:ask", "mail:cl:quoted", "mail:cl:ask2"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := awaitIDs(t, s, ctx, tc.q); fmt.Sprint(got) != fmt.Sprint(tc.want) {
+				t.Errorf("ids = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAwaitingReplyNameFallback: when my newest message carries no
+// usable chat name (empty, or the bare number WhatsApp stores when it
+// knows no contact name), the thread's newest real name is used; with
+// none known, the number stays.
+func TestAwaitingReplyNameFallback(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	const me = "51900000009@s.whatsapp.net"
+	named := awaitItem("wa:eva:1", core.ChannelWhatsApp, "personal", "51900000005@s.whatsapp.net", "51900000005@s.whatsapp.net", false, ago(8, 0))
+	named.ThreadName = "Eva Ejemplo"
+	newerNumber := awaitItem("wa:eva:2", core.ChannelWhatsApp, "personal", "51900000005@s.whatsapp.net", "51900000005@s.whatsapp.net", false, ago(7, 0))
+	newerNumber.ThreadName = "51900000005"
+	mine := awaitItem("wa:eva:3", core.ChannelWhatsApp, "personal", "51900000005@s.whatsapp.net", me, true, ago(5, 0))
+	mine.ThreadName = "51900000005"
+	unknown := awaitItem("wa:raul:1", core.ChannelWhatsApp, "personal", "51900000006@s.whatsapp.net", me, true, ago(4, 0))
+	unknown.ThreadName = "51900000006"
+	for _, it := range []core.Item{named, newerNumber, mine, unknown} {
+		if err := s.Upsert(ctx, it); err != nil {
+			t.Fatalf("Upsert %s: %v", it.ID, err)
+		}
+	}
+	got, err := s.AwaitingReply(ctx, core.AwaitingQuery{Before: ago(3, 0), Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]string{}
+	for _, it := range got {
+		names[it.ID] = it.ThreadName
+	}
+	if names["wa:eva:3"] != "Eva Ejemplo" || names["wa:raul:1"] != "51900000006" {
+		t.Errorf("names = %v, want Eva Ejemplo and the bare number kept", names)
+	}
 }

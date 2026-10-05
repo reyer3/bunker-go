@@ -8,16 +8,18 @@ import (
 	"github.com/reyer3/bunker-go/internal/core"
 )
 
-const awaitingUsage = `usage: bunker awaiting [--days N] [--groups] [--json]`
+const awaitingUsage = `usage: bunker awaiting [--days N] [--groups] [--mail] [--json]`
 
 // cmdAwaiting lists the conversations awaiting a reply: where the user
 // wrote last and nobody has answered for --days days. bunker derives the
 // list from the store on every call; nothing is stored, so a reply makes
-// a conversation drop off by itself.
+// a conversation drop off by itself. Mail threads count only when the
+// user's last mail asks a question, unless --mail.
 func cmdAwaiting(ctx context.Context, backend Backend, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("awaiting", stderr)
 	days := fs.Int("days", core.DefaultAwaitingDays, "only conversations unanswered for at least this many days")
 	groups := fs.Bool("groups", false, "include groups (left out by default)")
+	mail := fs.Bool("mail", false, "include every mail thread, not only those whose last mail asks a question")
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	positionals, err := parseInterspersed(fs, args)
 	if err != nil {
@@ -28,7 +30,7 @@ func cmdAwaiting(ctx context.Context, backend Backend, args []string, stdout, st
 		fmt.Fprintln(stderr, awaitingUsage)
 		return 2
 	}
-	awaiting, err := backend.AwaitingReply(ctx, core.AwaitingFilter{Days: *days, Groups: *groups})
+	awaiting, err := backend.AwaitingReply(ctx, core.AwaitingFilter{Days: *days, Groups: *groups, Mail: *mail})
 	if err != nil {
 		return fail(*jsonOut, stdout, stderr, err)
 	}

@@ -1524,7 +1524,7 @@ Marks a to-do done, or open again. Completing a done one changes nothing
 (it keeps its first completion time); an unknown id is an error. Prints
 the to-do; `--json` returns `{"todo": {...}}`.
 
-## `bunker awaiting [--days N] [--groups] [--json]`
+## `bunker awaiting [--days N] [--groups] [--mail] [--json]`
 
 Lists the conversations awaiting a reply: those whose newest message is
 mine (and not deleted) and was sent at least `--days` days ago (default
@@ -1557,6 +1557,16 @@ What counts as a conversation:
   no direct-chat flag, a room where more than one other person has
   written (a room where nobody else wrote yet is a direct chat nobody
   answered). Mail threads are never groups.
+- Chats (WhatsApp, Matrix) always count. A mail thread counts only when
+  my last mail asks a question in my own text: a `?` or `¿` outside
+  quoted history (lines starting with `>`, and everything after an
+  attribution such as "El ... escribió:" or "On ... wrote:", an
+  "-----Original Message-----" separator or a "De:"/"From:" header
+  block), the signature and links. Most mail I send informs (an
+  invoice, "te envié el archivo") and expects no answer; `--mail` lists
+  every mail thread.
+- The person is the chat's name; when my last message carries none, or
+  only the bare number, the newest name known for the chat is used.
 
 ## `bunker counts [--json]`
 
@@ -2107,7 +2117,7 @@ which answers `daemon_up: false` with a hint to run `bunker daemon`.
 | `todo_add` | record a to-do (`text`, `direction` = `mine` for a promise the user made or `theirs` for something owed to the user, `due` as YYYY-MM-DD or `2d`/`1w`, `item_id` of the source message, `person`), like `bunker todo add`; idempotent; returns `todo` |
 | `todo_list` | the to-dos (`status` = `open` by default, `done` or `all`; `direction`; `limit` ≤ 100, default 50), open first and soonest due first; returns `todos` |
 | `todo_done` | mark a to-do done (`id`), or open again with `reopen`, like `bunker todo done`; returns `todo` |
-| `awaiting_reply` | the conversations where the user wrote last and nobody answered for `days` days (default 3; `groups` to include groups; `limit` ≤ 100, default 50), like `bunker awaiting`, newest first; returns `awaiting` with `sent` as RFC 3339 |
+| `awaiting_reply` | the conversations where the user wrote last and nobody answered for `days` days (default 3; `groups` to include groups; mail threads only when the user's last mail asks a question, `mail` to include every mail thread; `limit` ≤ 100, default 50), like `bunker awaiting`, newest first; returns `awaiting` with `sent` as RFC 3339 |
 | `thread` | a conversation's newest messages, oldest first |
 | `contacts` | the same matches as `bunker contacts` |
 | `calls` | live voice calls |

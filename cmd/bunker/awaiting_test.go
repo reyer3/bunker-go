@@ -34,11 +34,15 @@ func TestCmdAwaiting(t *testing.T) {
 		}
 	}
 
-	code, out, _ = runCallCmd(t, b, "awaiting", "--days", "7", "--groups", "--json")
+	if b.awaitingCalls[0].Mail {
+		t.Fatalf("calls = %+v, want mail off by default", b.awaitingCalls)
+	}
+
+	code, out, _ = runCallCmd(t, b, "awaiting", "--days", "7", "--groups", "--mail", "--json")
 	if code != 0 {
 		t.Fatalf("json code = %d", code)
 	}
-	if got := b.awaitingCalls[1]; got.Days != 7 || !got.Groups {
+	if got := b.awaitingCalls[1]; got.Days != 7 || !got.Groups || !got.Mail {
 		t.Errorf("flags = %+v", got)
 	}
 	var res struct {

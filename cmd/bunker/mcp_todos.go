@@ -50,6 +50,7 @@ type (
 	mcpAwaitingIn struct {
 		Days   int  `json:"days,omitempty" jsonschema:"only conversations unanswered for at least this many days (default 3)"`
 		Groups bool `json:"groups,omitempty" jsonschema:"include groups, left out by default"`
+		Mail   bool `json:"mail,omitempty" jsonschema:"include every mail thread; by default only mail threads whose last mail of the user asks a question"`
 		Limit  int  `json:"limit,omitempty" jsonschema:"at most this many conversations (default 50, max 100)"`
 	}
 	// mcpAwaiting is core.Awaiting with its time as RFC 3339 text.
@@ -95,7 +96,8 @@ func addMCPAwaitingTool(server *mcp.Server, dial mcpDialer) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "awaiting_reply",
 		Description: "List the conversations awaiting a reply, like bunker awaiting: where the user wrote last and nobody " +
-			"has answered for at least days days (default 3), newest first. Groups are left out unless groups is set. " +
+			"has answered for at least days days (default 3), newest first. Groups are left out unless groups is set; " +
+			"mail threads count only when the user's last mail asks a question (quoted history aside) unless mail is set. " +
 			"bunker derives the list on every call, so an answer makes a conversation drop off by itself. " +
 			"Use it to answer who has not replied to the user; read or thread opens the conversation.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
@@ -103,7 +105,7 @@ func addMCPAwaitingTool(server *mcp.Server, dial mcpDialer) {
 		if in.Days < 0 {
 			return nil, mcpAwaitingOut{}, fmt.Errorf("awaiting_reply: days %d: want 1 or more", in.Days)
 		}
-		filter := core.AwaitingFilter{Days: in.Days, Groups: in.Groups, Limit: mcpTodoListDefault}
+		filter := core.AwaitingFilter{Days: in.Days, Groups: in.Groups, Mail: in.Mail, Limit: mcpTodoListDefault}
 		if in.Limit > 0 {
 			filter.Limit = min(in.Limit, mcpListMax)
 		}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -22,23 +23,29 @@ const (
 
 // AwaitingFilter narrows Service.AwaitingReply. Days <= 0 means
 // DefaultAwaitingDays; Limit <= 0 (or above the row bound) returns at
-// most maxAwaitingRows. Groups are left out unless Groups is set.
+// most maxAwaitingRows. Groups are left out unless Groups is set. Mail
+// threads count only when the user's last mail asks a question
+// (AsksQuestion) unless Mail is set: most mail the user sends informs
+// (an invoice, "te envié el archivo") and expects no answer.
 type AwaitingFilter struct {
 	Days    int     `json:"days,omitempty"`
 	Channel Channel `json:"channel,omitempty"`
 	Account string  `json:"account,omitempty"`
 	Groups  bool    `json:"groups,omitempty"`
+	Mail    bool    `json:"mail,omitempty"`
 	Limit   int     `json:"limit,omitempty"`
 }
 
 // AwaitingQuery is what Service.AwaitingReply asks the store: the
 // conversations whose newest item is the user's, not deleted, and older
-// than Before.
+// than Before. Mail keeps every mail thread, not only those whose last
+// mail asks a question.
 type AwaitingQuery struct {
 	Before  time.Time
 	Channel Channel
 	Account string
 	Groups  bool
+	Mail    bool
 	Limit   int
 }
 
@@ -50,8 +57,11 @@ type AwaitingLister interface {
 	// and is older than q.Before, newest first, at most q.Limit. Items
 	// without a thread and the user's own chat (IsSelfChat) are never
 	// conversations awaiting anyone; groups (IsGroupConversation) are
-	// left out unless q.Groups. ThreadName falls back to the thread's
-	// newest known name, as Conversations does.
+	// left out unless q.Groups, and mail threads whose last mail asks
+	// nothing (AsksQuestion) unless q.Mail. Those rules run before the
+	// limit, so it counts listed rows only. A ThreadName that is not
+	// usable (UsableThreadName) falls back to the thread's newest usable
+	// one, when there is one.
 	AwaitingReply(ctx context.Context, q AwaitingQuery) ([]Item, error)
 }
 
@@ -133,7 +143,7 @@ func (s *Service) AwaitingReply(ctx context.Context, filter AwaitingFilter) ([]A
 	now := s.queryClock()
 	items, err := lister.AwaitingReply(ctx, AwaitingQuery{
 		Before: now.Add(-time.Duration(days) * 24 * time.Hour), Channel: filter.Channel,
-		Account: filter.Account, Groups: filter.Groups, Limit: limit,
+		Account: filter.Account, Groups: filter.Groups, Mail: filter.Mail, Limit: limit,
 	})
 	if err != nil {
 		return nil, err
@@ -165,4 +175,95 @@ func awaitingPreview(item Item) string {
 		return text
 	}
 	return strings.TrimSpace(string([]rune(text)[:AwaitingPreviewLen])) + "…"
+}
+
+// UsableThreadName reports whether name says who a chat is with: not
+// empty, not the thread id itself, and not just a phone number (digits
+// with optional +, spaces and dashes). WhatsApp stores the bare number
+// as the chat name when it knows no contact name, as a message sent from
+// the phone often does, while older messages of the same chat carry the
+// person's name.
+func UsableThreadName(thread, name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" || name == thread {
+		return false
+	}
+	return strings.ContainsFunc(name, func(r rune) bool {
+		return !unicode.IsDigit(r) && r != '+' && r != ' ' && r != '-'
+	})
+}
+
+// AsksQuestion reports whether a mail body asks something in the
+// sender's own text: a '?' or '¿' outside quoted history and links. It
+// skips lines quoted with '>' and stops at the signature ("-- ") and at
+// the start of the quoted original: an attribution line ("El ...
+// escribió:", "On ... wrote:", also wrapped over two lines), an
+// "-----Original Message-----" or "-----Mensaje original-----"
+// separator, an Outlook rule of underscores, or a "De:"/"From:" header
+// block (followed by Enviado:, Para:, Sent:, To: and the like).
+func AsksQuestion(body string) bool {
+	for _, line := range ownLines(body) {
+		for _, word := range strings.Fields(line) {
+			if strings.Contains(word, "://") || strings.HasPrefix(strings.ToLower(word), "www.") {
+				continue
+			}
+			if strings.ContainsAny(word, "?¿") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// replyHeaderKeys start the lines of a quoted mail's header block, after
+// its "De:"/"From:" line.
+var replyHeaderKeys = []string{"enviado:", "fecha:", "para:", "asunto:", "cc:", "sent:", "date:", "to:", "subject:"}
+
+// ownLines is a mail body's lines written by its sender: those before the
+// quoted history or the signature, without '>' quoted lines.
+func ownLines(body string) []string {
+	lines := strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
+	var out []string
+	for i, raw := range lines {
+		line := strings.ToLower(strings.TrimSpace(raw))
+		switch {
+		case strings.HasPrefix(line, ">"):
+			continue
+		case strings.TrimRight(raw, "\r") == "-- " || line == "--",
+			strings.HasPrefix(line, "-----") && (strings.Contains(line, "original message") || strings.Contains(line, "mensaje original")),
+			strings.HasPrefix(line, "_____"),
+			(strings.HasPrefix(line, "de:") || strings.HasPrefix(line, "from:")) && nextIsReplyHeader(lines[i+1:]):
+			return out
+		case strings.HasSuffix(line, "wrote:") || strings.HasSuffix(line, "escribió:") || strings.HasSuffix(line, "escribio:"):
+			// A wrapped attribution starts on the line before.
+			if !isAttributionStart(line) && len(out) > 0 && isAttributionStart(strings.ToLower(strings.TrimSpace(out[len(out)-1]))) {
+				out = out[:len(out)-1]
+			}
+			return out
+		}
+		out = append(out, raw)
+	}
+	return out
+}
+
+func isAttributionStart(line string) bool {
+	return strings.HasPrefix(line, "el ") || strings.HasPrefix(line, "on ")
+}
+
+// nextIsReplyHeader reports whether the first non-blank of lines is a
+// quoted mail's header (Enviado:, Para:, Sent:, To:...).
+func nextIsReplyHeader(lines []string) bool {
+	for _, raw := range lines {
+		line := strings.ToLower(strings.TrimSpace(raw))
+		if line == "" {
+			continue
+		}
+		for _, key := range replyHeaderKeys {
+			if strings.HasPrefix(line, key) {
+				return true
+			}
+		}
+		return false
+	}
+	return false
 }

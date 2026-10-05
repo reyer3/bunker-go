@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -148,6 +149,9 @@ func TestMCPAwaitingReply(t *testing.T) {
 			ThreadName: "Demo Ana", FromMe: true, Body: "¿Me confirmas la hora?", Timestamp: old},
 		{ID: "whatsapp:personal:G1", Channel: core.ChannelWhatsApp, Account: "personal", Thread: "120363000000000001@g.us",
 			ThreadName: "Demo Equipo", FromMe: true, Body: "¿Alguien?", Timestamp: old},
+		{ID: "mail:cl:M1", Channel: core.ChannelMail, Account: "cl", Thread: "t-m1", FromMe: true,
+			Subject: "Factura", Body: "Te envié la factura.", To: []core.Address{{ID: "ventas@example.com"}},
+			Timestamp: old.Add(-time.Hour)},
 	} {
 		if err := st.Upsert(ctx, it); err != nil {
 			t.Fatal(err)
@@ -191,5 +195,13 @@ func TestMCPAwaitingReply(t *testing.T) {
 	_, out = callTool(t, s, "awaiting_reply", map[string]any{"groups": true})
 	if rows, _ := out["awaiting"].([]any); len(rows) != 2 {
 		t.Errorf("groups = %v, want both", out)
+	}
+	_, out = callTool(t, s, "awaiting_reply", map[string]any{"mail": true})
+	rows, _ = out["awaiting"].([]any)
+	if len(rows) != 2 || rows[1].(map[string]any)["item_id"] != "mail:cl:M1" {
+		t.Errorf("mail = %v, want the chat and the informative mail", out)
+	}
+	if schema, _ := json.Marshal(tool.InputSchema); !strings.Contains(string(schema), `"mail"`) {
+		t.Errorf("schema = %s, want a mail property", schema)
 	}
 }

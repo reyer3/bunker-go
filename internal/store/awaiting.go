@@ -25,8 +25,9 @@ type awaitingCandidate struct {
 // idx_items_thread; NOT EXISTS keeps the highest id when several rows
 // share the newest timestamp, the same tie-break the inbox uses, so a
 // conversation is judged by exactly one row. Only light columns are read
-// here; the group and self-chat rules live in core and run in Go, and
-// full items are loaded for the survivors only.
+// here; the group, self-chat and mail-question rules live in core and run
+// in Go before the limit, and full items are loaded for the candidates
+// the cheap rules keep (the mail rule needs the body).
 func (s *Store) AwaitingReply(ctx context.Context, q core.AwaitingQuery) ([]core.Item, error) {
 	conds := []string{"thread <> ''"}
 	args := []any{}
@@ -76,9 +77,16 @@ func (s *Store) AwaitingReply(ctx context.Context, q core.AwaitingQuery) ([]core
 		if err != nil {
 			return nil, fmt.Errorf("store: awaiting item %s: %w", c.id, err)
 		}
-		if item.ThreadName == "" {
-			if item.ThreadName, err = s.lastThreadName(ctx, string(item.Channel), item.Account, item.Thread); err != nil {
+		if item.Channel == core.ChannelMail && !q.Mail && !core.AsksQuestion(item.Body) {
+			continue
+		}
+		if !core.UsableThreadName(item.Thread, item.ThreadName) {
+			name, err := s.lastThreadName(ctx, string(item.Channel), item.Account, item.Thread, true)
+			if err != nil {
 				return nil, err
+			}
+			if name != "" {
+				item.ThreadName = name
 			}
 		}
 		out = append(out, item)

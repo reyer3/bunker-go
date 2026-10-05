@@ -24,6 +24,10 @@ func TestClientAwaitingReplyRoundTrip(t *testing.T) {
 			ThreadName: "Demo Ana", FromMe: true, Body: "¿Me confirmas la hora?", Timestamp: sent},
 		{ID: "whatsapp:personal:B1", Channel: core.ChannelWhatsApp, Account: "personal", Thread: "demo-beto",
 			ThreadName: "Demo Beto", FromMe: true, Body: "Hola", Timestamp: time.Now()},
+		// An informative mail: listed only with Mail.
+		{ID: "mail:cl:M1", Channel: core.ChannelMail, Account: "cl", Thread: "t-m1", FromMe: true,
+			Subject: "Factura", Body: "Te envié la factura.", To: []core.Address{{ID: "ventas@example.com"}},
+			Timestamp: sent.Add(-time.Hour)},
 	} {
 		if err := st.Upsert(context.Background(), it); err != nil {
 			t.Fatal(err)
@@ -52,5 +56,13 @@ func TestClientAwaitingReplyRoundTrip(t *testing.T) {
 	if a.ItemID != "whatsapp:personal:A1" || a.Person != "Demo Ana" || a.Preview != "¿Me confirmas la hora?" ||
 		a.Days != 5 || !a.Sent.Equal(sent) {
 		t.Errorf("row = %+v", a)
+	}
+
+	got, err = client.AwaitingReply(ctx, core.AwaitingFilter{Days: 3, Mail: true})
+	if err != nil {
+		t.Fatalf("AwaitingReply mail: %v", err)
+	}
+	if len(got) != 2 || got[1].ItemID != "mail:cl:M1" {
+		t.Errorf("mail rows = %+v, want the chat and the informative mail", got)
 	}
 }
