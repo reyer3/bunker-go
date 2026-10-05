@@ -118,6 +118,7 @@ var migrations = []migration{
 	{version: 4, apply: migrateV4},
 	{version: 5, apply: migrateV5},
 	{version: 6, apply: migrateV6},
+	{version: 7, apply: migrateV7},
 }
 
 // CurrentSchemaVersion returns the latest schema version this binary
@@ -347,7 +348,7 @@ func migrateV5(db *sql.DB) error {
 	return nil
 }
 
-// migrateV6 merges WhatsApp conversations split by sends to a bare
+// migrateV7 merges WhatsApp conversations split by sends to a bare
 // number. Before sent items took the chat the adapter resolved the
 // recipient to (core.Receipt.Thread), a send to "51999999999" or
 // "+51999999999" stored its item under those digits as typed: a
@@ -366,7 +367,7 @@ func migrateV5(db *sql.DB) error {
 // deleted (the full-text triggers drop its index entry).
 //
 // Re-running it finds no thread made only of digits and does nothing.
-func migrateV6(db *sql.DB) error {
+func migrateV7(db *sql.DB) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("begin whatsapp thread merge: %w", err)

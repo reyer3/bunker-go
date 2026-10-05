@@ -114,7 +114,7 @@ func TestMigrationMergesWhatsAppThreadsSplitByBareNumberSends(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s = openAtVersion(t, path, 5)
+	s = openAtVersion(t, path, 6)
 	defer s.Close()
 	if got, want := rawUserVersion(t, path), store.CurrentSchemaVersion(); got != want {
 		t.Fatalf("user_version = %d, want %d", got, want)
@@ -185,7 +185,7 @@ func TestMigrationMergesWhatsAppThreadsSplitByBareNumberSends(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s2 := openAtVersion(t, path, 5)
+	s2 := openAtVersion(t, path, 6)
 	defer s2.Close()
 	if after := snapshot(t, s2); after != before {
 		t.Fatalf("second migration changed the store:\nbefore:\n%s\nafter:\n%s", before, after)
