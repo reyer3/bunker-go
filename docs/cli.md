@@ -1495,9 +1495,11 @@ Mail re-fetches the MIME part by UID over IMAP (`BODY.PEEK`, so this
 never marks anything `\Seen` either) — it works for any mail item
 already stored, with no extra state kept around for it. WhatsApp looks up
 the download descriptor (`DirectPath`/`MediaKey`/`FileSHA256`/
-`FileEncSHA256`) it privately persisted when the message first arrived
-and calls whatsmeow's `Download`; an item stored before this feature
-existed has no descriptor and fails with a clear error ("no media key
+`FileEncSHA256`) it privately persisted when the message first arrived,
+or when bunker uploaded it (attachments and voice notes you send), and
+calls whatsmeow's `Download`; an item stored before this feature existed
+— including media bunker sent with v0.18.0 or earlier, whose key was never
+kept — has no descriptor and fails with a clear error ("no media key
 stored; re-download from the phone") instead of a panic. Matrix looks up
 the mxc:// URL (plain rooms) or the `attachment.EncryptedFile` key/iv/hash
 (E2EE rooms, from the event's `file`) it privately persisted when the
