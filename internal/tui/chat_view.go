@@ -429,6 +429,7 @@ func (m Model) chatTailLines() []string {
 	if m.mediaErr != nil {
 		lines = append(lines, "Error: "+humanError(m.mediaErr))
 	}
+	lines = append(lines, m.chatLinkPickerLines()...)
 	action, hasAction := m.chatActionLine()
 	switch {
 	case m.chatAction != nil:
@@ -592,9 +593,13 @@ func chatBubbleLinesFocus(r *lipgloss.Renderer, item core.Item, width int, showN
 		body := sanitizeTerminalText(item.Body)
 		for _, raw := range strings.Split(body, "\n") {
 			text := strings.ReplaceAll(raw, "\r", "")
-			for _, wrapped := range wrapWords(text, bubbleWidth) {
-				padded := padTo(wrapped, bubbleWidth)
-				lines = append(lines, alignBubbleLine(bodyStyle.Render(padded), bubbleWidth, width, item.FromMe))
+			wrapped := wrapWords(text, bubbleWidth)
+			// URLs become OSC 8 links once the text is wrapped, so the
+			// zero-width escapes never touch the width math above.
+			links := wrappedLinks(text, wrapped)
+			for j, w := range wrapped {
+				padded := padTo(w, bubbleWidth)
+				lines = append(lines, alignBubbleLine(renderLinked(bodyStyle, padded, links[j]), bubbleWidth, width, item.FromMe))
 			}
 		}
 		for i, attachment := range item.Attachments {

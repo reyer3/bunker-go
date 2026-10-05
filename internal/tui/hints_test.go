@@ -55,7 +55,7 @@ func TestHelpListsChatKeys(t *testing.T) {
 	model, _ := openedChat(t)
 	model.height = 0
 	help := model.openHelp().helpView()
-	for _, key := range []string{"Ctrl+O", "Ctrl+V", "arrastrar", ":risa", "Ctrl+D", "F1", "F2"} {
+	for _, key := range []string{"Ctrl+O", "Ctrl+V", "arrastrar", ":risa", "Ctrl+D", "F1", "F2", "Alt+↑", "Alt+↓"} {
 		if !strings.Contains(help, key) {
 			t.Errorf("help overlay does not mention %q", key)
 		}

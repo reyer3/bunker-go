@@ -456,6 +456,14 @@ the mail reply composer). `Up` at the top of an empty draft loads an
 older page of the conversation instead of moving the cursor. `Esc` leaves
 the chat view and returns to the inbox.
 
+**Selecting a message.** A click on a bubble selects it (it is
+highlighted); from the keyboard, `Alt+Up` selects the previous (older)
+message and `Alt+Down` the next one. With nothing selected, `Alt+Up`
+selects the newest; `Alt+Down` past the newest drops the selection. The
+selected bubble is scrolled into view, and `Esc` drops the selection
+before it would leave the chat. The message actions below (`Alt+Y`,
+`Alt+O`) act on the selected message, or on the newest when none is.
+
 **Selecting and copying text.** The panel captures the mouse, which is
 what keeps the terminal from selecting text. Three ways around it:
 `F7` (or `Alt+S`) enters the *selection mode*: the mouse goes back to the
@@ -482,6 +490,16 @@ an error shown on screen, before anything is downloaded. Voice notes keep
 their single click to play; on an image thumbnail the first click still
 opens the viewer and the second opens the file; on a video the first
 click plays it as before. All of these are also in the command palette.
+
+**Links in a chat.** The http(s) URLs in chat bubbles are OSC 8
+hyperlinks, so a terminal that supports them opens one on click (a URL
+wrapped across lines links the whole URL on every line). `Alt+L` opens
+the selected message's link (or the newest message's, as with `Alt+Y`)
+with `xdg-open` (`open` on macOS) or `$BUNKER_OPEN_URL`, and says
+"Abriendo enlace…". A message with several links shows a numbered picker
+(at most nine): `1`-`9`, or `Up`/`Down` and `Enter`, open one and `Esc`
+closes it. A message without links says "El mensaje no tiene enlaces".
+Only http(s) links are ever passed to the opener.
 
 Opening a mail item now opens its thread view instead of the plain
 single-item detail: the Subject renders as a bold title, every message in

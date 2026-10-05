@@ -46,6 +46,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.addChatAttachments(msg.path), nil
 	case meetingOpenedMsg:
 		return m.handleMeetingOpened(msg)
+	case linkOpenedMsg:
+		return m.handleLinkOpened(msg)
 	case callsLoadedMsg:
 		return m.handleCallsLoaded(msg)
 	case callTickMsg:
