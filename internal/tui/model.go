@@ -391,6 +391,15 @@ type Model struct {
 	meetings []core.UpcomingMeeting
 	openURL  func(rawURL string) error
 
+	// Pendientes (pending.go): the open to-dos and the chats awaiting a
+	// reply the last poll saw, which row p (or a click) focused, and the
+	// to-do D last completed, for U.
+	todos          []core.Todo
+	awaiting       []core.Awaiting
+	pendingFocused bool
+	pendingSel     int
+	todoUndo       *todoUndo
+
 	// updateNotice is the "nueva versión" line (issue #105, see
 	// update_notice.go), shown from updateNoticeAt for
 	// updateNoticeDuration; updateNoticed keeps it to once per session.

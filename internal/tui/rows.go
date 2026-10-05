@@ -388,7 +388,7 @@ func footerLine(styles rowStyles, width int) string {
 // footerLine is the package-level footerLine plus "a Claude" with an
 // agent asker and "J unirse" while a meeting can be joined.
 func (m Model) footerLine(styles rowStyles, width int) string {
-	return styles.dim.Render(hintLine(width, m.withMeetingHint(m.withAskHint(inboxHints, "a"))...))
+	return styles.dim.Render(hintLine(width, m.withPendingHint(m.withMeetingHint(m.withAskHint(inboxHints, "a")))...))
 }
 
 // emptySectionLine renders a section's single dim placeholder line when
@@ -405,7 +405,7 @@ func (m Model) emptySectionLine(styles rowStyles, width int) string {
 			return styles.dim.Render(truncatePlain("sin conversaciones", width))
 		}
 	}
-	return styles.dim.Render(truncatePlain("sin pendientes", width))
+	return styles.dim.Render(truncatePlain("sin no leídos", width))
 }
 
 // moreLine renders the dim "+N más" truncation notice a section shows

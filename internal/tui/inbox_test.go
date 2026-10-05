@@ -258,7 +258,7 @@ func TestModelLoadsBoundedUnreadInboxAndCounts(t *testing.T) {
 	// loaded/rendered row count): Mail's real total is 3 even though only
 	// one two-item conversation was loaded, and Matrix has no loaded
 	// group at all yet still shows its header and count.
-	for _, text := range []string{"Mail (3)", "WhatsApp (0)", "Matrix (1)", "sin pendientes"} {
+	for _, text := range []string{"Mail (3)", "WhatsApp (0)", "Matrix (1)", "sin no leídos"} {
 		if !strings.Contains(view, text) {
 			t.Errorf("view %q lacks %q", view, text)
 		}

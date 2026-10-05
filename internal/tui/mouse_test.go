@@ -23,10 +23,10 @@ import (
 //	3  sender preview        -> hitRow row=0
 //	4  WhatsApp (0) header   -> hitFocus tab=2
 //	5  WhatsApp rule         -> hitFocus tab=2
-//	6  sin pendientes        -> none
+//	6  sin no leídos        -> none
 //	7  Matrix (0) header     -> hitFocus tab=3
 //	8  Matrix rule           -> hitFocus tab=3
-//	9  sin pendientes        -> none
+//	9  sin no leídos        -> none
 //	10 separator             -> none
 //	11 footer                -> none
 func mouseFixtureModel(client Client) Model {

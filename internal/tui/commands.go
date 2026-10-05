@@ -34,6 +34,11 @@ type inboxLoadedMsg struct {
 	// they could not be loaded, so the model keeps what it showed.
 	meetings   []core.UpcomingMeeting
 	meetingsOK bool
+	// todos and awaiting feed the Pendientes section; pendingOK is false
+	// when they could not be loaded, so the model keeps what it showed.
+	todos     []core.Todo
+	awaiting  []core.Awaiting
+	pendingOK bool
 }
 
 type pollTickMsg struct{ token uint64 }
@@ -171,6 +176,8 @@ func loadInbox(client Client, token uint64) tea.Cmd {
 		chats := fetchChatLists(ctx, client)
 		report := fetchHealthReport(ctx, client)
 		meetings, meetingsOK := fetchMeetings(ctx, client)
-		return inboxLoadedMsg{token: token, items: items, counts: counts, chats: chats, countsErr: countsErr, health: report.Adapters, update: report.Update, meetings: meetings, meetingsOK: meetingsOK}
+		todos, awaiting, pendingOK := fetchPending(ctx, client)
+		return inboxLoadedMsg{token: token, items: items, counts: counts, chats: chats, countsErr: countsErr, health: report.Adapters, update: report.Update, meetings: meetings, meetingsOK: meetingsOK,
+			todos: todos, awaiting: awaiting, pendingOK: pendingOK}
 	}
 }

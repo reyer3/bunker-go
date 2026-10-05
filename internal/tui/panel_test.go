@@ -71,7 +71,7 @@ func TestInboxFitsSidePanel(t *testing.T) {
 	if !strings.Contains(raw, "WhatsApp (0)") || !strings.Contains(raw, "Matrix (0)") {
 		t.Error("an empty section's header is missing (no section may be pushed off screen)")
 	}
-	if !strings.Contains(raw, "sin pendientes") {
+	if !strings.Contains(raw, "sin no leídos") {
 		t.Error("an empty section is missing its placeholder line")
 	}
 	if !strings.Contains(raw, "Sender 20") {

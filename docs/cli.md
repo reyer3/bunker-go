@@ -154,7 +154,7 @@ instead: `🎤 Nota de voz 0:12`, `📷 Foto`, `🎥 Video`, `Sticker`, `🎵 Au
 collapsed Mail sender previews its newest thread's subject (and the start
 of its body once fetched). The selected row gets a full-width highlight and a
 colored left bar. An empty section still shows its header and one dim
-"sin pendientes" line. The overview shows all three sections at once,
+"sin no leídos" line. The overview shows all three sections at once,
 each getting a fair share of the pane's height; a section with more
 conversations than fit ends in a dim "+N más" line rather than pushing
 another section off screen.
@@ -192,6 +192,27 @@ takes at most a third of the pane and only what still fits, so a channel
 section or the footer never leaves the screen, and it is hidden while
 there is nothing to show. It refreshes with the 5-second poll; against an
 older daemon without `meetings` it stays hidden.
+
+**Pendientes.** Under Reuniones (inbox and sidebar) a "Pendientes" section
+lists the open to-dos ([`bunker todo`](#bunker-todo-list---all---mine--theirs---json)),
+soonest due first, then the chats awaiting a reply
+([`bunker awaiting`](#bunker-awaiting---days-n---groups---json)): `↗ Enviar
+informe · Ana · vie 9` for one I promised, `↙ Cotización · Proveedor · vence
+hoy` for one I am owed (the date is `vence hoy`, `mañana`, `vie 9`, `15 oct`,
+or `venció ayer` / `venció jue 1`; due today or overdue is highlighted), and
+`⏳ Ana · hace 4 d · "te paso el…"` for a chat where I wrote last. Reuniones
+stays on top because a meeting is minutes away; the slower backlog sits
+right above the footer that names its keys. `p` walks the rows (past the
+last, or `Esc`, leaves them), and a click selects one; `Enter`, or a click
+on the selected row, opens its conversation (a to-do recorded without a
+message says so instead). `D` marks the selected to-do done ("Marcar
+pendiente hecho" in the palette) and `U` reopens the last one marked. The
+section shows at most 4 rows (the rest as `+N más`) and shares the room
+under the list with Reuniones: together they take at most a third of the
+pane and only what still fits, each gets a header and a row when both have
+something, and with room for only one Reuniones wins. It refreshes with
+the 5-second poll and is hidden while there is nothing to show or against
+an older daemon without to-dos.
 
 Every view ends in a one-line key hint in the same notation (`key
 label`, joined by ` · `). When it does not fit the width, the
@@ -2321,7 +2342,8 @@ running daemon (else the same "cannot reach bunker daemon" hint, exit 1).
 - **Keys:** `j`/`k` and the arrows move, `Tab`/`⇧Tab` or `1`/`2`/`3`/`0`
   switch channel, `/` filters, `@` searches a contact (scoped to the focused
   channel), `c` explains to call with `Alt+C` in the conversation pane,
-  `J` joins the next meeting (see Reuniones above), `g` refreshes, `Ctrl+K` or `F2` opens the
+  `J` joins the next meeting (see Reuniones above), `p`/`D`/`U` walk,
+  complete and reopen to-dos (see Pendientes above), `g` refreshes, `Ctrl+K` or `F2` opens the
   command palette, `?` or `F1` shows help, `q` quits. The other inbox
   keys work as in the full TUI.
 - **Enter:** inside herdr (`HERDR_ENV=1`) it shows the conversation in
