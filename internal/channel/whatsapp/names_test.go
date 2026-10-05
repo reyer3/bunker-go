@@ -217,3 +217,32 @@ func TestThreadKeyStableAcrossLIDAndPNForms(t *testing.T) {
 		t.Errorf("Thread = %q, want the PN JID %q", items[0].Thread, pn.String())
 	}
 }
+
+// TestResolveContactNameIgnoresDevicePart: contacts and LID mappings are
+// stored per person, so a device JID (number:device@server) must resolve
+// exactly like the bare person JID instead of falling back to the number.
+func TestResolveContactNameIgnoresDevicePart(t *testing.T) {
+	pn := types.NewJID("51911111111", types.DefaultUserServer)
+	lid := types.NewJID("123456789", types.HiddenUserServer)
+	names := newFakeNameResolver()
+	names.pnForLID[lid] = pn
+	names.contacts[pn] = types.ContactInfo{Found: true, FullName: "Ana Ejemplo"}
+	a := newTestAdapter("personal", &fakeWAClient{linked: true})
+	a.SetNameResolver(names)
+
+	tests := []struct {
+		name string
+		jid  types.JID
+	}{
+		{"phone number device", types.JID{User: pn.User, Server: pn.Server, Device: 16}},
+		{"lid device", types.JID{User: lid.User, Server: lid.Server, Device: 3}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolved, name := a.resolveContactName(context.Background(), tt.jid, "")
+			if resolved != pn || name != "Ana Ejemplo" {
+				t.Errorf("resolveContactName(%s) = (%s, %q), want (%s, %q)", tt.jid, resolved, name, pn, "Ana Ejemplo")
+			}
+		})
+	}
+}
