@@ -84,7 +84,7 @@ func TestWhatsAppTabListsReadConversationsNewestFirstWithBadges(t *testing.T) {
 	if strings.Contains(view, "⬤0") {
 		t.Fatalf("read conversations must not show a badge:\n%s", view)
 	}
-	if strings.Contains(view, "sin pendientes") || strings.Contains(view, "Proveedor") {
+	if strings.Contains(view, "sin no leídos") || strings.Contains(view, "Proveedor") {
 		t.Fatalf("WhatsApp tab shows unrelated rows:\n%s", view)
 	}
 	// Both chat channels are asked for, bounded by inboxLimit.

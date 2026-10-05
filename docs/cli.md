@@ -154,7 +154,7 @@ instead: `🎤 Nota de voz 0:12`, `📷 Foto`, `🎥 Video`, `Sticker`, `🎵 Au
 collapsed Mail sender previews its newest thread's subject (and the start
 of its body once fetched). The selected row gets a full-width highlight and a
 colored left bar. An empty section still shows its header and one dim
-"sin pendientes" line. The overview shows all three sections at once,
+"sin no leídos" line. The overview shows all three sections at once,
 each getting a fair share of the pane's height; a section with more
 conversations than fit ends in a dim "+N más" line rather than pushing
 another section off screen.

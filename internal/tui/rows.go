@@ -405,7 +405,7 @@ func (m Model) emptySectionLine(styles rowStyles, width int) string {
 			return styles.dim.Render(truncatePlain("sin conversaciones", width))
 		}
 	}
-	return styles.dim.Render(truncatePlain("sin pendientes", width))
+	return styles.dim.Render(truncatePlain("sin no leídos", width))
 }
 
 // moreLine renders the dim "+N más" truncation notice a section shows
