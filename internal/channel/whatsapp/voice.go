@@ -86,11 +86,7 @@ func (a *Adapter) SendVoice(ctx context.Context, out core.Outgoing) (core.Receip
 			return fmt.Errorf("whatsapp: send voice note: %w", err)
 		}
 		sent = msg
-		receipt = core.Receipt{
-			ID:      itemID(a.account, jid.String(), string(resp.ID)),
-			Channel: core.ChannelWhatsApp,
-			At:      resp.Timestamp,
-		}
+		receipt = a.sentReceipt(ctx, jid, resp)
 		return nil
 	})
 	if err != nil {

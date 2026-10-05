@@ -199,3 +199,57 @@ func TestServiceSendStoresSentItemWhenNameLookupFails(t *testing.T) {
 		t.Fatalf("sent item %q not stored after a failed name lookup", receipt.ID)
 	}
 }
+
+// threadReceiptAdapter is a spyAdapter whose receipts name the chat the
+// adapter actually resolved the recipient to, as WhatsApp's do.
+type threadReceiptAdapter struct {
+	spyAdapter
+	thread string
+}
+
+func (a *threadReceiptAdapter) Send(ctx context.Context, out core.Outgoing) (core.Receipt, error) {
+	r, err := a.spyAdapter.Send(ctx, out)
+	r.Thread = a.thread
+	return r, err
+}
+
+// TestServiceSendStoresSentItemInReceiptThread: a send to a number as
+// typed (no @server) must land in the chat the adapter resolved it to,
+// the one live ingest keys that person's messages on, not in a separate
+// thread named after the digits the user typed.
+func TestServiceSendStoresSentItemInReceiptThread(t *testing.T) {
+	const canonical = "56900000001@s.whatsapp.net"
+	tests := []struct {
+		name          string
+		receiptThread string
+		wantThread    string
+		wantName      string
+	}{
+		{name: "adapter-resolved chat wins over the typed number", receiptThread: canonical, wantThread: canonical, wantName: "Ana Ejemplo"},
+		{name: "no resolved chat keeps the typed recipient", receiptThread: "", wantThread: "56900000001", wantName: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newMemStore(core.Item{ID: "in-1", Channel: core.ChannelWhatsApp, Account: "personal", Thread: canonical, ThreadName: "Ana Ejemplo", Timestamp: time.Unix(10, 0)})
+			reg := core.NewRegistry()
+			reg.Register(&threadReceiptAdapter{spyAdapter: spyAdapter{channel: core.ChannelWhatsApp, account: "personal"}, thread: tt.receiptThread})
+			svc := core.NewService(store, reg)
+
+			out := core.Outgoing{Channel: core.ChannelWhatsApp, Account: "personal", To: []string{"56900000001"}, Body: "hola"}
+			_, receipt, err := svc.Send(context.Background(), out, false)
+			if err != nil {
+				t.Fatalf("Send: %v", err)
+			}
+			stored, ok := store.items[receipt.ID]
+			if !ok {
+				t.Fatalf("sent item %q not stored", receipt.ID)
+			}
+			if stored.Thread != tt.wantThread {
+				t.Errorf("stored Thread = %q, want %q", stored.Thread, tt.wantThread)
+			}
+			if stored.ThreadName != tt.wantName {
+				t.Errorf("stored ThreadName = %q, want %q", stored.ThreadName, tt.wantName)
+			}
+		})
+	}
+}

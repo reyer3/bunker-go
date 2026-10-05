@@ -118,6 +118,7 @@ var migrations = []migration{
 	{version: 4, apply: migrateV4},
 	{version: 5, apply: migrateV5},
 	{version: 6, apply: migrateV6},
+	{version: 7, apply: migrateV7},
 }
 
 // CurrentSchemaVersion returns the latest schema version this binary
@@ -343,6 +344,112 @@ func migrateV5(db *sql.DB) error {
 	}
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_items_meeting ON items(meeting_end) WHERE meeting_end > 0`); err != nil {
 		return fmt.Errorf("create meeting index: %w", err)
+	}
+	return nil
+}
+
+// migrateV7 merges WhatsApp conversations split by sends to a bare
+// number. Before sent items took the chat the adapter resolved the
+// recipient to (core.Receipt.Thread), a send to "51999999999" or
+// "+51999999999" stored its item under those digits as typed: a
+// separate, nameless conversation beside the person's real chat, which
+// ingest keys on "51999999999@s.whatsapp.net". Each such item moves to
+// that chat and, when it has no name, takes the chat's newest one.
+//
+// Item ids are left alone: they are primary keys that labels, reactions
+// and the full-text map reference, and the chat part of an old sent
+// item's id (often the LID the number resolved to) still addresses the
+// same conversation for edits, deletes and reactions. The one case that
+// needs more is a message stored twice, the sent copy here and its echo
+// under the canonical chat with a different id prefix but the same
+// message id: the echo is the richer row ingest wrote, so it is kept,
+// the sent copy's labels and reactions move onto it, and the copy is
+// deleted (the full-text triggers drop its index entry).
+//
+// Re-running it finds no thread made only of digits and does nothing.
+func migrateV7(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin whatsapp thread merge: %w", err)
+	}
+	defer tx.Rollback()
+
+	type split struct{ id, account, thread string }
+	rows, err := tx.Query(`
+		SELECT id, account, thread FROM items
+		WHERE channel = 'whatsapp' AND thread <> '' AND thread <> '+'
+			AND (CASE WHEN substr(thread, 1, 1) = '+' THEN substr(thread, 2) ELSE thread END) NOT GLOB '*[^0-9]*'
+	`)
+	if err != nil {
+		return fmt.Errorf("find split whatsapp threads: %w", err)
+	}
+	var splits []split
+	for rows.Next() {
+		var sp split
+		if err := rows.Scan(&sp.id, &sp.account, &sp.thread); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan split whatsapp thread: %w", err)
+		}
+		splits = append(splits, sp)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("read split whatsapp threads: %w", err)
+	}
+
+	type chat struct{ account, thread string }
+	moved := map[chat]bool{}
+	for _, sp := range splits {
+		canonical := strings.TrimPrefix(sp.thread, "+") + "@s.whatsapp.net"
+		msgSuffix := sp.id[strings.LastIndex(sp.id, "/"):]
+		var dup string
+		err := tx.QueryRow(`
+			SELECT id FROM items
+			WHERE channel = 'whatsapp' AND account = ? AND thread = ? AND id <> ? AND substr(id, -?) = ?
+			LIMIT 1
+		`, sp.account, canonical, sp.id, len(msgSuffix), msgSuffix).Scan(&dup)
+		switch {
+		case err == sql.ErrNoRows:
+			if _, err := tx.Exec(`UPDATE items SET thread = ? WHERE id = ?`, canonical, sp.id); err != nil {
+				return fmt.Errorf("move %s to its chat: %w", sp.id, err)
+			}
+			moved[chat{sp.account, canonical}] = true
+		case err != nil:
+			return fmt.Errorf("find echo of %s: %w", sp.id, err)
+		default:
+			if _, err := tx.Exec(`INSERT OR IGNORE INTO labels (item_id, label) SELECT ?, label FROM labels WHERE item_id = ?`, dup, sp.id); err != nil {
+				return fmt.Errorf("move labels of %s: %w", sp.id, err)
+			}
+			if _, err := tx.Exec(`INSERT OR IGNORE INTO reactions (item_id, sender, emoji) SELECT ?, sender, emoji FROM reactions WHERE item_id = ?`, dup, sp.id); err != nil {
+				return fmt.Errorf("move reactions of %s: %w", sp.id, err)
+			}
+			if _, err := tx.Exec(`DELETE FROM items WHERE id = ?`, sp.id); err != nil {
+				return fmt.Errorf("drop duplicate %s: %w", sp.id, err)
+			}
+		}
+	}
+
+	// Name the moved items after their chat: the TUI titles a
+	// conversation from its newest item, so an unnamed sent item there
+	// would show the bare number. Only empty names are filled, and only
+	// in chats that received an item, so it is a no-op when re-run.
+	for c := range moved {
+		if _, err := tx.Exec(`
+			UPDATE items SET thread_name = (
+				SELECT thread_name FROM items
+				WHERE channel = 'whatsapp' AND account = ?1 AND thread = ?2 AND thread_name <> ''
+				ORDER BY timestamp DESC LIMIT 1
+			)
+			WHERE channel = 'whatsapp' AND account = ?1 AND thread = ?2 AND thread_name = ''
+				AND EXISTS (
+					SELECT 1 FROM items
+					WHERE channel = 'whatsapp' AND account = ?1 AND thread = ?2 AND thread_name <> ''
+				)
+		`, c.account, c.thread); err != nil {
+			return fmt.Errorf("name merged chat: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit whatsapp thread merge: %w", err)
 	}
 	return nil
 }
