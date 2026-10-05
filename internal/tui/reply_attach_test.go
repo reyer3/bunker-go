@@ -20,7 +20,7 @@ func writeTempFile(t *testing.T, name string, content string) string {
 }
 
 func attachPath(model Model, path string) Model {
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
 	model = updated.(Model)
 	model = typeRunes(model, path)
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})

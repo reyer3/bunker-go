@@ -1,16 +1,67 @@
 package tui
 
 import (
+	"os"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// replyAttachKey opens the reply's attachment path prompt. Not Ctrl+A:
+// that is a common multiplexer prefix (herdr, screen, tmux setups) and
+// readline's line start, which the composer keeps. Ctrl+R is free in
+// herdr (prefix keys only), Ghostty (no plain Ctrl+letter defaults),
+// tmux and Zellij defaults, bubbles/textarea and every other bunker view.
+const replyAttachKey = "ctrl+r"
+
+// addReplyAttachments appends paths to the reply, skipping ones already
+// attached.
+func (m Model) addReplyAttachments(paths ...string) Model {
+	next := append([]string(nil), m.attachments...)
+	for _, p := range paths {
+		if !slices.Contains(next, p) {
+			next = append(next, p)
+		}
+	}
+	m.attachments = next
+	m.replyErr = nil
+	return m
+}
+
+// addReplyClipboardImage attaches an image pasted with Ctrl+V.
+func (m Model) addReplyClipboardImage(msg clipboardImageMsg) Model {
+	if msg.err != nil {
+		m.replyErr = msg.err
+		return m
+	}
+	m.replyTempFiles = append(m.replyTempFiles, msg.path)
+	return m.addReplyAttachments(msg.path)
+}
+
+// clearReplyAttachments drops the reply's attachments and deletes its
+// pasted temp images: after a send, or when the composer closes.
+func (m Model) clearReplyAttachments() Model {
+	for _, p := range m.replyTempFiles {
+		os.Remove(p)
+	}
+	m.attachments = nil
+	m.replyTempFiles = nil
+	return m
+}
+
 // updateCompose handles keys while drafting a reply. Every key is literal
 // text except the handful of compose control keys; this is what lets "q"
 // and "r" be typed into the draft instead of triggering quit/reply again.
 func (m Model) updateCompose(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.Paste {
+		// Files dropped on the terminal arrive as a pasted list of their
+		// paths, as in the chat: attach them instead of typing them.
+		if paths, ok := parseDroppedPaths(string(msg.Runes)); ok {
+			return m.addReplyAttachments(paths...), nil
+		}
+	}
 	switch msg.String() {
 	case "esc":
 		if next, kept := m.keepDraft(replyDraftKey(m.draftID), m.composer.Value()); kept {
@@ -21,19 +72,28 @@ func (m Model) updateCompose(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.composing = false
 		m.draftID = ""
 		m.composer.Reset()
-		m.attachments = nil
+		m = m.clearReplyAttachments()
 		m.attaching = false
 		m.attachInput = ""
 		m.replyErr = nil
 		return m, nil
-	case "ctrl+a":
+	case replyAttachKey:
 		m.attaching = true
 		m.attachInput = ""
 		m.replyErr = nil
 		return m, nil
+	case "ctrl+v":
+		// Like the chat (chat_attach.go): paste an image from the
+		// clipboard as an attachment; text pastes arrive bracketed.
+		if m.clipboard == nil {
+			return m, nil
+		}
+		return m, pasteClipboardImageCmd(m.clipboard)
 	case "ctrl+x":
-		if len(m.attachments) > 0 {
-			m.attachments = m.attachments[:len(m.attachments)-1]
+		if n := len(m.attachments); n > 0 {
+			last := m.attachments[n-1]
+			m.attachments = append([]string(nil), m.attachments[:n-1]...)
+			m.replyTempFiles = removeTempFile(m.replyTempFiles, last)
 		}
 		return m, nil
 	case "ctrl+s":

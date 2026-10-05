@@ -68,6 +68,9 @@ type Model struct {
 	draftID        string
 	composer       textarea.Model
 	attachments    []string
+	// replyTempFiles are the reply's pasted clipboard images, deleted
+	// when they are removed, sent or the composer closes.
+	replyTempFiles []string
 	attaching      bool
 	attachInput    string
 	previewPlan    core.Plan

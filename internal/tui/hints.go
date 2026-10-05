@@ -103,7 +103,7 @@ var chatHints = []keyHint{
 // confirmed with ↵ (or Ctrl+S again) from its preview.
 var composeHints = []keyHint{
 	{"Ctrl+S", "enviar", false},
-	{"Ctrl+A", "adjuntar", false},
+	{"Ctrl+R", "adjuntar", false},
 	{"Ctrl+X", "quitar adjunto", false},
 	{"Esc", "cerrar", true},
 }
@@ -132,6 +132,7 @@ var threadHints = []keyHint{
 	{"F7", "seleccionar", false},
 	{"Alt+O", "abrir adjunto", false},
 	{"Esc", "volver", true},
+	{"q", "salir", false},
 	{"?", "ayuda", true},
 }
 
@@ -150,8 +151,8 @@ type helpSection struct {
 
 // helpSections are the help overlay's pages: one per view, shown alone
 // (plus the calls block during a call, see helpBody), so a key is
-// explained once on the page where it works. The help and palette keys
-// are not listed here: helpFooter adds them once, as they apply.
+// explained once on the page where it works. The help, palette and quit
+// keys are not listed here: helpFooter adds them once, as they apply.
 var helpSections = []helpSection{
 	{"inbox", "Bandeja", [][2]string{
 		{"j/k, ↑/↓", "mover selección"},
@@ -238,6 +239,7 @@ var helpSections = []helpSection{
 		{"F7 o Alt+S", "modo selección: suelta el ratón para seleccionar texto"},
 		{"PgUp/PgDn", "desplazar"},
 		{"Esc", "volver"},
+		{"q", "salir"},
 	}},
 	{"detail", "Mensaje", [][2]string{
 		{"j/k, ↑/↓", "desplazar"},
@@ -254,7 +256,9 @@ var helpSections = []helpSection{
 	{"editor", "Redactar (correo o respuesta)", [][2]string{
 		{"Tab/⇧Tab", "siguiente/anterior campo (correo)"},
 		{"Ctrl+S", "enviar: primero la vista previa, que ↵ o Ctrl+S confirman"},
-		{"Ctrl+A / Ctrl+X", "adjuntar / quitar adjunto (respuesta)"},
+		{"Ctrl+R / Ctrl+X", "adjuntar una ruta / quitar el último adjunto (respuesta)"},
+		{"Ctrl+V", "adjuntar imagen del portapapeles (respuesta)"},
+		{"arrastrar", "soltar archivos para adjuntarlos (respuesta)"},
 		{"PgUp/PgDn", "desplazar el borrador"},
 		{"Esc", "cerrar y guardar el borrador"},
 	}},
@@ -334,15 +338,16 @@ type helpOptions struct {
 	ringing, live          bool
 }
 
-// helpFooter is the page's help and palette keys, listed once.
+// helpFooter is the page's help, palette and quit keys, listed once.
 func helpFooter(ctx string) [][2]string {
+	quit := [2]string{"Ctrl+C", "salir de bunker desde cualquier vista"}
 	switch {
 	case helpPlainKeys[ctx]:
-		return [][2]string{{"? o F1", "esta ayuda"}, {"Ctrl+K o F2", "paleta de comandos"}}
+		return [][2]string{{"? o F1", "esta ayuda"}, {"Ctrl+K o F2", "paleta de comandos"}, quit}
 	case ctx == "chat":
-		return [][2]string{{"F1", "esta ayuda"}, {"F2", "paleta de comandos"}}
+		return [][2]string{{"F1", "esta ayuda"}, {"F2", "paleta de comandos"}, quit}
 	}
-	return [][2]string{{"F1", "esta ayuda"}}
+	return [][2]string{{"F1", "esta ayuda"}, quit}
 }
 
 // helpCallKeys is the calls block for a ringing or live call: only its

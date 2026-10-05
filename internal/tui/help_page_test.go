@@ -140,6 +140,9 @@ func TestHelpDetailAndPreviewListTheirOwnKeys(t *testing.T) {
 		cases[c.name] = c.model
 	}
 	detail := helpPage(t, cases["detail"])
+	if _, ok := helpLineFor(helpPage(t, cases["thread"]), "q"); !ok {
+		t.Error("thread help lacks q")
+	}
 	for _, key := range []string{"G", "PgUp/PgDn", "r", "m", "Esc", "q"} {
 		if _, ok := helpLineFor(detail, key); !ok {
 			t.Errorf("detail help lacks %q:\n%s", key, strings.Join(detail, "\n"))
@@ -165,6 +168,9 @@ func TestHelpListsHelpKeyWhereItWorks(t *testing.T) {
 		keys := strings.Join(helpPageKeys(page), "\x00") + "\x00"
 		if !strings.Contains("\x00"+keys, "\x00F1\x00") {
 			t.Errorf("%s help lacks F1", c.name)
+		}
+		if !strings.Contains("\x00"+keys, "\x00Ctrl+C\x00") {
+			t.Errorf("%s help lacks Ctrl+C", c.name)
 		}
 		wantQ := map[string]bool{"inbox": true, "sidebar": true, "thread": true, "detail": true}[c.name]
 		if hasQ := strings.Contains("\x00"+keys, "\x00?\x00"); hasQ != wantQ {

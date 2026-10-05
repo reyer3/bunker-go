@@ -9,8 +9,8 @@ import (
 
 // updateThread handles keys in the K6 mail thread view: j/k/up/down move
 // the selection, Enter toggles the selected message's collapsed/expanded
-// state, r/R/f open the full editor on the selected message, and Esc
-// leaves the thread view.
+// state, r/R/f open the full editor on the selected message, Esc leaves
+// the thread view and q quits, as in the inbox and the detail view.
 func (m Model) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "?":
@@ -26,12 +26,11 @@ func (m Model) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.askAgent()
 	case "x", "h":
 		return m.plainCallKeyOrNothing(msg.String())
-	case "esc", "q":
+	case "q":
+		return m, tea.Quit
+	case "esc":
 		if m.openID != "" {
 			return m, tea.Quit
-		}
-		if msg.String() == "q" {
-			return m, nil
 		}
 		m.detail = false
 		m.threadMode = false
