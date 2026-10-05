@@ -117,3 +117,50 @@ func TestConversationsTieBreaksOnID(t *testing.T) {
 	}
 	assertConvs(t, got, "wa:y/0")
 }
+
+// TestConversationsFillsEmptyThreadNameFromLastKnown: rows already stored
+// with an empty name (a sent item that was the newest in its chat) take
+// the newest non-empty thread_name of the same thread, so the chat list
+// shows the contact's name instead of the bare number. A non-empty name
+// is never overridden, and another account's thread never lends its name.
+func TestConversationsFillsEmptyThreadNameFromLastKnown(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	base := time.Date(2025, 3, 1, 12, 0, 0, 0, time.UTC)
+	named := func(id, account, thread, name string, at time.Time) core.Item {
+		it := convItem(id, core.ChannelWhatsApp, account, thread, false, at)
+		it.ThreadName = name
+		return it
+	}
+	items := []core.Item{
+		// "a": two named items, newest last item unnamed (sent from bunker).
+		named("wa:1", "me", "a", "Nombre viejo", base),
+		named("wa:2", "me", "a", "Ana Ejemplo", base.Add(time.Minute)),
+		named("wa:3", "me", "a", "", base.Add(2*time.Minute)),
+		// "b": newest item already named; it wins over an older name.
+		named("wa:4", "me", "b", "Antiguo", base),
+		named("wa:5", "me", "b", "Grupo Ejemplo", base.Add(time.Minute)),
+		// "c": never named; another account's "c" must not lend its name.
+		named("wa:6", "me", "c", "", base),
+		named("wa:7", "alt", "c", "Otra cuenta", base),
+	}
+	for _, it := range items {
+		if err := s.Upsert(ctx, it); err != nil {
+			t.Fatalf("Upsert %s: %v", it.ID, err)
+		}
+	}
+	got, err := s.Conversations(ctx, core.ConversationFilter{Account: "me"})
+	if err != nil {
+		t.Fatalf("Conversations: %v", err)
+	}
+	names := map[string]string{}
+	for _, c := range got {
+		names[c.Last.ID] = c.Last.ThreadName
+	}
+	want := map[string]string{"wa:3": "Ana Ejemplo", "wa:5": "Grupo Ejemplo", "wa:6": ""}
+	for id, w := range want {
+		if n, ok := names[id]; !ok || n != w {
+			t.Errorf("conversation %s ThreadName = %q (present %v), want %q", id, n, ok, w)
+		}
+	}
+}
