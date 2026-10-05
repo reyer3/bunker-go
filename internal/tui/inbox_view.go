@@ -73,15 +73,16 @@ func (m Model) inboxLinesAndHits() (lines []string, hits []inboxHit) {
 	}
 	bodyLines, bodyHits := renderBody(bodyHeight)
 
-	// The meetings section takes the most room the list can spare: at
-	// most a third of the pane, and only if the whole view still fits the
-	// height, so it never pushes a section or the footer off screen. An
-	// unknown height (0) shows it whole.
+	// The sections under the list (Reuniones, then Pendientes) take the
+	// most room the list can spare: at most a third of the pane, shared
+	// between them (splitLowerRoom), and only if the whole view still fits
+	// the height, so they never push a section or the footer off screen.
+	// An unknown height (0) shows them whole.
 	var meetingLines []string
 	var meetingHits []inboxHit
 	if bodyHeight > 0 {
-		for avail := min(bodyHeight/3, 1+meetingMaxRows); avail >= 2; avail-- {
-			ml, mh := m.meetingSection(styles, width, avail)
+		for avail := min(bodyHeight/3, m.lowerSectionsWant()); avail >= 2; avail-- {
+			ml, mh := m.lowerSections(styles, width, avail)
 			if len(ml) == 0 {
 				break
 			}
@@ -92,7 +93,7 @@ func (m Model) inboxLinesAndHits() (lines []string, hits []inboxHit) {
 			}
 		}
 	} else {
-		meetingLines, meetingHits = m.meetingSection(styles, width, 1+meetingMaxRows)
+		meetingLines, meetingHits = m.lowerSections(styles, width, -1)
 	}
 	lines = append(lines, bodyLines...)
 	hits = append(hits, bodyHits...)

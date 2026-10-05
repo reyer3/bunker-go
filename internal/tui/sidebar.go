@@ -212,13 +212,14 @@ func (m Model) sidebarLinesAndHits() (lines []string, hits []inboxHit) {
 	if m.height > 0 {
 		budget = max(1, m.height-len(lines)-footerReservedLines)
 	}
-	// The meetings section sits under the list and only takes what the
-	// list can spare: it keeps at least sidebarMeetingListMin lines.
-	meetingAvail := 1 + meetingMaxRows
+	// The meetings and pending sections sit under the list and only take
+	// what the list can spare: it keeps at least sidebarMeetingListMin
+	// lines.
+	meetingAvail := -1
 	if budget > 0 {
-		meetingAvail = budget - sidebarMeetingListMin
+		meetingAvail = max(0, budget-sidebarMeetingListMin)
 	}
-	meetingLines, meetingHits := m.meetingSection(styles, width, meetingAvail)
+	meetingLines, meetingHits := m.lowerSections(styles, width, meetingAvail)
 	if budget > 0 {
 		budget = max(1, budget-len(meetingLines))
 	}
@@ -257,6 +258,6 @@ func (m Model) sidebarLinesAndHits() (lines []string, hits []inboxHit) {
 		add(line, meetingHits[i])
 	}
 	add(separatorLine(styles, width), inboxHit{kind: hitNone})
-	add(styles.dim.Render(hintLine(width, m.withMeetingHint(m.withAskHint(sidebarHints, "a"))...)), inboxHit{kind: hitNone})
+	add(styles.dim.Render(hintLine(width, m.withPendingHint(m.withMeetingHint(m.withAskHint(sidebarHints, "a")))...)), inboxHit{kind: hitNone})
 	return lines, hits
 }

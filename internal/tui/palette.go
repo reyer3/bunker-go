@@ -167,6 +167,17 @@ func (m Model) paletteCommands() []paletteEntry {
 			add("Ir a "+name, string(rune('0'+tab)), paletteRune(rune('0'+tab)), reason)
 		}
 		add("Unirse a la próxima reunión", meetingJoinKey, paletteRune('J'), m.joinReason())
+		pending := ""
+		if len(m.pendingRows()) == 0 {
+			pending = "no hay pendientes"
+		}
+		add("Recorrer pendientes", pendingFocusKey, paletteRune('p'), pending)
+		add("Marcar pendiente hecho", pendingDoneKey, paletteRune('D'), m.pendingDoneReason())
+		undoTodo := ""
+		if m.todoUndo == nil {
+			undoTodo = "nada que deshacer"
+		}
+		add("Deshacer pendiente hecho", pendingUndoKey, paletteRune('U'), undoTodo)
 		add("Marcar leído", "m", paletteRune('m'), selected)
 		undo := ""
 		if len(m.readUndo) == 0 {

@@ -46,6 +46,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.addChatAttachments(msg.path), nil
 	case meetingOpenedMsg:
 		return m.handleMeetingOpened(msg)
+	case todoSetMsg:
+		return m.handleTodoSet(msg)
 	case linkOpenedMsg:
 		return m.handleLinkOpened(msg)
 	case callsLoadedMsg:
@@ -410,6 +412,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.meetingsOK {
 			m.meetings = msg.meetings
 		}
+		if msg.pendingOK {
+			m.todos, m.awaiting = msg.todos, msg.awaiting
+			m = m.clampPendingFocus()
+		}
 		if visible := len(m.visibleRows()); m.selected >= visible {
 			m.selected = max(0, visible-1)
 		}
@@ -501,6 +507,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.startFilter(), nil
 			}
 		case "esc":
+			if !m.detail && m.pendingFocused {
+				m.pendingFocused = false
+				return m, nil
+			}
 			if !m.detail && m.filterQuery != "" {
 				return m.clearFilter(), nil
 			}
@@ -549,11 +559,15 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m = m.switchTab((m.activeTab - 1 + numTabs) % numTabs)
 			}
 		case "enter":
+			if !m.detail && m.pendingFocused {
+				return m.openPendingRow(m.pendingSel)
+			}
 			if !m.detail {
 				return m.openItem(m.selected)
 			}
 		case "j", "down":
 			if !m.detail {
+				m.pendingFocused = false
 				if m.selected < len(m.visibleRows())-1 {
 					m.selected++
 				}
@@ -562,6 +576,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detailScroll = clampScroll(m.detailScroll+1, len(m.detailBodyLines(m.readItem)), m.detailScrollBudget())
 		case "k", "up":
 			if !m.detail {
+				m.pendingFocused = false
 				if m.selected > 0 {
 					m.selected--
 				}
@@ -626,6 +641,18 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case meetingJoinKey:
 			if !m.detail {
 				return m.joinNextMeeting()
+			}
+		case pendingFocusKey:
+			if !m.detail {
+				return m.focusNextPending(), nil
+			}
+		case pendingDoneKey:
+			if !m.detail {
+				return m.completeFocusedTodo()
+			}
+		case pendingUndoKey:
+			if !m.detail {
+				return m.undoTodoDone()
 			}
 		case "u":
 			if !m.detail {

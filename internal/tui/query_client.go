@@ -295,6 +295,52 @@ func (c *queryClient) Meetings(ctx context.Context, filter core.MeetingFilter) (
 	})
 }
 
+// Todos and AwaitingReply are idempotent queries (the "Pendientes"
+// section); they error with core.ErrUnsupported when the connection
+// underneath cannot list them.
+func (c *queryClient) Todos(ctx context.Context, filter core.TodoFilter) ([]core.Todo, error) {
+	return query(c, ctx, func(client Client) ([]core.Todo, error) {
+		lister, ok := client.(PendingClient)
+		if !ok {
+			return nil, fmt.Errorf("tui: to-dos: %w", core.ErrUnsupported)
+		}
+		return lister.Todos(ctx, filter)
+	})
+}
+
+func (c *queryClient) AwaitingReply(ctx context.Context, filter core.AwaitingFilter) ([]core.Awaiting, error) {
+	return query(c, ctx, func(client Client) ([]core.Awaiting, error) {
+		lister, ok := client.(PendingClient)
+		if !ok {
+			return nil, fmt.Errorf("tui: awaiting reply: %w", core.ErrUnsupported)
+		}
+		return lister.AwaitingReply(ctx, filter)
+	})
+}
+
+// CompleteTodo and ReopenTodo write, but setting a to-do's status twice
+// changes nothing (the daemon keeps the first completion time), so a
+// retry after a lost response is as safe as a query's.
+func (c *queryClient) CompleteTodo(ctx context.Context, id string) (core.Todo, error) {
+	return query(c, ctx, func(client Client) (core.Todo, error) {
+		setter, ok := client.(PendingClient)
+		if !ok {
+			return core.Todo{}, fmt.Errorf("tui: complete to-do: %w", core.ErrUnsupported)
+		}
+		return setter.CompleteTodo(ctx, id)
+	})
+}
+
+func (c *queryClient) ReopenTodo(ctx context.Context, id string) (core.Todo, error) {
+	return query(c, ctx, func(client Client) (core.Todo, error) {
+		setter, ok := client.(PendingClient)
+		if !ok {
+			return core.Todo{}, fmt.Errorf("tui: reopen to-do: %w", core.ErrUnsupported)
+		}
+		return setter.ReopenTodo(ctx, id)
+	})
+}
+
 func (c *queryClient) Presence(ctx context.Context, channel string, account, thread string) (core.Presence, error) {
 	return query(c, ctx, func(client Client) (core.Presence, error) { return client.Presence(ctx, channel, account, thread) })
 }

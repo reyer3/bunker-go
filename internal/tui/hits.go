@@ -19,6 +19,9 @@ const (
 	hitFocus
 	// hitMeeting joins activeMeetings()[row] (the "Reuniones" section).
 	hitMeeting
+	// hitPending focuses pendingRows()[row] (the "Pendientes" section);
+	// a click on the already-focused row opens its conversation.
+	hitPending
 )
 
 // inboxHit is one physical line's click target.

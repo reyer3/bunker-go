@@ -46,4 +46,5 @@ var (
 	_ ConversationsClient = (*rpc.Client)(nil)
 	_ CallClient          = (*rpc.Client)(nil)
 	_ MeetingsClient      = (*rpc.Client)(nil)
+	_ PendingClient       = (*rpc.Client)(nil)
 )

@@ -266,7 +266,14 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m.switchTab(hit.tab), nil
 		case hitMeeting:
 			return m.joinMeeting(hit.row)
+		case hitPending:
+			if m.pendingFocused && hit.row == m.pendingSel {
+				return m.openPendingRow(hit.row)
+			}
+			m.pendingFocused, m.pendingSel = true, hit.row
+			return m, nil
 		case hitRow:
+			m.pendingFocused = false
 			// A Mail sender row toggles on a single click, whether or not
 			// it was already selected — unlike a thread row, which keeps
 			// the "first click selects, a click on the already-selected
