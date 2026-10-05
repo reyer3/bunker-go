@@ -167,67 +167,66 @@ func meetingTitle(u core.UpcomingMeeting) string {
 
 var spanishWeekdays = [...]string{"dom", "lun", "mar", "mié", "jue", "vie", "sáb"}
 
-// meetingWhen is the relative label after a row's title: "ahora", "en 25
-// min", "en 1 h 30 min", then the day for later ones ("hoy", "mañana",
-// "jue 8", "12 oct"). A link meeting has no time: "enlace".
-func meetingWhen(u core.UpcomingMeeting, now time.Time) string {
-	if u.Link {
-		return "enlace"
-	}
-	if u.InProgress(now) {
-		return "ahora"
-	}
-	start := u.Start.In(now.Location())
-	if d := start.Sub(now); d > 0 && d < 6*time.Hour && sameDay(start, now) && !u.AllDay {
-		switch {
-		case d < time.Minute:
-			return "en 1 min"
-		case d < time.Hour:
-			return fmt.Sprintf("en %d min", int(d.Minutes()))
-		}
-		h, min := int(d.Hours()), int(d.Minutes())%60
-		if min == 0 {
-			return fmt.Sprintf("en %d h", h)
-		}
-		return fmt.Sprintf("en %d h %d min", h, min)
-	}
+// meetingDay is the event's day as a row shows it: "hoy", "mañana",
+// "jue 8" within the week (also for one that started on an earlier day),
+// then "15 oct". start must already be in now's zone.
+func meetingDay(start, now time.Time) string {
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	day := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, now.Location())
 	switch days := int(day.Sub(today).Hours() / 24); {
-	case days <= 0:
+	case days == 0:
 		return "hoy"
 	case days == 1:
 		return "mañana"
-	case days < 7:
+	case days > -7 && days < 7:
 		return fmt.Sprintf("%s %d", spanishWeekdays[start.Weekday()], start.Day())
 	}
 	return fmt.Sprintf("%d %s", start.Day(), spanishMonths[start.Month()-1])
 }
 
-// meetingRowText is one row without styling:
-// "📅 10:30 Revisión semanal · en 25 min". A link meeting has no clock and
-// an all-day event shows none either; the label after the title stays
-// visible when the title has to be cut.
+// meetingOrganizer is who invites, as short as a row needs: the name of
+// "Ana <ana@example.com>", else the address itself.
+func meetingOrganizer(org string) string {
+	org = strings.TrimSpace(safeLine(org))
+	if i := strings.Index(org, " <"); i > 0 {
+		return strings.TrimSpace(org[:i])
+	}
+	return strings.Trim(org, "<>")
+}
+
+// meetingRowText is one row without styling: the event's day and time in
+// the local zone, its title and who invites, "📅 hoy 10:30 Revisión
+// semanal · Ana". An all-day event has no time. A bare link knows only
+// who sent it: "🔗 Equipo · enlace". The title is what gets cut when the
+// row does not fit.
 func meetingRowText(u core.UpcomingMeeting, now time.Time, width int) string {
-	icon := "📅 "
+	var prefix, suffix string
 	if u.Link {
-		icon = "🔗 "
+		prefix, suffix = "🔗 ", " · enlace"
+	} else {
+		start := u.Start.In(now.Location())
+		prefix = "📅 " + meetingDay(start, now) + " "
+		if !u.AllDay {
+			prefix += start.Format("15:04") + " "
+		}
+		if org := meetingOrganizer(u.Organizer); org != "" {
+			suffix = " · " + runewidth.Truncate(org, meetingOrganizerMax, "…")
+		}
 	}
-	clock := ""
-	if !u.Link && !u.AllDay {
-		clock = u.Start.In(now.Location()).Format("15:04") + " "
-	}
-	suffix := " · " + meetingWhen(u, now)
 	title := meetingTitle(u)
 	if width > 0 {
-		budget := width - runewidth.StringWidth(icon+clock+suffix) - 1
+		budget := width - runewidth.StringWidth(prefix+suffix) - 1
 		if budget < 1 {
 			budget = 1
 		}
 		title = runewidth.Truncate(title, budget, "…")
 	}
-	return truncatePlain(icon+clock+title+suffix, max(width-1, 0))
+	return truncatePlain(prefix+title+suffix, max(width-1, 0))
 }
+
+// meetingOrganizerMax caps the organizer so a long name never leaves the
+// title without room.
+const meetingOrganizerMax = 20
 
 // meetingSection renders the header and up to avail-1 rows (avail <= 0
 // means none; a row beyond the cap becomes a "+N más" notice). Every
