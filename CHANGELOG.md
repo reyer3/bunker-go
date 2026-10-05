@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.19.0](https://github.com/reyer3/bunker-go/compare/v0.18.0...v0.19.0) (2026-10-05)
+
+
+### Features
+
+* **tui:** meeting rows show day, time, title and organizer ([#145](https://github.com/reyer3/bunker-go/issues/145)) ([d062649](https://github.com/reyer3/bunker-go/commit/d062649e7e51c43006a7d960cfd97142dd3355df))
+* **tui:** select chat messages by keyboard and open their links ([#149](https://github.com/reyer3/bunker-go/issues/149)) ([8c60c20](https://github.com/reyer3/bunker-go/commit/8c60c20f701cb091f6d378958fa47f4921e06392))
+* **whatsapp:** forward chat messages with the native label ([#148](https://github.com/reyer3/bunker-go/issues/148)) ([fcae373](https://github.com/reyer3/bunker-go/commit/fcae373aabe6e94c4acfaf508752e6d92f5ee88d))
+
+
+### Bug Fixes
+
+* **tui:** help per view, attach without Ctrl+A, quit with Ctrl+C ([#144](https://github.com/reyer3/bunker-go/issues/144)) ([adeaeab](https://github.com/reyer3/bunker-go/commit/adeaeab259cbd87ca4df0c1a0a8c2d65edde8955))
+* **whatsapp:** chats keep their names after sending from bunker ([#146](https://github.com/reyer3/bunker-go/issues/146)) ([7cc0358](https://github.com/reyer3/bunker-go/commit/7cc035852188449ba63bac9cd7c53b0cdf63d28e))
+* **whatsapp:** keep the media key of media we send ([#143](https://github.com/reyer3/bunker-go/issues/143)) ([71604d9](https://github.com/reyer3/bunker-go/commit/71604d9b4f20791220a869205cd846fdaa16a753))
+
 ## [0.18.0](https://github.com/reyer3/bunker-go/compare/v0.17.0...v0.18.0) (2026-10-03)
 
 
