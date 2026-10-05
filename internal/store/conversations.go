@@ -105,7 +105,7 @@ func (s *Store) Conversations(ctx context.Context, filter core.ConversationFilte
 			return nil, fmt.Errorf("store: conversations last item of %s/%s/%s: %w", g.channel, g.account, g.thread, err)
 		}
 		if last.ThreadName == "" && g.single == "" {
-			name, err := s.lastThreadName(ctx, g.channel, g.account, g.thread)
+			name, err := s.lastThreadName(ctx, g.channel, g.account, g.thread, false)
 			if err != nil {
 				return nil, err
 			}
@@ -123,11 +123,21 @@ func (s *Store) Conversations(ctx context.Context, filter core.ConversationFilte
 // falling back here keeps the contact's name instead of the bare number.
 // idx_items_thread walks the thread newest-first, so the scan stops at
 // the first named item (no id tie-break: it would add a temp sort).
-func (s *Store) lastThreadName(ctx context.Context, channel, account, thread string) (string, error) {
-	var name string
-	err := s.db.QueryRowContext(ctx, `
+//
+// usable also skips the names core.UsableThreadName rejects (the thread
+// id, or just a phone number), for callers that would rather keep what
+// they have than take another bare number.
+func (s *Store) lastThreadName(ctx context.Context, channel, account, thread string, usable bool) (string, error) {
+	query := `
 		SELECT thread_name FROM items
-		WHERE channel = ? AND account = ? AND thread = ? AND thread_name <> ''
+		WHERE channel = ? AND account = ? AND thread = ? AND thread_name <> ''`
+	if usable {
+		// Mirrors core.UsableThreadName: not the thread id, and some
+		// character other than a digit, '+', space or '-'.
+		query += ` AND thread_name <> thread AND thread_name GLOB '*[^0-9+ -]*'`
+	}
+	var name string
+	err := s.db.QueryRowContext(ctx, query+`
 		ORDER BY timestamp DESC LIMIT 1`, channel, account, thread).Scan(&name)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil

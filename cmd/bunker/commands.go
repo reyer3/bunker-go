@@ -145,6 +145,12 @@ Commands:
                                                              date (--all adds
                                                              the done ones)
   todo done|reopen <id> [--json]                           complete or reopen
+  awaiting [--days N] [--groups] [--mail] [--json]         chats where I wrote
+                                                             last and nobody
+                                                             answered in N days
+                                                             (default 3; groups
+                                                             left out, mail only
+                                                             when it asked)
   counts [--json]                                          unread counts
   health [--json]                                          per-adapter connection
                                                              state, since when,
@@ -258,6 +264,8 @@ func runWithBackend(ctx context.Context, backend Backend, args []string, stdin i
 		return cmdMeetings(ctx, backend, args[1:], stdout, stderr)
 	case "todo":
 		return cmdTodo(ctx, backend, args[1:], stdout, stderr)
+	case "awaiting":
+		return cmdAwaiting(ctx, backend, args[1:], stdout, stderr)
 	case "unread":
 		return cmdUnread(ctx, backend, args[1:], stdout, stderr)
 	default:

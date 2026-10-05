@@ -36,6 +36,8 @@ todo_add, todo_list and todo_done keep the user's to-do list: todo_add records a
 (direction mine) or something someone owes the user (theirs), with the item_id of the message it came from;
 todo_list shows what is pending; todo_done completes one. They only write bunker's local store, so like
 download they need no confirm or --allow-send, and adding the same to-do again never duplicates it.
+awaiting_reply lists the conversations where the user wrote last and nobody answered for days (default 3,
+groups left out): who owes the user a reply. bunker derives it from the store; it is not a to-do.
 search finds stored items with a query language: from:, to:, subject:, is:unread|read, has:attachment,
 in:<folder>, channel:, account:, label:, before:/after: (YYYY-MM-DD or 7d/2w/3m), "phrases", -negation
 and free text; list and search page with cursor/next_cursor.
@@ -445,6 +447,7 @@ func newMCPServer(dial mcpDialer, allowSend bool) *mcp.Server {
 	addMCPAttachmentTool(server, dial)
 	addMCPDownloadTool(server, dial)
 	addMCPTodoTools(server, dial)
+	addMCPAwaitingTool(server, dial)
 
 	return server
 }

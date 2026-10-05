@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -131,5 +133,75 @@ func TestMCPTodoErrors(t *testing.T) {
 				t.Errorf("%s(%v) = %v %q, want an error about %q", tc.tool, tc.args, res.IsError, toolText(res), tc.want)
 			}
 		})
+	}
+}
+
+func TestMCPAwaitingReply(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "bunker.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	ctx := context.Background()
+	old := time.Now().Add(-5 * 24 * time.Hour)
+	for _, it := range []core.Item{
+		{ID: "whatsapp:personal:A1", Channel: core.ChannelWhatsApp, Account: "personal", Thread: "demo-ana",
+			ThreadName: "Demo Ana", FromMe: true, Body: "¿Me confirmas la hora?", Timestamp: old},
+		{ID: "whatsapp:personal:G1", Channel: core.ChannelWhatsApp, Account: "personal", Thread: "120363000000000001@g.us",
+			ThreadName: "Demo Equipo", FromMe: true, Body: "¿Alguien?", Timestamp: old},
+		{ID: "mail:cl:M1", Channel: core.ChannelMail, Account: "cl", Thread: "t-m1", FromMe: true,
+			Subject: "Factura", Body: "Te envié la factura.", To: []core.Address{{ID: "ventas@example.com"}},
+			Timestamp: old.Add(-time.Hour)},
+	} {
+		if err := st.Upsert(ctx, it); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := mcpSession(t, core.NewService(st, core.NewRegistry()), false)
+
+	tools, err := s.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tool *mcp.Tool
+	for _, tl := range tools.Tools {
+		if tl.Name == "awaiting_reply" {
+			tool = tl
+		}
+	}
+	if tool == nil || !tool.Annotations.ReadOnlyHint {
+		t.Fatalf("awaiting_reply = %+v, want a read-only tool", tool)
+	}
+	if !strings.Contains(mcpInstructions, "awaiting_reply") {
+		t.Error("the server instructions must mention awaiting_reply")
+	}
+
+	res, out := callTool(t, s, "awaiting_reply", map[string]any{})
+	if res.IsError {
+		t.Fatalf("awaiting_reply: %s", toolText(res))
+	}
+	rows, _ := out["awaiting"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("awaiting = %v, want only the one-to-one chat", out)
+	}
+	row := rows[0].(map[string]any)
+	if row["item_id"] != "whatsapp:personal:A1" || row["person"] != "Demo Ana" || row["days"] != float64(5) || row["sent"] == "" {
+		t.Errorf("row = %v", row)
+	}
+	_, out = callTool(t, s, "awaiting_reply", map[string]any{"groups": true, "days": 7})
+	if rows, _ := out["awaiting"].([]any); len(rows) != 0 {
+		t.Errorf("days 7 = %v, want none", out)
+	}
+	_, out = callTool(t, s, "awaiting_reply", map[string]any{"groups": true})
+	if rows, _ := out["awaiting"].([]any); len(rows) != 2 {
+		t.Errorf("groups = %v, want both", out)
+	}
+	_, out = callTool(t, s, "awaiting_reply", map[string]any{"mail": true})
+	rows, _ = out["awaiting"].([]any)
+	if len(rows) != 2 || rows[1].(map[string]any)["item_id"] != "mail:cl:M1" {
+		t.Errorf("mail = %v, want the chat and the informative mail", out)
+	}
+	if schema, _ := json.Marshal(tool.InputSchema); !strings.Contains(string(schema), `"mail"`) {
+		t.Errorf("schema = %s, want a mail property", schema)
 	}
 }

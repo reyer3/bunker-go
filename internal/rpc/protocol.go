@@ -71,6 +71,7 @@ const (
 	MethodTodoAdd           = "todo_add"
 	MethodTodos             = "todos"
 	MethodTodoSet           = "todo_set"
+	MethodAwaiting          = "awaiting_reply"
 	MethodMarkUnread        = "mark_unread"
 	MethodEdit              = "edit"
 	MethodDelete            = "delete"
@@ -251,6 +252,13 @@ type todosParams struct {
 }
 type todosResult struct {
 	Todos []core.Todo `json:"todos"`
+}
+
+type awaitingParams struct {
+	Filter core.AwaitingFilter `json:"filter"`
+}
+type awaitingResult struct {
+	Awaiting []core.Awaiting `json:"awaiting"`
 }
 
 // todoSetParams completes (status done) or reopens (status open) a to-do.

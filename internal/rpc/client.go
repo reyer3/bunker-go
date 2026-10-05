@@ -338,6 +338,16 @@ func (c *Client) setTodo(ctx context.Context, id string, status core.TodoStatus)
 	return res.Todo, nil
 }
 
+// AwaitingReply lists the conversations where the user wrote last and
+// nobody has answered for days (see core.Service.AwaitingReply).
+func (c *Client) AwaitingReply(ctx context.Context, filter core.AwaitingFilter) ([]core.Awaiting, error) {
+	var res awaitingResult
+	if err := c.call(ctx, MethodAwaiting, awaitingParams{Filter: filter}, &res); err != nil {
+		return nil, err
+	}
+	return res.Awaiting, nil
+}
+
 // PostStatus publishes a status/story on channel/account.
 func (c *Client) PostStatus(ctx context.Context, channel core.Channel, account string, status core.Status, dryRun bool) (core.Plan, core.Receipt, error) {
 	var res planReceiptResult

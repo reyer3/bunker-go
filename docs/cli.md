@@ -10,7 +10,7 @@ compact plain text for a human at a terminal.
 
 | Command | `--json` |
 |---|---|
-| `list`, `find`, `read`, `thread`, `search`, `counts`, `health`, `contacts`, `chats`, `meetings`, `todo list`, `calls`, `avatar`, `download` | yes: data |
+| `list`, `find`, `read`, `thread`, `search`, `counts`, `health`, `contacts`, `chats`, `meetings`, `todo list`, `awaiting`, `calls`, `avatar`, `download` | yes: data |
 | `reply`, `send`, `edit`, `delete`, `react`, `organize`, `status post`, `call`, `call answer\|reject\|hangup`, `backfill` | yes: `{"dryRun", "plan", ...}` with the [`core.Plan`/`core.Receipt` shape](#coreplan-and-corereceipt-json-shape) |
 | `unread`, `read-thread`, `meetings join`, `todo add`, `todo done\|reopen` | yes: the result of the change |
 | `version`, `update`, `render`, `herdr toggle` | yes |
@@ -1524,6 +1524,50 @@ Marks a to-do done, or open again. Completing a done one changes nothing
 (it keeps its first completion time); an unknown id is an error. Prints
 the to-do; `--json` returns `{"todo": {...}}`.
 
+## `bunker awaiting [--days N] [--groups] [--mail] [--json]`
+
+Lists the conversations awaiting a reply: those whose newest message is
+mine (and not deleted) and was sent at least `--days` days ago (default
+3), newest first. Nothing is stored: bunker derives the list from the
+messages on every call, so an answer makes a conversation drop off by
+itself. It is independent of the to-do list.
+
+```
+4 d	2026-10-01 09:30	Demo Ana	te paso el informe cuando lo tenga	whatsapp:personal:3EB0A1
+9 d	2026-09-26 18:02	Proveedor Ejemplo	Cotización	mail:cl:Sent/1700000000.12
+```
+
+Columns: whole days waiting, when my last message was sent, who I am
+waiting on (the chat's name, or a mail's first recipient), the start of
+my message (a mail's subject) and its item id. `--json` returns
+`{"awaiting": [...]}`, each:
+
+```json
+{"item_id": "whatsapp:personal:3EB0A1", "channel": "whatsapp", "account": "personal",
+ "thread": "51900000000@s.whatsapp.net", "person": "Demo Ana",
+ "preview": "te paso el informe cuando lo tenga", "sent": "2026-10-01T09:30:00-05:00", "days": 4}
+```
+
+What counts as a conversation:
+
+- Only messages with a thread: a threadless item is no conversation.
+- My own WhatsApp chat ("message yourself") never counts.
+- Groups are left out unless `--groups`: on WhatsApp, chats ending in
+  `@g.us`, broadcast lists and channels; on Matrix, where the store keeps
+  no direct-chat flag, a room where more than one other person has
+  written (a room where nobody else wrote yet is a direct chat nobody
+  answered). Mail threads are never groups.
+- Chats (WhatsApp, Matrix) always count. A mail thread counts only when
+  my last mail asks a question in my own text: a `?` or `¿` outside
+  quoted history (lines starting with `>`, and everything after an
+  attribution such as "El ... escribió:" or "On ... wrote:", an
+  "-----Original Message-----" separator or a "De:"/"From:" header
+  block), the signature and links. Most mail I send informs (an
+  invoice, "te envié el archivo") and expects no answer; `--mail` lists
+  every mail thread.
+- The person is the chat's name; when my last message carries none, or
+  only the bare number, the newest name known for the chat is used.
+
 ## `bunker counts [--json]`
 
 Unread item counts per channel and account.
@@ -2073,6 +2117,7 @@ which answers `daemon_up: false` with a hint to run `bunker daemon`.
 | `todo_add` | record a to-do (`text`, `direction` = `mine` for a promise the user made or `theirs` for something owed to the user, `due` as YYYY-MM-DD or `2d`/`1w`, `item_id` of the source message, `person`), like `bunker todo add`; idempotent; returns `todo` |
 | `todo_list` | the to-dos (`status` = `open` by default, `done` or `all`; `direction`; `limit` ≤ 100, default 50), open first and soonest due first; returns `todos` |
 | `todo_done` | mark a to-do done (`id`), or open again with `reopen`, like `bunker todo done`; returns `todo` |
+| `awaiting_reply` | the conversations where the user wrote last and nobody answered for `days` days (default 3; `groups` to include groups; mail threads only when the user's last mail asks a question, `mail` to include every mail thread; `limit` ≤ 100, default 50), like `bunker awaiting`, newest first; returns `awaiting` with `sent` as RFC 3339 |
 | `thread` | a conversation's newest messages, oldest first |
 | `contacts` | the same matches as `bunker contacts` |
 | `calls` | live voice calls |
