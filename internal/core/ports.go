@@ -178,6 +178,12 @@ type Receipt struct {
 	ID      string    `json:"id"`
 	Channel Channel   `json:"channel"`
 	At      time.Time `json:"at"`
+	// Thread is the chat the adapter actually delivered to, in the form
+	// live ingest keys that conversation on (e.g. a WhatsApp phone-number
+	// JID even when the recipient was typed as bare digits or resolved to
+	// a LID). Empty when the adapter does not know it; the stored sent
+	// item then groups under the recipient as given.
+	Thread string `json:"thread,omitempty"`
 	// Recipients lists this send/reply's outcome for every fan-out
 	// recipient (see MultiRecipientSender and Service.Send/Reply): one
 	// entry per Outgoing.To address when the adapter needed N sequential

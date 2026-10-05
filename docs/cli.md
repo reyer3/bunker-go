@@ -730,6 +730,12 @@ on the first image only.
 `receipt` is the zero value (`{"id":"","channel":"","at":"0001-01-01T00:00:00Z"}`)
 when `dryRun` is `true`.
 
+`receipt.thread`, when present, is the conversation the message actually
+went to, in the form the store keys it on (a WhatsApp phone-number JID
+such as `51999999999@s.whatsapp.net` even when the recipient was typed
+as bare digits, or a Matrix room id); the stored sent item joins that
+conversation.
+
 ## `bunker send <channel> <account> <to> <text|-> [--cc addr]... [--subject s] [--attach path]... [--media path]... [--forward] [--idempotency-key k] [--dry-run] [--json]`
 
 `bunker send <channel> <account> <to> --voice <file.ogg>` sends an Ogg

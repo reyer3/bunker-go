@@ -160,11 +160,7 @@ func (a *Adapter) Send(ctx context.Context, out core.Outgoing) (core.Receipt, er
 	if err != nil {
 		return core.Receipt{}, err
 	}
-	return core.Receipt{
-		ID:      itemID(a.account, jid.String(), string(resp.ID)),
-		Channel: core.ChannelWhatsApp,
-		At:      resp.Timestamp,
-	}, nil
+	return a.sentReceipt(ctx, jid, resp), nil
 }
 
 func ptrString(s string) *string { return &s }

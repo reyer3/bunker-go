@@ -132,11 +132,7 @@ func (a *Adapter) SendMedia(ctx context.Context, out core.Outgoing) (core.Receip
 				return fmt.Errorf("whatsapp: send media: %w", err)
 			}
 			sent = append(sent, msg)
-			receipt = core.Receipt{
-				ID:      itemID(a.account, jid.String(), string(resp.ID)),
-				Channel: core.ChannelWhatsApp,
-				At:      resp.Timestamp,
-			}
+			receipt = a.sentReceipt(ctx, jid, resp)
 			// AudioMessage has no Caption: send the body as its own text
 			// message rather than dropping it.
 			if i == 0 && caption != "" && msg.GetAudioMessage() != nil {

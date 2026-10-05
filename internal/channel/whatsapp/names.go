@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
 
 	"github.com/reyer3/bunker-go/internal/core"
@@ -59,23 +60,47 @@ type NameResolver interface {
 // per person, so a device lookup would always miss and fall back to the
 // number.
 func (a *Adapter) resolveContactName(ctx context.Context, jid types.JID, pushName string) (types.JID, string) {
-	jid = jid.ToNonAD()
-	resolved := jid
+	resolved := a.canonicalChat(ctx, jid)
 	if a.names != nil {
-		lookup := jid
-		if jid.Server == types.HiddenUserServer {
-			if pn, err := a.names.ResolvePN(ctx, jid); err == nil && !pn.IsEmpty() {
-				resolved = pn
-				lookup = pn
-			}
-		}
-		if contact, err := a.names.Contact(ctx, lookup); err == nil {
+		if contact, err := a.names.Contact(ctx, resolved); err == nil {
 			if name := firstNonEmpty(contact.FullName, contact.FirstName, contact.PushName, contact.BusinessName); name != "" {
 				return resolved, name
 			}
 		}
 	}
 	return resolved, fallbackName(resolved, pushName)
+}
+
+// canonicalChat returns the JID a chat's thread is keyed on: jid without
+// its device part, and a @lid replaced by its mapped phone-number JID
+// when the store knows the mapping (see resolveContactName for why).
+// Groups and unmapped LIDs come back as they are. Live ingest
+// (enrichItem) and the send receipts both key on it, so a sent message
+// and its later echo or history-sync copy share one item and one thread.
+func (a *Adapter) canonicalChat(ctx context.Context, jid types.JID) types.JID {
+	jid = jid.ToNonAD()
+	if a.names == nil || jid.Server != types.HiddenUserServer {
+		return jid
+	}
+	if pn, err := a.names.ResolvePN(ctx, jid); err == nil && !pn.IsEmpty() {
+		return pn
+	}
+	return jid
+}
+
+// sentReceipt is the Receipt for a message sent to jid: keyed on the
+// canonical chat, exactly as ingest would key the same message (enrichItem
+// rewrites a mapped LID chat's Thread and ID to the PN), and naming that
+// chat in Receipt.Thread so the stored sent item joins the person's
+// conversation even when the recipient was typed as bare digits.
+func (a *Adapter) sentReceipt(ctx context.Context, jid types.JID, resp whatsmeow.SendResponse) core.Receipt {
+	chat := a.canonicalChat(ctx, jid).String()
+	return core.Receipt{
+		ID:      itemID(a.account, chat, string(resp.ID)),
+		Channel: core.ChannelWhatsApp,
+		At:      resp.Timestamp,
+		Thread:  chat,
+	}
 }
 
 // groupName resolves jid's group name via the configured NameResolver,

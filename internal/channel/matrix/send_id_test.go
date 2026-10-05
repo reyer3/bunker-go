@@ -213,3 +213,18 @@ func TestSendEchoInEncryptedRoomIsTheSameItem(t *testing.T) {
 		t.Errorf("React after encrypted echo: %v", err)
 	}
 }
+
+// The receipt names the resolved room, the Thread ingest keys the echo
+// on, so the stored sent item joins that room's conversation whatever
+// form the recipient was given in.
+func TestSendReceiptNamesResolvedRoom(t *testing.T) {
+	srv, _ := newFakeHomeserver(t, nil)
+	a := newTestAdapter(t, srv, nil)
+	receipt, err := a.Send(context.Background(), core.Outgoing{To: []string{relRoom.String()}, Body: "hola"})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if receipt.Thread != relRoom.String() {
+		t.Fatalf("receipt.Thread = %q, want the room id %q", receipt.Thread, relRoom)
+	}
+}

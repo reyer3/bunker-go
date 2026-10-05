@@ -36,9 +36,18 @@ import (
 // passes the replied item's). Otherwise it falls back to the newest name
 // already stored for the thread: the TUI titles a conversation from its
 // newest item, so an unnamed sent item would show the bare number.
+//
+// receipt.Thread, when the adapter reports it, overrides thread: it is
+// the chat the message actually went to, in the form live ingest keys
+// that conversation on. A WhatsApp send to bare digits would otherwise
+// group under the digits as typed, a separate nameless conversation
+// beside the person's real chat.
 func (s *Service) storeSentItem(ctx context.Context, channel Channel, account, thread, threadName, to, subject, body string, attachments []AttachmentInfo, receipt Receipt) {
 	if channel == ChannelMail || receipt.ID == "" {
 		return
+	}
+	if receipt.Thread != "" {
+		thread = receipt.Thread
 	}
 	if _, err := s.store.Get(ctx, receipt.ID); err == nil {
 		return
@@ -109,7 +118,8 @@ func attachmentsFromInfo(infos []AttachmentInfo) []Attachment {
 	return out
 }
 
-// outgoingThread resolves the Thread key a stored sent item groups under:
+// outgoingThread resolves the Thread key a stored sent item groups under
+// when the adapter's Receipt names none (see storeSentItem):
 // explicit when Outgoing.Thread was already set (Reply always sets it
 // from the original item), else fallback (the recipient address) — the
 // same convention live ingest already uses for a fresh WhatsApp/Matrix

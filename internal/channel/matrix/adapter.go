@@ -617,9 +617,11 @@ func (a *Adapter) Send(ctx context.Context, out core.Outgoing) (core.Receipt, er
 // echo gets from toItem, so the optimistic item core.Service stores under
 // Receipt.ID and the echo are one row, and the returned id can be edited,
 // deleted or reacted to at once (issue #114). roomID must be the resolved
-// room, never an alias: the echo always carries the room id.
+// room, never an alias: the echo always carries the room id. Thread names
+// that room too, so the stored sent item groups under the room's
+// conversation even when the recipient was given in another form.
 func (a *Adapter) sentReceipt(roomID id.RoomID, eventID id.EventID) core.Receipt {
-	return core.Receipt{ID: itemID(a.account, roomID, eventID), Channel: core.ChannelMatrix, At: time.Now()}
+	return core.Receipt{ID: itemID(a.account, roomID, eventID), Channel: core.ChannelMatrix, At: time.Now(), Thread: roomID.String()}
 }
 
 func (a *Adapter) resolveRoom(ctx context.Context, out core.Outgoing) (id.RoomID, error) {
