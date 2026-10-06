@@ -124,26 +124,13 @@ type chatReplyPreviewMsg struct {
 	err   error
 }
 
+// chatReplySentMsg's token is the seq of the queue entry it delivered
+// (chat_queue.go), not chatReplyToken: previews keep bumping that one
+// while earlier sends are still in flight.
 type chatReplySentMsg struct {
 	token   uint64
 	receipt core.Receipt
 	err     error
-}
-
-// chatOptimisticMsg is the K10 optimistic own bubble's state: body/at are
-// captured at confirm time (before the real send even starts) so the
-// bubble renders identically whether the send is still in flight, just
-// failed, or just succeeded and is waiting for the reload to confirm it.
-// id stays empty until the real send returns a receipt; failed is set
-// only if the send itself errors (never on a merely-slow send).
-type chatOptimisticMsg struct {
-	id     string
-	body   string
-	at     time.Time
-	failed bool
-	// attachments names the files riding on this send (issue #5), so
-	// the optimistic bubble lists them like the stored item will.
-	attachments []core.Attachment
 }
 
 // attachmentNames describes local attachment paths the way a stored
@@ -165,51 +152,93 @@ func attachmentNames(paths []string) []core.Attachment {
 // item (K7b) appears in place of the optimistic bubble, matched by
 // receiptID.
 type chatSendReloadMsg struct {
-	token     uint64
+	token uint64
+	// queued marks the reload after a queued send (chat_queue.go): its
+	// token is the chat's own chatToken, since chatReplyToken keeps
+	// moving with every preview.
+	queued    bool
 	receiptID string
 	items     []core.Item
 	err       error
 }
 
-// chatSendCmd previews (dryRun) or sends the chat draft: a reply to the
-// conversation's newest item, or, for a chat opened from the contact
-// picker (no item to reply to) and for a forward, a fresh send to its
-// thread and address.
+// chatSendRequest is everything one chat send needs, captured from the
+// chat view when the draft is previewed or confirmed. A confirmed send
+// waits in the send queue (chat_queue.go) while the composer moves on to
+// the next message, so it must never read the composer, the attachments
+// or the forward state again once captured.
+type chatSendRequest struct {
+	channel         core.Channel
+	account, thread string
+	// draftID is the item a reply quotes; newTo the address of a chat
+	// opened from the contact picker (no item to reply to).
+	draftID, newTo string
+	forward        bool
+	body           string
+	attachments    []string
+	voice          bool
+}
+
+// chatSendRequest captures the open chat's current send state for body.
+func (m Model) chatSendRequest(body string) chatSendRequest {
+	return chatSendRequest{
+		channel:     m.chatChannel,
+		account:     m.chatAccount,
+		thread:      m.chatThread,
+		draftID:     m.chatDraftID,
+		newTo:       m.chatNewTo,
+		forward:     m.chatForward != nil,
+		body:        body,
+		attachments: append([]string(nil), m.chatAttachments...),
+		voice:       m.chatVoice,
+	}
+}
+
+// chatSendCmd previews (dryRun) or sends the chat draft right now, with
+// the preview token (chatReplyToken).
 func (m Model) chatSendCmd(body string, dryRun bool) tea.Cmd {
-	if m.chatForward != nil {
+	return m.chatSendRequest(body).cmd(m.client, m.chatReplyToken, dryRun)
+}
+
+// cmd previews (dryRun) or sends r: a reply to the conversation's newest
+// item, or, for a chat opened from the contact picker (no item to reply
+// to) and for a forward, a fresh send to its thread and address. token
+// is the preview token for a dry-run, and the queue entry's seq for a
+// real send (chatReplySentMsg.token).
+func (r chatSendRequest) cmd(client Client, token uint64, dryRun bool) tea.Cmd {
+	if r.forward {
 		// A forward is a fresh send to the chat, never a reply quoting
 		// its newest message.
-		to := m.chatNewTo
+		to := r.newTo
 		if to == "" {
-			to = m.chatThread
+			to = r.thread
 		}
-		return chatOutgoingCmd(m.client, core.Outgoing{
-			Channel:     m.chatChannel,
-			Account:     m.chatAccount,
+		return chatOutgoingCmd(client, core.Outgoing{
+			Channel:     r.channel,
+			Account:     r.account,
 			To:          []string{to},
-			Thread:      m.chatThread,
-			Body:        body,
-			Attachments: append([]string(nil), m.chatAttachments...),
-			Voice:       m.chatVoice,
+			Thread:      r.thread,
+			Body:        r.body,
+			Attachments: r.attachments,
+			Voice:       r.voice,
 			Forward:     true,
-		}, m.chatReplyToken, dryRun)
+		}, token, dryRun)
 	}
-	if m.chatDraftID != "" || m.chatNewTo == "" {
+	if r.draftID != "" || r.newTo == "" {
 		if dryRun {
-			return previewChatReply(m.client, m.chatDraftID, body, m.chatAttachments, m.chatReplyToken, m.chatVoice)
+			return previewChatReply(client, r.draftID, r.body, r.attachments, token, r.voice)
 		}
-		return sendChatReply(m.client, m.chatDraftID, body, m.chatAttachments, m.chatReplyToken, m.chatVoice)
+		return sendChatReply(client, r.draftID, r.body, r.attachments, token, r.voice)
 	}
-	out := core.Outgoing{
-		Channel:     m.chatChannel,
-		Account:     m.chatAccount,
-		To:          []string{m.chatNewTo},
-		Thread:      m.chatThread,
-		Body:        body,
-		Attachments: append([]string(nil), m.chatAttachments...),
-		Voice:       m.chatVoice,
-	}
-	return chatOutgoingCmd(m.client, out, m.chatReplyToken, dryRun)
+	return chatOutgoingCmd(client, core.Outgoing{
+		Channel:     r.channel,
+		Account:     r.account,
+		To:          []string{r.newTo},
+		Thread:      r.thread,
+		Body:        r.body,
+		Attachments: r.attachments,
+		Voice:       r.voice,
+	}, token, dryRun)
 }
 
 // chatOutgoingCmd previews (dryRun) or sends out as a fresh message from

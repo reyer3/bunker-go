@@ -3,7 +3,6 @@ package tui
 import (
 	"errors"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/reyer3/bunker-go/internal/kittygfx"
@@ -16,8 +15,13 @@ import (
 // unlike the mail composer), Alt+Enter (insert a newline instead), and Up
 // at the top of the draft (scroll-up pagination, K5's "Scrolling up
 // paginates through thread(before=oldest)").
+//
+// Sends already confirmed never block the composer: they wait in the send
+// queue (chat_queue.go) while the user keeps typing and sending. Only the
+// short dry-run preview still ignores keys, so the draft cannot change
+// between its preview and its send.
 func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.chatSending || m.chatPreviewPending {
+	if m.chatPreviewPending {
 		return m, nil
 	}
 	if m.voiceRec != nil {
@@ -261,38 +265,18 @@ func (m Model) scrollChatUp(amount int) (tea.Model, tea.Cmd) {
 
 // confirmChatSendNow sends the previewed chat draft for real: the second
 // Enter of the explicit flow, or the preview's own reply when one Enter is
-// enough (chatSendsOnOneEnter).
+// enough (chatSendsOnOneEnter). The draft joins the send queue: its
+// optimistic bubble shows and the composer clears right away, before the
+// real send even starts — the draft is restored only if its send fails
+// (failChatSend).
 func (m Model) confirmChatSendNow() (Model, tea.Cmd) {
-	draft := m.composer.Value()
-	// K10: clear the confirm state as the send starts (it was
-	// previously left true for the whole in-flight send, which
-	// left chatTailLines' "Enviando..." case dead code, since its
-	// switch checks chatConfirm first) so the tail line actually
-	// shows the send-in-progress state.
+	// K10: clear the confirm state as the send starts, so the tail line
+	// shows the send in progress instead of the confirm.
 	m.chatConfirm = false
 	m.chatAutoSend = false
-	m.chatSending = true
-	m.chatReplyToken++
-	// Show the optimistic own bubble and clear the composer right
-	// away, before the real send even returns — the draft is
-	// restored only if chatReplySentMsg comes back with an error
-	// (see its handler above).
-	m.chatOptimistic = &chatOptimisticMsg{body: draft, at: m.clock()}
-	m.composer.Reset()
-	m = m.resizeChatComposer()
 	if err := validateAttachments(m.chatAttachments); err != nil {
-		m.chatSending = false
-		m.chatOptimistic = nil
-		m.composer.SetValue(draft)
 		m.chatSendErr = err
-		return m.resizeChatComposer(), nil
+		return m, nil
 	}
-	m.chatOptimistic.attachments = attachmentNames(m.chatAttachments)
-	if m.chatVoice {
-		for i := range m.chatOptimistic.attachments {
-			m.chatOptimistic.attachments[i].Voice = true
-			m.chatOptimistic.attachments[i].Duration = int((m.chatVoiceDur + 500*time.Millisecond) / time.Second)
-		}
-	}
-	return m, m.chatSendCmd(draft, false)
+	return m.enqueueChatSend(m.composer.Value())
 }

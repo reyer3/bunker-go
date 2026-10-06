@@ -304,7 +304,8 @@ func (m Model) chatBodyMeta() (lines []string, meta []chatLineMeta) {
 	}
 	r := m.renderer()
 	// Issue #39: say what an empty body means, instead of a blank pane.
-	if len(m.chatItems) == 0 && m.chatOptimistic == nil && m.chatLoadErr == nil {
+	bubbles := m.chatBubbles()
+	if len(m.chatItems) == 0 && len(bubbles) == 0 && m.chatLoadErr == nil {
 		dim := r.NewStyle().Foreground(lipgloss.Color(m.colors().DimColor()))
 		if m.chatLoading {
 			lines = append(lines, dim.Render("cargando mensajes…"))
@@ -314,24 +315,26 @@ func (m Model) chatBodyMeta() (lines []string, meta []chatLineMeta) {
 		pad()
 		return lines, meta
 	}
-	// K10: the optimistic own bubble, if any, renders as one more item
-	// appended after the loaded conversation — it goes through the exact
-	// same day-pill/showName logic as a real item, so it never doubles up
-	// on a "hoy" pill or breaks a same-sender grouping run. Its own index
-	// (optIdx) is the only thing telling chatBubbleLines to render it dim
-	// with a status line instead of a real "HH:MM" time.
+	// K10: each queued send's optimistic own bubble renders as one more
+	// item appended after the loaded conversation, oldest first — they go
+	// through the exact same day-pill/showName logic as a real item, so
+	// they never double up on a "hoy" pill or break a same-sender
+	// grouping run. Being at or past optFrom is the only thing telling
+	// chatBubbleLines to render one dim with a status line instead of a
+	// real "HH:MM" time.
 	items := m.chatItems
-	optIdx := -1
-	if m.chatOptimistic != nil {
-		synthetic := core.Item{
-			Channel:     m.chatChannel,
-			FromMe:      true,
-			Body:        m.chatOptimistic.body,
-			Timestamp:   m.chatOptimistic.at,
-			Attachments: m.chatOptimistic.attachments,
+	optFrom := len(items)
+	if len(bubbles) > 0 {
+		items = append([]core.Item(nil), items...)
+		for _, b := range bubbles {
+			items = append(items, core.Item{
+				Channel:     m.chatChannel,
+				FromMe:      true,
+				Body:        b.body,
+				Timestamp:   b.at,
+				Attachments: b.attachments,
+			})
 		}
-		items = append(append([]core.Item(nil), items...), synthetic)
-		optIdx = len(items) - 1
 	}
 	var lastDay time.Time
 	now := m.clock()
@@ -342,10 +345,10 @@ func (m Model) chatBodyMeta() (lines []string, meta []chatLineMeta) {
 		}
 		pad()
 		showName := !item.FromMe && (i == 0 || items[i-1].From.Name != item.From.Name || items[i-1].FromMe)
-		dim := i == optIdx
+		dim := i >= optFrom
 		status := ""
 		if dim {
-			status = m.chatOptimisticStatusText()
+			status = chatOptimisticStatusText(bubbles[i-optFrom])
 		}
 		focused := !dim && item.ID != "" && item.ID == m.chatFocus
 		bubble := chatBubbleLinesFocus(r, m.colors(), item, m.width, showName, now, dim, status, m.readyThumb, focused)
@@ -372,22 +375,6 @@ func (m Model) chatBodyMeta() (lines []string, meta []chatLineMeta) {
 		}
 	}
 	return wrapped, wrappedMeta
-}
-
-// chatOptimisticStatusText is the K10 optimistic bubble's bottom-right
-// status line, replacing the normal "HH:MM" time: "enviando…" while the
-// real send is still in flight or has just succeeded but not yet been
-// confirmed by the reload, "no enviado" once it has failed, matching
-// conversation-view.md's K10 requirements exactly.
-func (m Model) chatOptimisticStatusText() string {
-	opt := m.chatOptimistic
-	if opt == nil {
-		return ""
-	}
-	if opt.failed {
-		return "no enviado"
-	}
-	return "enviando…"
 }
 
 // chatItemsContainID reports whether items contains one with the given
@@ -455,8 +442,8 @@ func (m Model) chatTailLines() []string {
 			verb, key = "Reenviar", "reenviar"
 		}
 		lines = append(lines, fmt.Sprintf("¿%s %sa %s? ↵ %s · Esc cancelar", verb, what, safeLine(strings.Join(m.chatPlan.Recipients, ", ")), key))
-	case m.chatSending:
-		lines = append(lines, "Enviando…")
+	case m.chatPendingSends(m.chatConvKey()) > 0:
+		lines = append(lines, m.chatSendingLine())
 	case m.chatSendErr != nil:
 		lines = append(lines, "Error: "+humanError(m.chatSendErr))
 	case hasAction:
@@ -696,4 +683,13 @@ func alignBubbleLine(text string, contentWidth, totalWidth int, right bool) stri
 		return text
 	}
 	return strings.Repeat(" ", pad) + text
+}
+
+// chatSendingLine is the tail line while the open chat's sends are being
+// delivered, saying how many wait behind the one in flight.
+func (m Model) chatSendingLine() string {
+	if n := m.chatPendingSends(m.chatConvKey()); n > 1 {
+		return fmt.Sprintf("Enviando… (%d más en cola)", n-1)
+	}
+	return "Enviando…"
 }

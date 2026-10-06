@@ -97,7 +97,7 @@ func (m Model) composerCursorAtEnd() bool {
 // emojiMatches returns the completion list for the current chat draft,
 // or nil when no completion is active.
 func (m Model) emojiMatches() []emojiEntry {
-	if !m.chatMode || m.chatConfirm || m.chatSending || m.chatPreviewPending {
+	if !m.chatMode || m.chatConfirm || m.chatPreviewPending {
 		return nil
 	}
 	value := m.composer.Value()
