@@ -184,6 +184,27 @@ func TestLoadReadsRenderGlyphOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadReadsRenderColorOverrides(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	body := "[render.glyphs]\nmatrix = \"x\"\n\n[render.colors]\nmail = \"#7aa2f7\"\ndim = \"#565f89\"\n\n[[account]]\nchannel = \"mail\"\nname = \"cl\"\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.Render.Colors["mail"]; got != "#7aa2f7" {
+		t.Errorf("Render.Colors[mail] = %q, want #7aa2f7", got)
+	}
+	if got := cfg.Render.Colors["dim"]; got != "#565f89" {
+		t.Errorf("Render.Colors[dim] = %q, want #565f89", got)
+	}
+	if got := cfg.Render.Glyphs["matrix"]; got != "x" {
+		t.Errorf("Render.Glyphs[matrix] = %q, want x (colors must not disturb glyphs)", got)
+	}
+}
+
 func TestLoadReadsAppCommand(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(path, []byte("[app]\ncommand = [\"kitty\", \"--class\", \"dev.bunker.app\", \"bunker\"]\n"), 0o600); err != nil {

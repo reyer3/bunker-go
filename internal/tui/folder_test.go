@@ -13,6 +13,7 @@ import (
 
 	"github.com/reyer3/bunker-go/internal/config"
 	"github.com/reyer3/bunker-go/internal/core"
+	"github.com/reyer3/bunker-go/internal/style"
 )
 
 func TestFolderDisplayName(t *testing.T) {
@@ -91,7 +92,7 @@ func TestRowFolderTagKeepsWidth(t *testing.T) {
 		Subject: "Un asunto bastante largo para probar el ancho", Unread: true, Timestamp: queryAt,
 		Meta: map[string]string{"folder": "INBOX.Archive"},
 	}}}
-	styles := newRowStyles(lipgloss.NewRenderer(io.Discard))
+	styles := newRowStyles(lipgloss.NewRenderer(io.Discard), style.DefaultPalette())
 	for _, width := range []int{30, 40, 60, 100} {
 		line1, _ := buildRow(group, false, width, map[core.Channel]string{core.ChannelMail: "M"}, nil, styles, queryAt, "Archive")
 		if w := lipgloss.Width(line1); w > width {

@@ -44,19 +44,20 @@ var senderPalette = []string{"#e06c75", "#61afef", "#e5c07b", "#c678dd", "#56b6c
 // senderColorHex picks a stable color for name via a simple string hash:
 // the same sender always renders in the same color, without any shared
 // state to track "which sender got which color first".
-func senderColorHex(name string) string {
+func senderColorHex(name, dim string) string {
 	if name == "" {
-		return style.ColorDim
+		return dim
 	}
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(name))
 	return senderPalette[h.Sum32()%uint32(len(senderPalette))]
 }
 
-// ownBubbleBg picks the own-message bubble background for channel.
-func ownBubbleBg(channel core.Channel) string {
+// ownBubbleBg picks the own-message bubble background for channel: the
+// Matrix accent from pal for Matrix, the WhatsApp bubble green otherwise.
+func ownBubbleBg(channel core.Channel, pal style.Palette) string {
 	if channel == core.ChannelMatrix {
-		return style.ColorMatrix
+		return pal.Channel(core.ChannelMatrix)
 	}
 	return bubbleOwnWhatsAppBg
 }
@@ -244,7 +245,7 @@ func (m Model) chatHeaderLines() []string {
 		}
 		name = runewidth.Truncate(name, budget, "…")
 	}
-	glyphStyle := r.NewStyle().Foreground(lipgloss.Color(style.ChannelColors[m.chatChannel]))
+	glyphStyle := r.NewStyle().Foreground(lipgloss.Color(m.colors().Channel(m.chatChannel)))
 	nameStyle := r.NewStyle().Bold(true)
 	lines := []string{glyphStyle.Render(glyph) + " " + nameStyle.Render(name)}
 
@@ -252,9 +253,9 @@ func (m Model) chatHeaderLines() []string {
 		if m.width > 0 {
 			presence = runewidth.Truncate(presence, m.width, "…")
 		}
-		lines = append(lines, r.NewStyle().Foreground(lipgloss.Color(style.ColorDim)).Render(presence))
+		lines = append(lines, r.NewStyle().Foreground(lipgloss.Color(m.colors().DimColor())).Render(presence))
 	}
-	lines = append(lines, r.NewStyle().Foreground(lipgloss.Color(style.ColorDim)).Render(strings.Repeat("─", widthOrDefault(m.width))))
+	lines = append(lines, r.NewStyle().Foreground(lipgloss.Color(m.colors().DimColor())).Render(strings.Repeat("─", widthOrDefault(m.width))))
 	return wrapLines(lines, m.width)
 }
 
@@ -304,7 +305,7 @@ func (m Model) chatBodyMeta() (lines []string, meta []chatLineMeta) {
 	r := m.renderer()
 	// Issue #39: say what an empty body means, instead of a blank pane.
 	if len(m.chatItems) == 0 && m.chatOptimistic == nil && m.chatLoadErr == nil {
-		dim := r.NewStyle().Foreground(lipgloss.Color(style.ColorDim))
+		dim := r.NewStyle().Foreground(lipgloss.Color(m.colors().DimColor()))
 		if m.chatLoading {
 			lines = append(lines, dim.Render("cargando mensajes…"))
 		} else {
@@ -347,7 +348,7 @@ func (m Model) chatBodyMeta() (lines []string, meta []chatLineMeta) {
 			status = m.chatOptimisticStatusText()
 		}
 		focused := !dim && item.ID != "" && item.ID == m.chatFocus
-		bubble := chatBubbleLinesFocus(r, item, m.width, showName, now, dim, status, m.readyThumb, focused)
+		bubble := chatBubbleLinesFocus(r, m.colors(), item, m.width, showName, now, dim, status, m.readyThumb, focused)
 		lines = append(lines, bubble...)
 		voice := voiceLineTags(item, bubble)
 		file := fileLineTags(item, bubble, m.width)
@@ -475,14 +476,14 @@ func (m Model) chatTailLines() []string {
 // one-space horizontal pad (K7), so the draft/placeholder text never
 // touches the border itself.
 func (m Model) composerBox() string {
-	border := m.renderer().NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(style.ColorDim)).Padding(0, 1)
+	border := m.renderer().NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(m.colors().DimColor())).Padding(0, 1)
 	return border.Render(m.composer.View())
 }
 
 // voiceRecordBox is the recording state in the composer's place: the same
 // rounded box, holding the timer and the keys.
 func (m Model) voiceRecordBox() string {
-	border := m.renderer().NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(style.ColorDim)).Padding(0, 1)
+	border := m.renderer().NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(m.colors().DimColor())).Padding(0, 1)
 	text := m.voiceRecordLine()
 	if w := chatComposerWidth(m.width); w > 0 {
 		text = runewidth.Truncate(text, w, "…")
@@ -551,20 +552,22 @@ func presenceHeaderText(p core.Presence, now time.Time) string {
 // terminal width. dim/status back K10's optimistic own bubble: dim swaps
 // the bubble's colors for the dim optimistic palette, and a non-empty
 // status replaces the trailing "HH:MM" time line with that text (e.g.
-// "enviando…"/"no enviado") instead.
+// "enviando…"/"no enviado") instead. It renders with the default accent
+// palette; the chat view itself calls chatBubbleLinesFocus with the
+// configured one.
 func chatBubbleLines(r *lipgloss.Renderer, item core.Item, width int, showName bool, now time.Time, dim bool, status string, thumb func(key string) (*mediaThumb, bool)) []string {
-	return chatBubbleLinesFocus(r, item, width, showName, now, dim, status, thumb, false)
+	return chatBubbleLinesFocus(r, style.DefaultPalette(), item, width, showName, now, dim, status, thumb, false)
 }
 
 // chatBubbleLinesFocus is chatBubbleLines for a bubble the user selected
 // by clicking it (focused): it gets a lighter background, so it is plain
 // which message Alt+Y copies.
-func chatBubbleLinesFocus(r *lipgloss.Renderer, item core.Item, width int, showName bool, now time.Time, dim bool, status string, thumb func(key string) (*mediaThumb, bool), focused bool) []string {
+func chatBubbleLinesFocus(r *lipgloss.Renderer, pal style.Palette, item core.Item, width int, showName bool, now time.Time, dim bool, status string, thumb func(key string) (*mediaThumb, bool), focused bool) []string {
 	bubbleWidth := chatBubbleWidth(width)
 	bgHex := bubbleIncomingBg
 	fgHex := bubbleIncomingFg
 	if item.FromMe {
-		bgHex = ownBubbleBg(item.Channel)
+		bgHex = ownBubbleBg(item.Channel, pal)
 		fgHex = bubbleOwnFg
 	}
 	if focused {
@@ -576,13 +579,13 @@ func chatBubbleLinesFocus(r *lipgloss.Renderer, item core.Item, width int, showN
 		fgHex = bubbleOptimisticFg
 	}
 	bodyStyle := r.NewStyle().Background(lipgloss.Color(bgHex)).Foreground(lipgloss.Color(fgHex))
-	timeStyle := r.NewStyle().Background(lipgloss.Color(bgHex)).Foreground(lipgloss.Color(style.ColorDim))
+	timeStyle := r.NewStyle().Background(lipgloss.Color(bgHex)).Foreground(lipgloss.Color(pal.DimColor()))
 
 	var lines []string
 	if showName {
 		name := strings.TrimSpace(safeLine(item.From.Name))
 		if name != "" {
-			nameStyle := r.NewStyle().Background(lipgloss.Color(bgHex)).Foreground(lipgloss.Color(senderColorHex(name))).Bold(true)
+			nameStyle := r.NewStyle().Background(lipgloss.Color(bgHex)).Foreground(lipgloss.Color(senderColorHex(name, pal.DimColor()))).Bold(true)
 			text := runewidth.Truncate(name, bubbleWidth, "…")
 			padded := padTo(text, bubbleWidth)
 			lines = append(lines, alignBubbleLine(nameStyle.Render(padded), bubbleWidth, width, item.FromMe))
@@ -593,7 +596,7 @@ func chatBubbleLinesFocus(r *lipgloss.Renderer, item core.Item, width int, showN
 		// conversation) but shows neither its old body nor its
 		// attachments — only the deletion marker, dim/italic like a
 		// real chat client.
-		delStyle := r.NewStyle().Background(lipgloss.Color(bgHex)).Foreground(lipgloss.Color(style.ColorDim)).Italic(true)
+		delStyle := r.NewStyle().Background(lipgloss.Color(bgHex)).Foreground(lipgloss.Color(pal.DimColor())).Italic(true)
 		text := runewidth.Truncate("mensaje eliminado", bubbleWidth, "…")
 		padded := padTo(text, bubbleWidth)
 		lines = append(lines, alignBubbleLine(delStyle.Render(padded), bubbleWidth, width, item.FromMe))
@@ -658,7 +661,7 @@ func chatBubbleLinesFocus(r *lipgloss.Renderer, item core.Item, width int, showN
 			lines = append(lines, alignBubbleLine(bodyStyle.Render(padded), bubbleWidth, width, item.FromMe))
 		}
 		if item.Edited {
-			editedStyle := r.NewStyle().Background(lipgloss.Color(bgHex)).Foreground(lipgloss.Color(style.ColorDim)).Italic(true)
+			editedStyle := r.NewStyle().Background(lipgloss.Color(bgHex)).Foreground(lipgloss.Color(pal.DimColor())).Italic(true)
 			text := runewidth.Truncate("(editado)", bubbleWidth, "…")
 			padded := padTo(text, bubbleWidth)
 			lines = append(lines, alignBubbleLine(editedStyle.Render(padded), bubbleWidth, width, item.FromMe))

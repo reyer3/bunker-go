@@ -2588,6 +2588,19 @@ Any styled glyph can be overridden in `config.toml`, for example with a codepoin
 matrix = "\U00100000"   # keys: mail, whatsapp, matrix
 ```
 
+The accent colors can be overridden the same way, for example to match a
+terminal theme. They apply to `--tmux`, `--ansi` and the interactive
+panel (inbox, sidebar, chat view). Values must be `#rrggbb`; unknown keys
+and malformed values are ignored, so a typo keeps the default color:
+
+```toml
+[render.colors]
+mail = "#7aa2f7"       # default #4db0ff
+whatsapp = "#9ece6a"   # default #25d366
+matrix = "#bb9af7"     # default #0dbd8b
+dim = "#565f89"        # empty channels and de-emphasized text; default #a3a09e
+```
+
 The interactive panel's desktop notifications (see above) can be turned
 off in `config.toml` too, independently of the `BUNKER_TUI_NOTIFY=0`
 environment opt-out:

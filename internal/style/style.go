@@ -48,3 +48,79 @@ func ResolveGlyphs(overrides map[string]string) map[core.Channel]string {
 	}
 	return out
 }
+
+// Palette is a resolved set of accent colors: one per channel plus the dim
+// color. The zero value is usable and yields the package defaults, so a
+// caller that never loaded config still renders the brand colors.
+type Palette struct {
+	// Channels maps each channel to its accent ("#rrggbb").
+	Channels map[core.Channel]string
+	// Dim marks empty/zero channels and de-emphasized elements.
+	Dim string
+}
+
+// DefaultPalette returns a fresh copy of the brand accents and ColorDim.
+func DefaultPalette() Palette {
+	p := Palette{Channels: make(map[core.Channel]string, len(ChannelColors)), Dim: ColorDim}
+	for ch, hex := range ChannelColors {
+		p.Channels[ch] = hex
+	}
+	return p
+}
+
+// Channel returns ch's accent, falling back to the brand default.
+func (p Palette) Channel(ch core.Channel) string {
+	if hex, ok := p.Channels[ch]; ok && hex != "" {
+		return hex
+	}
+	return ChannelColors[ch]
+}
+
+// DimColor returns the dim color, falling back to ColorDim.
+func (p Palette) DimColor() string {
+	if p.Dim != "" {
+		return p.Dim
+	}
+	return ColorDim
+}
+
+// paletteDimKey is the [render.colors] key for the dim color; every other
+// recognized key is a channel name.
+const paletteDimKey = "dim"
+
+// ResolvePalette returns DefaultPalette with config overrides applied
+// (keys: "mail", "whatsapp", "matrix", "dim"; values "#rrggbb"). Unknown
+// keys and malformed values are ignored, and the package defaults are
+// never mutated.
+func ResolvePalette(overrides map[string]string) Palette {
+	p := DefaultPalette()
+	for key, hex := range overrides {
+		if !isHexColor(hex) {
+			continue
+		}
+		if key == paletteDimKey {
+			p.Dim = hex
+			continue
+		}
+		ch := core.Channel(key)
+		if _, known := p.Channels[ch]; known {
+			p.Channels[ch] = hex
+		}
+	}
+	return p
+}
+
+// isHexColor reports whether s is exactly "#rrggbb" (either letter case).
+func isHexColor(s string) bool {
+	if len(s) != 7 || s[0] != '#' {
+		return false
+	}
+	for _, c := range s[1:] {
+		switch {
+		case c >= '0' && c <= '9', c >= 'a' && c <= 'f', c >= 'A' && c <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
+}

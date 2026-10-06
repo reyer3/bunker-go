@@ -132,7 +132,10 @@ type Model struct {
 	// (folder.go), keyed by account name.
 	folderLayouts map[string]folderLayout
 
-	glyphs          map[core.Channel]string
+	glyphs map[core.Channel]string
+	// accent holds the configured accent colors ([render.colors]); the
+	// zero value renders the brand defaults (see colors()).
+	accent          style.Palette
 	render          *lipgloss.Renderer
 	now             func() time.Time
 	blurred         bool
@@ -432,6 +435,19 @@ func (m Model) withGlyphs(glyphs map[core.Channel]string) Model {
 	return m
 }
 
+// withColors returns a copy of m using the given resolved accent palette
+// (see internal/style.ResolvePalette) instead of the brand defaults.
+func (m Model) withColors(p style.Palette) Model {
+	m.accent = p
+	return m
+}
+
+// colors returns the model's accent palette; an unset palette yields the
+// brand defaults through style.Palette's fallbacks.
+func (m Model) colors() style.Palette {
+	return m.accent
+}
+
 // clock returns the model's injectable clock, defaulting to time.Now so
 // production code needs no wiring while tests pin a fixed time.
 func (m Model) clock() time.Time {
@@ -475,10 +491,12 @@ func (m Model) Init() tea.Cmd {
 // closes that connection whether the terminal exits cleanly or with an
 // error. It builds its lipgloss renderer from output (so color detection,
 // including NO_COLOR, matches the real terminal Bubble Tea writes to) and
-// loads [render.glyphs] config overrides the same way `bunker render`
-// does; a missing/unreadable config keeps the package default glyphs.
+// loads [render.glyphs] and [render.colors] config overrides the same way
+// `bunker render` does; a missing/unreadable config keeps the package
+// default glyphs and colors.
 func Run(client Client, input io.Reader, output io.Writer, opts ...Option) error {
 	glyphs := style.Glyphs
+	colors := style.DefaultPalette()
 	var notify *bool
 	var confirmChatSend bool
 	var folderLayouts map[string]folderLayout
@@ -486,11 +504,12 @@ func Run(client Client, input io.Reader, output io.Writer, opts ...Option) error
 	if cfg, err := config.LoadDefault(); err == nil {
 		voiceRecordCommands = voiceRecordCommandsFromConfig(*cfg)
 		glyphs = style.ResolveGlyphs(cfg.Render.Glyphs)
+		colors = style.ResolvePalette(cfg.Render.Colors)
 		notify = cfg.Tui.Notify
 		confirmChatSend = cfg.Tui.ConfirmChatSend
 		folderLayouts = folderLayoutsFromConfig(*cfg)
 	}
-	model := NewModel(client, opts...).withGlyphs(glyphs)
+	model := NewModel(client, opts...).withGlyphs(glyphs).withColors(colors)
 	model.folderLayouts = folderLayouts
 	model.confirmChatSend = confirmChatSend
 	model.voiceRecordCmds = voiceRecordCommands

@@ -52,12 +52,14 @@ type rowStyles struct {
 
 // styles builds this model's lipgloss style set from its renderer.
 func (m Model) styles() rowStyles {
-	return newRowStyles(m.renderer())
+	return newRowStyles(m.renderer(), m.colors())
 }
 
-func newRowStyles(r *lipgloss.Renderer) rowStyles {
+// newRowStyles builds the style set from r, taking the channel accents
+// and the dim color from pal.
+func newRowStyles(r *lipgloss.Renderer, pal style.Palette) rowStyles {
 	rs := rowStyles{
-		dim:           r.NewStyle().Foreground(lipgloss.Color(style.ColorDim)),
+		dim:           r.NewStyle().Foreground(lipgloss.Color(pal.DimColor())),
 		title:         r.NewStyle().Bold(true),
 		readTitle:     r.NewStyle(),
 		selectedBar:   r.NewStyle().Background(lipgloss.Color(selectionBackground)).Bold(true),
@@ -66,7 +68,8 @@ func newRowStyles(r *lipgloss.Renderer) rowStyles {
 		badge:         make(map[core.Channel]lipgloss.Style, len(style.ChannelColors)),
 		sectionHeader: make(map[core.Channel]lipgloss.Style, len(style.ChannelColors)),
 	}
-	for ch, hex := range style.ChannelColors {
+	for ch := range style.ChannelColors {
+		hex := pal.Channel(ch)
 		rs.glyph[ch] = r.NewStyle().Foreground(lipgloss.Color(hex))
 		rs.badge[ch] = r.NewStyle().Foreground(lipgloss.Color(hex))
 		rs.sectionHeader[ch] = r.NewStyle().Bold(true).Foreground(lipgloss.Color(hex))
