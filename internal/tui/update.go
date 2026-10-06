@@ -414,6 +414,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleOpenAttach(msg)
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
+			// Quitting drops the chat sends still queued: ask for a
+			// second Ctrl+C first.
+			if m.chatSendBusy() && !m.chatQuitArmed {
+				m.chatQuitArmed = true
+				return m.withFlash("se están enviando mensajes · Ctrl+C otra vez para salir igual"), nil
+			}
 			return m, m.quitCmd()
 		}
 		if next, cmd, ok := m.selectModeToggle(msg.String()); ok {

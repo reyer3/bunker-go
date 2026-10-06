@@ -108,6 +108,12 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.chatFocus = ""
 			return m, nil
 		}
+		// Leaving with sends still queued would hide their outcome and,
+		// on a failure, the attachments riding on them: stay until the
+		// queue drains (bounded by the send timeout).
+		if n := m.chatPendingSends(m.chatConvKey()); n > 0 {
+			return m.withFlash(pendingSendsNotice(n)), nil
+		}
 		if m.openID != "" {
 			return m, m.quitOpenChat()
 		}

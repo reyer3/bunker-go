@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -158,6 +159,7 @@ func (m Model) enqueueChatSend(draft string) (Model, tea.Cmd) {
 		}
 	}
 	m.chatQueue = append(m.chatQueue, e)
+	m.chatQuitArmed = false
 	// The entry owns the attachments and their temp files now: the
 	// composer starts over empty (clearChatAttachments would delete
 	// files the send still needs).
@@ -353,6 +355,14 @@ func (m Model) restoreChatAttachments(failed []chatOptimisticMsg, clean bool) Mo
 		}
 	}
 	return m
+}
+
+// pendingSendsNotice tells why the chat cannot be left yet.
+func pendingSendsNotice(n int) string {
+	if n == 1 {
+		return "esperando a que se envíe 1 mensaje…"
+	}
+	return fmt.Sprintf("esperando a que se envíen %d mensajes…", n)
 }
 
 // chatOptimisticStatusText is an optimistic bubble's bottom-right status

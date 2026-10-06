@@ -207,6 +207,9 @@ type Model struct {
 	// numbers the entries.
 	chatQueue   []chatOptimisticMsg
 	chatSendSeq uint64
+	// chatQuitArmed is set by a Ctrl+C refused because sends were still
+	// queued: the next Ctrl+C quits anyway.
+	chatQuitArmed bool
 	// chatAction is the edit, delete or reaction on screen (see
 	// chat_actions.go); chatEditID is our message being edited in the
 	// composer, with the draft set aside for it in chatEditDraft.
