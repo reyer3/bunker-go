@@ -6,7 +6,12 @@ import (
 	"time"
 
 	"github.com/reyer3/bunker-go/internal/core"
+	"github.com/reyer3/bunker-go/internal/style"
 )
+
+// defaultPal is the built-in palette, named so tests whose loop variable
+// shadows the style package can still use it.
+var defaultPal = style.DefaultPalette()
 
 func testSegments(mail, wa, mx int) []renderSegment {
 	return []renderSegment{
@@ -17,13 +22,13 @@ func testSegments(mail, wa, mx int) []renderSegment {
 }
 
 func TestFormatRenderPlainIsUnchanged(t *testing.T) {
-	if got := formatRender(testSegments(3, 0, 2), renderPlain, false, styledGlyphs); got != "✉ 3  💬 0  ⌘ 2" {
+	if got := formatRender(testSegments(3, 0, 2), renderPlain, false, styledGlyphs, defaultPal); got != "✉ 3  💬 0  ⌘ 2" {
 		t.Fatalf("plain = %q, want the documented default", got)
 	}
 }
 
 func TestFormatRenderTmuxColorsEachChannelAndDimsZero(t *testing.T) {
-	got := formatRender(testSegments(3, 0, 53), renderTmux, false, styledGlyphs)
+	got := formatRender(testSegments(3, 0, 53), renderTmux, false, styledGlyphs, defaultPal)
 	for _, want := range []string{
 		"#[fg=#4db0ff]\U000f01ee 3#[default]",
 		"#[fg=#a3a09e]\U000f05a3 0#[default]",
@@ -36,7 +41,7 @@ func TestFormatRenderTmuxColorsEachChannelAndDimsZero(t *testing.T) {
 }
 
 func TestFormatRenderANSIUsesTruecolor(t *testing.T) {
-	got := formatRender(testSegments(0, 2, 0), renderANSI, false, styledGlyphs)
+	got := formatRender(testSegments(0, 2, 0), renderANSI, false, styledGlyphs, defaultPal)
 	if !strings.Contains(got, "\x1b[38;2;37;211;102m\U000f05a3 2\x1b[0m") {
 		t.Errorf("ansi = %q, want WhatsApp green truecolor segment", got)
 	}
@@ -44,10 +49,10 @@ func TestFormatRenderANSIUsesTruecolor(t *testing.T) {
 
 func TestFormatRenderHideEmptyPrintsNothingWhenAllZero(t *testing.T) {
 	for _, style := range []renderStyle{renderPlain, renderTmux, renderANSI} {
-		if got := formatRender(testSegments(0, 0, 0), style, true, styledGlyphs); got != "" {
+		if got := formatRender(testSegments(0, 0, 0), style, true, styledGlyphs, defaultPal); got != "" {
 			t.Errorf("style %v hide-empty all zero = %q, want empty", style, got)
 		}
-		if got := formatRender(testSegments(1, 0, 0), style, true, styledGlyphs); got == "" {
+		if got := formatRender(testSegments(1, 0, 0), style, true, styledGlyphs, defaultPal); got == "" {
 			t.Errorf("style %v hide-empty with unread = empty, want output", style)
 		}
 	}
@@ -90,5 +95,19 @@ func TestFormatCallSegment(t *testing.T) {
 	evil := core.Call{Direction: core.CallIncoming, State: core.CallStateRinging, PeerName: "#[fg=red]x\x1b"}
 	if got := formatCallSegment([]core.Call{evil}, renderPlain, now); strings.ContainsAny(got, "#\x1b") {
 		t.Errorf("peer name not sanitized: %q", got)
+	}
+}
+
+func TestFormatRenderUsesConfiguredPalette(t *testing.T) {
+	pal := style.ResolvePalette(map[string]string{"mail": "#7aa2f7", "dim": "#565f89"})
+	got := formatRender(testSegments(3, 0, 1), renderTmux, false, styledGlyphs, pal)
+	for _, want := range []string{
+		"#[fg=#7aa2f7]\U000f01ee 3#[default]",
+		"#[fg=#565f89]\U000f05a3 0#[default]",
+		"#[fg=#0dbd8b]\U000f0628 1#[default]",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("tmux = %q, want it to contain %q", got, want)
+		}
 	}
 }

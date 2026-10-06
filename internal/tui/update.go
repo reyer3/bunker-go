@@ -265,6 +265,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mailPreviewing = false
 		m.mailPlan = core.Plan{}
 		m.mailSendErr = nil
+		if m.composeOnly() {
+			// The compose pane was opened for this one message.
+			return m, tea.Quit
+		}
 		return m, nil
 	case chatReplySentMsg:
 		if msg.token != m.chatReplyToken || !m.chatSending {

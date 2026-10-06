@@ -108,6 +108,10 @@ type tuiLaunch struct {
 	asker  func(ctx context.Context, itemID string) error
 	unread func(n int) error
 	notify func(body string) error
+	// mailDraft starts on the new mail editor from mailAccount ("bunker
+	// compose"), quitting when it closes.
+	mailDraft   *tui.MailDraft
+	mailAccount string
 }
 
 func (l tuiLaunch) options() []tui.Option {
@@ -120,6 +124,9 @@ func (l tuiLaunch) options() []tui.Option {
 	}
 	if l.openID != "" {
 		opts = append(opts, tui.WithOpenItem(l.openID))
+	}
+	if l.mailDraft != nil {
+		opts = append(opts, tui.WithMailDraft(l.mailAccount, *l.mailDraft))
 	}
 	if l.asker != nil {
 		opts = append(opts, tui.WithAgentAsker(l.asker))
@@ -150,6 +157,8 @@ func runWithDependencies(args []string, stdin *os.File, stdout, stderr io.Writer
 		return cmdOpen(args[1:], stdin, stdout, stderr, deps)
 	case "sidebar":
 		return cmdSidebar(args[1:], stdin, stdout, stderr, deps)
+	case "compose":
+		return cmdCompose(args[1:], stdin, stdout, stderr, deps)
 	}
 	return runCommandLine(args, stdin, stdout, stderr)
 }

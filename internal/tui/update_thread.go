@@ -180,6 +180,9 @@ func (m Model) updateMailEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.mailDrafts[mailDraftKey(m.mailAction, m.mailTargetID)] = mailDraft{to: m.mailTo.Value(), cc: m.mailCc.Value(), subject: m.mailSubject.Value(), body: m.composer.Value()}
 		m.mailComposing = false
+		if m.composeOnly() {
+			return m, tea.Quit
+		}
 		return m.withFlash("borrador guardado"), nil
 	case "tab":
 		m.mailFocus = (m.mailFocus + 1) % 4

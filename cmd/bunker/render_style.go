@@ -25,16 +25,11 @@ const (
 // icons.
 var styledGlyphs = style.Glyphs
 
-// channelColors are the per-channel accents: the tmux theme's blue for mail,
-// WhatsApp green, Element green for Matrix. zeroColor dims empty channels.
-// Shared with internal/tui via internal/style.
-var channelColors = style.ChannelColors
-
-const zeroColor = style.ColorDim
-
 // formatRender renders segments in style. With hideEmpty, it returns ""
-// when no channel has unread items, so a status line can disappear.
-func formatRender(segments []renderSegment, style renderStyle, hideEmpty bool, glyphs map[core.Channel]string) string {
+// when no channel has unread items, so a status line can disappear. The
+// colored styles take each channel's accent from palette (see
+// style.ResolvePalette) and dim empty channels with its dim color.
+func formatRender(segments []renderSegment, style renderStyle, hideEmpty bool, glyphs map[core.Channel]string, palette style.Palette) string {
 	if hideEmpty {
 		any := false
 		for _, seg := range segments {
@@ -54,9 +49,9 @@ func formatRender(segments []renderSegment, style renderStyle, hideEmpty bool, g
 			parts = append(parts, fmt.Sprintf("%s %d", seg.Glyph, seg.Unread))
 			continue
 		}
-		color := channelColors[seg.Channel]
+		color := palette.Channel(seg.Channel)
 		if seg.Unread == 0 {
-			color = zeroColor
+			color = palette.DimColor()
 		}
 		text := fmt.Sprintf("%s %d", glyphs[seg.Channel], seg.Unread)
 		if style == renderTmux {
@@ -144,4 +139,11 @@ func hexRGB(hex string) (r, g, b int) {
 // to internal/style, shared with internal/tui.
 func resolveGlyphs(overrides map[string]string) map[core.Channel]string {
 	return style.ResolveGlyphs(overrides)
+}
+
+// styleColors returns the accent palette with [render.colors] overrides
+// applied; invalid entries are ignored. Delegates to internal/style,
+// shared with internal/tui.
+func styleColors(overrides map[string]string) style.Palette {
+	return style.ResolvePalette(overrides)
 }

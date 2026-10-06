@@ -44,7 +44,7 @@ func TestBuildRowWidthMathHandlesRealWorldText(t *testing.T) {
 	for _, profile := range []termenv.Profile{termenv.Ascii, termenv.TrueColor} {
 		renderer := lipgloss.NewRenderer(io.Discard)
 		renderer.SetColorProfile(profile)
-		styles := newRowStyles(renderer)
+		styles := newRowStyles(renderer, style.DefaultPalette())
 
 		for _, width := range []int{20, 24, 36, 40, 60, 100} {
 			for _, selected := range []bool{false, true} {
@@ -98,7 +98,7 @@ func TestInboxDegradesGracefullyForNoColorAndNarrowWidth(t *testing.T) {
 	}
 	// The one-line fallback drops the dim "Sender: body" preview: the
 	// row line and its own would-be preview line collapse into one.
-	line1, line2 := buildRow(inboxGroup{items: client.items}, false, narrowWidth-1, style.Glyphs, client.counts, newRowStyles(renderer), time.Now(), "")
+	line1, line2 := buildRow(inboxGroup{items: client.items}, false, narrowWidth-1, style.Glyphs, client.counts, newRowStyles(renderer, style.DefaultPalette()), time.Now(), "")
 	if line2 != "" {
 		t.Errorf("narrow width still produced a second preview line: %q / %q", line1, line2)
 	}
@@ -110,7 +110,7 @@ func TestInboxDegradesGracefullyForNoColorAndNarrowWidth(t *testing.T) {
 // did before ("q" was not even in the untruncated string).
 func TestFooterKeepsQVisibleAtNarrowWidth(t *testing.T) {
 	renderer := lipgloss.NewRenderer(io.Discard)
-	styles := newRowStyles(renderer)
+	styles := newRowStyles(renderer, style.DefaultPalette())
 
 	got := stripANSI(footerLine(styles, 40))
 	if !strings.Contains(got, "q") {
@@ -149,7 +149,7 @@ func stripANSI(s string) string {
 // still never render more physical lines than its share, even when the
 // units it is given are not all the same height.
 func TestLayoutSectionRowsRespectsShareWithMixedRowHeights(t *testing.T) {
-	styles := newRowStyles(lipgloss.NewRenderer(io.Discard))
+	styles := newRowStyles(lipgloss.NewRenderer(io.Discard), style.DefaultPalette())
 	units := []rowUnit{
 		{lines: []string{"sender0"}},                      // collapsed sender: 1 line
 		{lines: []string{"sender1"}},                      // collapsed sender: 1 line

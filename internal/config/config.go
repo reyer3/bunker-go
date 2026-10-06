@@ -37,6 +37,10 @@ type Render struct {
 	// "whatsapp", "matrix"), e.g. a codepoint from a locally installed
 	// icon font.
 	Glyphs map[string]string
+	// Colors overrides the accent colors ("mail", "whatsapp", "matrix",
+	// and "dim" for empty channels and de-emphasized text) as "#rrggbb";
+	// see style.ResolvePalette for how invalid entries are ignored.
+	Colors map[string]string
 }
 
 // Tui holds optional interactive-panel settings.
@@ -80,6 +84,7 @@ type rawConfig struct {
 	Account []map[string]interface{} `toml:"account"`
 	Render  struct {
 		Glyphs map[string]string `toml:"glyphs"`
+		Colors map[string]string `toml:"colors"`
 	} `toml:"render"`
 	Tui struct {
 		Notify          *bool `toml:"notify"`
@@ -105,7 +110,7 @@ func Load(path string) (*Config, error) {
 
 	cfg := &Config{
 		Accounts: make([]Account, 0, len(raw.Account)),
-		Render:   Render{Glyphs: raw.Render.Glyphs},
+		Render:   Render{Glyphs: raw.Render.Glyphs, Colors: raw.Render.Colors},
 		Tui:      Tui{Notify: raw.Tui.Notify, ConfirmChatSend: raw.Tui.ConfirmChatSend},
 		App:      App{Command: raw.App.Command},
 		Herdr:    Herdr{Notify: raw.Herdr.Notify},

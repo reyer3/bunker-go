@@ -554,9 +554,12 @@ func runHerdrToggle(ctx context.Context, deps herdrDeps, dryRun bool) (herdrTogg
 	return plan, nil
 }
 
-const herdrUsage = "usage: bunker herdr toggle [--dry-run] [--json]"
+const herdrUsage = "usage: bunker herdr toggle [--dry-run] [--json]\n       bunker herdr mailto [--dry-run] [<mailto-url>]"
 
 func cmdHerdr(ctx context.Context, args []string, stdout, stderr io.Writer, deps herdrDeps) int {
+	if len(args) > 0 && args[0] == "mailto" {
+		return cmdHerdrMailto(ctx, args[1:], stdout, stderr, deps)
+	}
 	if len(args) == 0 || args[0] != "toggle" {
 		fmt.Fprintln(stderr, herdrUsage)
 		return 2

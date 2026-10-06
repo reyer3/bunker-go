@@ -132,7 +132,10 @@ type Model struct {
 	// (folder.go), keyed by account name.
 	folderLayouts map[string]folderLayout
 
-	glyphs          map[core.Channel]string
+	glyphs map[core.Channel]string
+	// accent holds the configured accent colors ([render.colors]); the
+	// zero value renders the brand defaults (see colors()).
+	accent          style.Palette
 	render          *lipgloss.Renderer
 	now             func() time.Time
 	blurred         bool
@@ -361,7 +364,10 @@ type Model struct {
 	sidebar      bool
 	externalOpen func(id string) error
 	openID       string
-	openErr      error
+	// compose is the message a "bunker compose" pane starts on (see
+	// mailto.go); nil otherwise.
+	compose *composeDraft
+	openErr error
 
 	// herdr integration (issue #82, herdr.go): agentAsk asks a coding
 	// agent about a conversation ("a"), asking while it runs;
@@ -416,6 +422,10 @@ func NewModel(client Client, opts ...Option) Model {
 	for _, opt := range opts {
 		opt(&m)
 	}
+	if m.compose != nil {
+		// A compose pane never shows the inbox either.
+		m.polling = false
+	}
 	if m.openID != "" {
 		// A single-conversation pane never shows the inbox, so it does
 		// not poll it (nor notify about it: the panel that opened it
@@ -430,6 +440,19 @@ func NewModel(client Client, opts ...Option) Model {
 func (m Model) withGlyphs(glyphs map[core.Channel]string) Model {
 	m.glyphs = glyphs
 	return m
+}
+
+// withColors returns a copy of m using the given resolved accent palette
+// (see internal/style.ResolvePalette) instead of the brand defaults.
+func (m Model) withColors(p style.Palette) Model {
+	m.accent = p
+	return m
+}
+
+// colors returns the model's accent palette; an unset palette yields the
+// brand defaults through style.Palette's fallbacks.
+func (m Model) colors() style.Palette {
+	return m.accent
 }
 
 // clock returns the model's injectable clock, defaulting to time.Now so
@@ -462,7 +485,7 @@ func (m Model) renderer() *lipgloss.Renderer {
 }
 
 func (m Model) Init() tea.Cmd {
-	if m.client == nil {
+	if m.client == nil || m.compose != nil {
 		return nil
 	}
 	if m.openID != "" {
@@ -475,10 +498,12 @@ func (m Model) Init() tea.Cmd {
 // closes that connection whether the terminal exits cleanly or with an
 // error. It builds its lipgloss renderer from output (so color detection,
 // including NO_COLOR, matches the real terminal Bubble Tea writes to) and
-// loads [render.glyphs] config overrides the same way `bunker render`
-// does; a missing/unreadable config keeps the package default glyphs.
+// loads [render.glyphs] and [render.colors] config overrides the same way
+// `bunker render` does; a missing/unreadable config keeps the package
+// default glyphs and colors.
 func Run(client Client, input io.Reader, output io.Writer, opts ...Option) error {
 	glyphs := style.Glyphs
+	colors := style.DefaultPalette()
 	var notify *bool
 	var confirmChatSend bool
 	var folderLayouts map[string]folderLayout
@@ -486,15 +511,17 @@ func Run(client Client, input io.Reader, output io.Writer, opts ...Option) error
 	if cfg, err := config.LoadDefault(); err == nil {
 		voiceRecordCommands = voiceRecordCommandsFromConfig(*cfg)
 		glyphs = style.ResolveGlyphs(cfg.Render.Glyphs)
+		colors = style.ResolvePalette(cfg.Render.Colors)
 		notify = cfg.Tui.Notify
 		confirmChatSend = cfg.Tui.ConfirmChatSend
 		folderLayouts = folderLayoutsFromConfig(*cfg)
 	}
-	model := NewModel(client, opts...).withGlyphs(glyphs)
+	model := NewModel(client, opts...).withGlyphs(glyphs).withColors(colors)
 	model.folderLayouts = folderLayouts
 	model.confirmChatSend = confirmChatSend
 	model.voiceRecordCmds = voiceRecordCommands
 	model.render = lipgloss.NewRenderer(output)
+	model = model.startMailDraft()
 	output = lockOutput(output)
 	model.notifyEnabled = resolveNotifyEnabled(notify, os.Getenv)
 	model.notifyWriter = output

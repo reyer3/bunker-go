@@ -87,12 +87,13 @@ func cmdRender(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	case *ansi:
 		style = renderANSI
 	}
-	var overrides map[string]string
+	var overrides, colorOverrides map[string]string
 	if cfg, err := config.LoadDefault(); err == nil {
 		overrides = cfg.Render.Glyphs
+		colorOverrides = cfg.Render.Colors
 	}
 	callSeg := formatCallSegment(calls, style, time.Now())
-	line := formatRender(segments, style, *hideEmpty && callSeg == "", resolveGlyphs(overrides))
+	line := formatRender(segments, style, *hideEmpty && callSeg == "", resolveGlyphs(overrides), styleColors(colorOverrides))
 	if callSeg != "" {
 		// Issue #15: a ringing or live call leads the segment, so it is
 		// the first thing seen in the status line.

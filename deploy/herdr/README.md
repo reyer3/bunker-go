@@ -18,7 +18,7 @@ herdr plugin link <checkout>/deploy/herdr
 
 ## Use
 
-The plugin adds one action, `bunker.toggle`, which runs
+The plugin adds the `bunker.toggle` action, which runs
 `bunker herdr toggle`:
 
 - no bunker panel in the tab: opens one on the right of the focused pane
@@ -95,6 +95,27 @@ rows = [
 A row whose tokens are all unset disappears, so the line only shows
 where the count is reported. Whether herdr lists a plain plugin pane
 (one without an agent) in its Agent sidebar is up to herdr.
+
+## mailto: links
+
+Ctrl-click on a `mailto:` link in any herdr pane opens a new bunker mail
+to that address in a popup (80% of the screen) instead of the system mail
+client. The plugin's `mailto` link handler runs the `bunker.mailto` action
+(`bunker herdr mailto`), which opens the `compose` popup running `bunker
+compose` with the URL in `BUNKER_MAILTO`. To, Cc, Subject and the body
+are filled from the link (RFC 6068); the mail is sent from the first
+mail account in `config.toml`. Ctrl+S previews and sends as in the TUI;
+Esc, or a sent mail, closes the popup.
+
+herdr routes a link to a handler only when it recognizes it as a link:
+`mailto:` works for OSC 8 hyperlinks (the sender addresses bunker shows
+in its mail views are such links, and so are those of other programs
+that emit OSC 8), while herdr's plain-text detection only finds
+`http(s)://` URLs, so a bare `mailto:` or address typed in a pane is not
+clickable. This was checked against herdr 0.9.3; older releases may only
+hand `http(s)` links to handlers.
+A link with a `bcc=` recipient is refused (the editor has no Bcc field):
+the action fails and its log (`herdr plugin log list`) says why.
 
 ## New-message notifications
 
