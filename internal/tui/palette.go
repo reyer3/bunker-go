@@ -94,7 +94,7 @@ func (m Model) canOpenPalette(key string) bool {
 		return false
 	}
 	if m.chatMode {
-		return key == paletteAltKey && m.chatAction == nil && !m.chatConfirm && !m.chatSending && !m.chatPreviewPending
+		return key == paletteAltKey && m.chatAction == nil && !m.chatConfirm && !m.chatSendBusy() && !m.chatPreviewPending
 	}
 	return true
 }

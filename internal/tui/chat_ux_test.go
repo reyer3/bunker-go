@@ -581,10 +581,10 @@ func TestPlainTextSendsWithASingleEnter(t *testing.T) {
 	}
 	updated, sendCmd := model.Update(previewCmd())
 	model = updated.(Model)
-	if sendCmd == nil || !model.chatSending || model.chatConfirm {
-		t.Fatalf("a clean plan should send at once (sending=%v confirm=%v)", model.chatSending, model.chatConfirm)
+	if sendCmd == nil || !model.chatSendBusy() || model.chatConfirm {
+		t.Fatalf("a clean plan should send at once (sending=%v confirm=%v)", model.chatSendBusy(), model.chatConfirm)
 	}
-	if model.composer.Value() != "" || model.chatOptimistic == nil || model.chatOptimistic.body != "hola" {
+	if model.composer.Value() != "" || lastBubble(model) == nil || lastBubble(model).body != "hola" {
 		t.Fatal("the send should show the optimistic bubble and clear the composer")
 	}
 	updated, _ = model.Update(sendCmd())
@@ -596,7 +596,7 @@ func TestPlainTextSendsWithASingleEnter(t *testing.T) {
 	if !client.calls[0].dryRun || client.calls[1].dryRun || client.calls[1].body != "hola" {
 		t.Fatalf("calls = %+v, want a dry-run then the real send", client.calls)
 	}
-	if model.chatSending {
+	if model.chatSendBusy() {
 		t.Fatal("still sending after the receipt")
 	}
 }
@@ -607,8 +607,8 @@ func TestPlanErrorShowsTheErrorAndDoesNotSend(t *testing.T) {
 	model, previewCmd := uxPress(t, model, tea.KeyMsg{Type: tea.KeyEnter})
 	updated, cmd := model.Update(previewCmd())
 	model = updated.(Model)
-	if cmd != nil || model.chatSending || model.chatConfirm || model.chatAutoSend {
-		t.Fatalf("a failed plan must not send (cmd=%v sending=%v confirm=%v)", cmd != nil, model.chatSending, model.chatConfirm)
+	if cmd != nil || model.chatSendBusy() || model.chatConfirm || model.chatAutoSend {
+		t.Fatalf("a failed plan must not send (cmd=%v sending=%v confirm=%v)", cmd != nil, model.chatSendBusy(), model.chatConfirm)
 	}
 	if model.chatSendErr == nil || !strings.Contains(model.View(), "sin permiso") {
 		t.Fatalf("error not shown:\n%s", model.View())
@@ -638,8 +638,8 @@ func TestAttachmentsStillNeedAnExplicitConfirm(t *testing.T) {
 	model, previewCmd := uxPress(t, model, tea.KeyMsg{Type: tea.KeyEnter})
 	updated, cmd := model.Update(previewCmd())
 	model = updated.(Model)
-	if cmd != nil || !model.chatConfirm || model.chatSending {
-		t.Fatalf("an attachment must wait for the confirm (confirm=%v sending=%v)", model.chatConfirm, model.chatSending)
+	if cmd != nil || !model.chatConfirm || model.chatSendBusy() {
+		t.Fatalf("an attachment must wait for the confirm (confirm=%v sending=%v)", model.chatConfirm, model.chatSendBusy())
 	}
 	if real, _ := realSends(client); real != 0 {
 		t.Fatal("sent without the second Enter")
@@ -673,8 +673,8 @@ func TestNewConversationStillNeedsAnExplicitConfirm(t *testing.T) {
 	model, previewCmd := uxPress(t, model, tea.KeyMsg{Type: tea.KeyEnter})
 	updated, cmd := model.Update(previewCmd())
 	model = updated.(Model)
-	if cmd != nil || !model.chatConfirm || model.chatSending {
-		t.Fatalf("a new conversation must wait for the confirm (confirm=%v sending=%v)", model.chatConfirm, model.chatSending)
+	if cmd != nil || !model.chatConfirm || model.chatSendBusy() {
+		t.Fatalf("a new conversation must wait for the confirm (confirm=%v sending=%v)", model.chatConfirm, model.chatSendBusy())
 	}
 	if len(client.outgoingCalls) != 1 || !client.outgoingCalls[0].dryRun {
 		t.Fatalf("outgoing calls = %+v, want only the dry-run", client.outgoingCalls)
@@ -696,14 +696,14 @@ func TestConfirmChatSendOptionRestoresTheTwoStepFlow(t *testing.T) {
 	model, previewCmd := uxPress(t, model, tea.KeyMsg{Type: tea.KeyEnter})
 	updated, cmd := model.Update(previewCmd())
 	model = updated.(Model)
-	if cmd != nil || !model.chatConfirm || model.chatSending {
+	if cmd != nil || !model.chatConfirm || model.chatSendBusy() {
 		t.Fatal("confirm_chat_send = true must wait for a second Enter")
 	}
 	if !strings.Contains(model.View(), "¿Enviar a alice?") {
 		t.Fatalf("confirm line missing:\n%s", model.View())
 	}
 	model, sendCmd := uxPress(t, model, tea.KeyMsg{Type: tea.KeyEnter})
-	if sendCmd == nil || !model.chatSending {
+	if sendCmd == nil || !model.chatSendBusy() {
 		t.Fatal("the second Enter should send")
 	}
 	sendCmd()
@@ -755,7 +755,7 @@ func TestAutoSendDoesNotSurviveLeavingTheChat(t *testing.T) {
 	model.chatAutoSend = false
 	model.chatReplyToken++
 	updated, cmd := model.Update(previewCmd())
-	if cmd != nil || updated.(Model).chatSending {
+	if cmd != nil || updated.(Model).chatSendBusy() {
 		t.Fatal("a stale preview reply sent a message")
 	}
 }

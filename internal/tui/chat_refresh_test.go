@@ -116,14 +116,14 @@ func TestChatRefreshDropsOptimisticBubbleOnceStored(t *testing.T) {
 	first := chatMsg("whatsapp:personal:1", base, false, "hola")
 	client := &replyClient{}
 	model := refreshChat(t, client, []core.Item{first})
-	model.chatOptimistic = &chatOptimisticMsg{id: "whatsapp:personal:2"}
+	model.chatQueue = []chatOptimisticMsg{{conv: model.chatConvKey(), state: chatSendDone, id: "whatsapp:personal:2"}}
 
 	client.threadItems = []core.Item{first, chatMsg("whatsapp:personal:2", base.Add(time.Minute), true, "enviado")}
 	updated, cmd := model.Update(chatRefreshTickMsg{token: model.chatToken})
 	model = updated.(Model)
 	updated, _ = model.Update(cmd())
 	model = updated.(Model)
-	if model.chatOptimistic != nil {
+	if len(model.chatQueue) != 0 {
 		t.Fatal("the optimistic bubble stayed after the refresh stored its message")
 	}
 }

@@ -408,8 +408,8 @@ func TestChatConfirmShowsOptimisticBubbleAndClearsComposer(t *testing.T) {
 	if model.composer.Value() != "" {
 		t.Fatalf("composer after confirm = %q, want cleared immediately", model.composer.Value())
 	}
-	if model.chatOptimistic == nil || model.chatOptimistic.body != "hola" {
-		t.Fatalf("chatOptimistic = %+v, want a pending optimistic bubble carrying the draft", model.chatOptimistic)
+	if lastBubble(model) == nil || lastBubble(model).body != "hola" {
+		t.Fatalf("chatOptimistic = %+v, want a pending optimistic bubble carrying the draft", lastBubble(model))
 	}
 	view := model.View()
 	if !strings.Contains(view, "hola") {
@@ -451,8 +451,8 @@ func TestChatSendSuccessReloadsAndDedupesOptimisticBubble(t *testing.T) {
 	model = updated.(Model)
 	updated, reloadCmd := model.Update(sendCmd())
 	model = updated.(Model)
-	if model.chatOptimistic == nil || model.chatOptimistic.id != "whatsapp:personal:99" {
-		t.Fatalf("chatOptimistic = %+v, want id set from the send's own receipt", model.chatOptimistic)
+	if lastBubble(model) == nil || lastBubble(model).id != "whatsapp:personal:99" {
+		t.Fatalf("chatOptimistic = %+v, want id set from the send's own receipt", lastBubble(model))
 	}
 	if reloadCmd == nil {
 		t.Fatal("a successful send did not reload the thread")
@@ -467,8 +467,8 @@ func TestChatSendSuccessReloadsAndDedupesOptimisticBubble(t *testing.T) {
 	updated, _ = model.Update(reloadCmd())
 	model = updated.(Model)
 
-	if model.chatOptimistic != nil {
-		t.Fatalf("chatOptimistic = %+v, want nil once the reload contains the sent item", model.chatOptimistic)
+	if lastBubble(model) != nil {
+		t.Fatalf("chatOptimistic = %+v, want nil once the reload contains the sent item", lastBubble(model))
 	}
 	if got := strings.Count(model.View(), "hola"); got != 1 {
 		t.Fatalf("chat view contains %q %d times, want exactly 1 (deduped, not duplicated): %q", "hola", got, model.View())
@@ -506,8 +506,8 @@ func TestChatSendFailureMarksBubbleAndRestoresDraft(t *testing.T) {
 	if model.composer.Value() != "hola" {
 		t.Fatalf("draft after a failed send = %q, want it restored for editing", model.composer.Value())
 	}
-	if model.chatOptimistic == nil || !model.chatOptimistic.failed {
-		t.Fatalf("chatOptimistic = %+v, want it marked failed", model.chatOptimistic)
+	if lastBubble(model) == nil || lastBubble(model).state != chatSendFailed {
+		t.Fatalf("chatOptimistic = %+v, want it marked failed", lastBubble(model))
 	}
 	if !strings.Contains(model.View(), "no enviado") {
 		t.Fatalf("chat view = %q, want the bubble marked \"no enviado\"", model.View())

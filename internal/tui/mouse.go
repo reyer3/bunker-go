@@ -107,6 +107,11 @@ func (m Model) openThread(item core.Item) (Model, tea.Cmd) {
 // and reports focused=true — all in one command (openChatCmd) — while
 // resetting the shared composer for a fresh chat draft.
 func (m Model) openChat(item core.Item) (Model, tea.Cmd) {
+	if m.chatMode {
+		// Switching straight from another chat: its settled bubbles go,
+		// its pending sends keep delivering (chat_queue.go).
+		m = m.dropSettledChatSends(m.chatConvKey())
+	}
 	m.detail = true
 	m.chatMode = true
 	m.chatChannel = item.Channel
@@ -133,11 +138,10 @@ func (m Model) openChat(item core.Item) (Model, tea.Cmd) {
 	m.chatPresenceErr = nil
 	m.chatConfirm = false
 	m.chatPlan = core.Plan{}
-	m.chatSending = false
 	m.chatSendErr = nil
 	m.chatTypingOn = false
 	m.chatPreviewPending = false
-	m.chatOptimistic = nil
+	m = m.dropSettledChatSends(m.chatConvKey())
 	m.chatAction = nil
 	m.chatEditID, m.chatEditDraft = "", ""
 	m.chatForward = nil
@@ -168,13 +172,12 @@ func (m Model) leaveChat() (Model, tea.Cmd) {
 	m.detail = false
 	m.chatMode = false
 	m.chatConfirm = false
-	m.chatSending = false
 	m.chatTypingOn = false
 	m.chatPreviewPending = false
 	m.chatAutoSend = false
 	m.chatFocus = ""
 	m.chatLinks, m.chatLinkSel = nil, 0
-	m.chatOptimistic = nil
+	m = m.dropSettledChatSends(chatDraftKey(channel, account, thread))
 	m = m.cancelVoiceRecording().stopVoicePlay()
 	m = m.clearChatAttachments()
 	return m, leaveChatCmd(m.client, channel, account, thread)

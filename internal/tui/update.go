@@ -136,6 +136,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.itemsErr == nil {
 			m.chatItems = msg.items
+			m = m.reconcileChatQueue()
 		}
 		m.chatPresence = msg.presence
 		m.chatPresenceErr = msg.presenceErr
@@ -271,51 +272,23 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case chatReplySentMsg:
-		if msg.token != m.chatReplyToken || !m.chatSending {
-			return m, nil
-		}
-		m.chatSending = false
-		if msg.err != nil {
-			m.chatSendErr = msg.err
-			m.chatConfirm = false
-			if m.chatOptimistic != nil {
-				// K10: keep the bubble visible, marked "no enviado", and
-				// restore the draft the optimistic send already cleared
-				// from the composer — never auto-retry.
-				m.chatOptimistic.failed = true
-				m.composer.SetValue(m.chatOptimistic.body)
-				m = m.resizeChatComposer()
-			}
-			return m, nil
-		}
-		m.chatConfirm = false
-		m.chatPlan = core.Plan{}
-		m.chatSendErr = nil
-		m.chatForward = nil
-		m = m.clearChatAttachments()
-		if m.chatOptimistic != nil {
-			m.chatOptimistic.id = msg.receipt.ID
-		}
-		return m, reloadChatAfterSend(m.client, m.chatChannel, m.chatAccount, m.chatThread, msg.receipt.ID, m.chatReplyToken)
+		return m.handleChatSent(msg)
 	case forwardMediaMsg:
 		return m.handleForwardMedia(msg)
 	case chatSendReloadMsg:
-		if msg.token != m.chatReplyToken {
+		if msg.queued {
+			// A queued send's reload: still the same open chat?
+			if msg.token != m.chatToken || !m.chatMode {
+				return m, nil
+			}
+		} else if msg.token != m.chatReplyToken {
 			return m, nil
 		}
 		if msg.err == nil {
 			m.chatItems = msg.items
 			m.chatScroll = 0
 		}
-		// K10 dedupe: the optimistic bubble is dropped only once the
-		// reloaded thread actually contains the stored FromMe item
-		// (matched by the send's own receipt ID) — never on the mere
-		// arrival of the reload, so a stale/short reload never hides the
-		// only visible copy of the message just sent.
-		if m.chatOptimistic != nil && chatItemsContainID(m.chatItems, m.chatOptimistic.id) {
-			m.chatOptimistic = nil
-		}
-		return m, nil
+		return m.reconcileChatQueue(), nil
 	case replyPreviewMsg:
 		if msg.token != m.replyToken || !m.composing {
 			return m, nil
@@ -441,6 +414,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleOpenAttach(msg)
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
+			// Quitting drops the chat sends still queued: ask for a
+			// second Ctrl+C first.
+			if m.chatSendBusy() && !m.chatQuitArmed {
+				m.chatQuitArmed = true
+				return m.withFlash("se están enviando mensajes · Ctrl+C otra vez para salir igual"), nil
+			}
 			return m, m.quitCmd()
 		}
 		if next, cmd, ok := m.selectModeToggle(msg.String()); ok {

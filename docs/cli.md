@@ -468,9 +468,26 @@ a second `Enter` or `Ctrl+S` answers — namely attachments, voice notes, a
 new conversation started from the contact picker, edits, calls and every
 mail composer. `[tui] confirm_chat_send = true` in the config restores the
 two-step flow for plain text too (see `docs/config.example.toml`). Input
-is ignored while the preview or the send is in flight, so a fast double
-`Enter` sends once. `Esc` cancels back to editing with the draft kept, and typing your
-own composing state is reported to the other side, throttled to at most
+is ignored only while the (local, quick) dry-run preview is in flight, so a
+fast double `Enter` sends once and what is sent is what was previewed.
+
+**Sending several messages in a row.** A confirmed message shows at once
+as a dim own bubble marked "enviando…" and the composer clears, so you can
+keep typing and sending while it is delivered (WhatsApp's human pacing
+can hold a send for several seconds). Each message gets its own bubble, in
+order, and they are delivered strictly one at a time: the next one starts
+only after the previous one returned; the tail line says how many wait in
+line. Once a send succeeds its bubble is replaced by the stored message
+when the conversation reloads. If a send fails, its bubble and every one
+still waiting behind it in that chat say "no enviado" and none of them is
+sent (never out of order, never retried automatically): their text comes
+back into the composer, oldest first, ahead of anything typed since, with
+their attachments, so you can fix it and send again. `Esc` (and starting a
+forward) waits while that chat still has messages to deliver, and
+`Ctrl+C` asks for a second `Ctrl+C` before quitting with sends pending.
+
+In the inline confirm, `Esc` cancels back to editing with the draft kept.
+While typing, your own composing state is reported to the other side, throttled to at most
 once every 5s and cleared after 5s idle, on send, or on leave. `Alt+Enter`
 inserts a newline (plain `Enter` is reserved for send/confirm here, unlike
 the mail reply composer). `Up` at the top of an empty draft loads an

@@ -188,25 +188,28 @@ type Model struct {
 	chatPresenceErr error
 	chatConfirm     bool
 	chatPlan        core.Plan
-	chatSending     bool
 	chatSendErr     error
 	chatReplyToken  uint64
 	// chatPreviewPending is true from the moment Enter requests a dry-run
 	// preview until chatReplyPreviewMsg resolves (K10): every key is
-	// ignored while it is true (mirroring chatSending's own guard), so a
+	// ignored while it is true (the dry-run is local and quick), so a
 	// repeated Enter typed while the round trip is still in flight can
 	// never reissue the preview or bump chatReplyToken — the root cause
 	// of the reported "tengo que dar como 4 enters" bug, where an
 	// impatient extra Enter discarded the in-flight token before its
 	// reply ever landed.
 	chatPreviewPending bool
-	// chatOptimistic is the K10 optimistic own bubble shown the instant
-	// the user confirms a send, before the real send even returns: nil
-	// when no optimistic bubble is pending. It is cleared once the
-	// reloaded thread (chatSendReloadMsg) contains an item whose ID
-	// matches the real send's receipt ID (chatOptimistic.id) — the
-	// stored FromMe item then renders in its place, deduplicated.
-	chatOptimistic *chatOptimisticMsg
+	// chatQueue is the chat send queue (chat_queue.go): every confirmed
+	// message, oldest first, each with its K10 optimistic own bubble,
+	// delivered one at a time. A done entry is dropped once the loaded
+	// conversation contains the item matching its receipt ID — the stored
+	// FromMe item then renders in its place, deduplicated. chatSendSeq
+	// numbers the entries.
+	chatQueue   []chatOptimisticMsg
+	chatSendSeq uint64
+	// chatQuitArmed is set by a Ctrl+C refused because sends were still
+	// queued: the next Ctrl+C quits anyway.
+	chatQuitArmed bool
 	// chatAction is the edit, delete or reaction on screen (see
 	// chat_actions.go); chatEditID is our message being edited in the
 	// composer, with the draft set aside for it in chatEditDraft.

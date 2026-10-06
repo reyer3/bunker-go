@@ -75,9 +75,7 @@ func (m Model) handleChatRefreshed(msg chatRefreshedMsg) (tea.Model, tea.Cmd) {
 	}
 	merged, incoming := mergeChatPage(m.chatItems, msg.items)
 	m.chatItems = merged
-	if m.chatOptimistic != nil && chatItemsContainID(m.chatItems, m.chatOptimistic.id) {
-		m.chatOptimistic = nil
-	}
+	m = m.reconcileChatQueue()
 	if incoming && !m.blurred {
 		return m, markChatReadCmd(m.client, m.chatChannel, m.chatAccount, m.chatThread, m.chatToken)
 	}

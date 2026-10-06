@@ -61,6 +61,10 @@ func (m Model) startChatForward() (tea.Model, tea.Cmd) {
 		return m.noteUIError(errors.New("el mensaje no tiene nada que reenviar")), nil
 	case m.client == nil:
 		return m.noteUIError(errors.New("sin conexión con el daemon")), nil
+	case m.chatSendBusy():
+		// A forward leaves for another chat: wait for the queue, as Esc
+		// does.
+		return m.withFlash(pendingSendsNotice(m.chatPendingSends(""))), nil
 	}
 	next, cmd := m.openPickerFor(m.chatChannel, "Reenviar a…")
 	next.forwardPick = &it
