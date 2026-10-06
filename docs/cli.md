@@ -2462,6 +2462,31 @@ command as fixed argv and passes the id with `--env`.
   An id the daemon does not know shows
   `No se pudo abrir la conversación: …` in the pane, and `q` or Esc quits.
 
+## `bunker compose [--account <name>] [<mailto-url>]`
+
+Starts the TUI directly on the new mail editor, prefilled from a
+`mailto:` URL (RFC 6068). With no URL argument it reads it from
+`BUNKER_MAILTO`; that is how the herdr plugin's `compose` popup gets it.
+
+- **Fields:** the addresses before `?` and every `to=` go to To, `cc=` to
+  Cc, the first `subject=` to Subject and the first `body=` to the body
+  (`%0D%0A` becomes a line break). Values are percent-decoded and `+`
+  stays a literal plus. Other header fields are ignored.
+- **Account:** `--account` picks the mail account to send from; without
+  it, the first `channel = "mail"` account in `config.toml`.
+- **Focus:** the cursor starts in To when there is no recipient, else in
+  Subject when it is empty, else in the body.
+- **Leaving:** the editor works as in the full TUI (Tab moves between
+  fields, Ctrl+S previews, a second confirmation sends). Esc, or a sent
+  message, quits: there is no inbox behind it, and an unsent draft is
+  discarded.
+- **Errors:** no URL or more than one prints usage and exits 2; a URL that
+  is not `mailto:`, has a bad percent escape, a control character outside
+  the body, or a `bcc=` recipient (the editor has no Bcc field, so it is
+  refused rather than dropped) exits 2; no mail account (or an unknown
+  `--account`) exits 2; no TTY prints `error: bunker compose needs a
+  terminal` and exits 2; an unreachable daemon exits 1 as bare `bunker`.
+
 ## `bunker herdr toggle [--dry-run] [--json]`
 
 Docks bunker as a narrow panel on the right of the current herdr tab. It
@@ -2511,6 +2536,21 @@ Plain output is the action and pane (`open w1:p5`, `focus w1:p3`,
 
 `pane` is empty in an open dry run; `anchor` (the pane it docks beside)
 is only set for `open`.
+
+## `bunker herdr mailto [--dry-run] [<mailto-url>]`
+
+The `bunker.mailto` action of the herdr plugin, run by its `mailto:` link
+handler when a `mailto:` link is Ctrl-clicked in a herdr pane. It reads
+the URL from `HERDR_PLUGIN_CLICKED_URL` (or the argument), checks it parses
+as `bunker compose` would, and opens the plugin's `compose` popup on it:
+
+```sh
+herdr plugin pane open --plugin bunker --entrypoint compose --env BUNKER_MAILTO=<url> --focus
+```
+
+- **`--dry-run`:** prints that command instead of running it.
+- **Errors:** no URL, or one `bunker compose` would refuse, exits 2
+  without calling herdr; a herdr error exits 1 with its message.
 
 ## `bunker render [--tmux] [--json]`
 

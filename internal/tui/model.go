@@ -364,7 +364,10 @@ type Model struct {
 	sidebar      bool
 	externalOpen func(id string) error
 	openID       string
-	openErr      error
+	// compose is the message a "bunker compose" pane starts on (see
+	// mailto.go); nil otherwise.
+	compose *composeDraft
+	openErr error
 
 	// herdr integration (issue #82, herdr.go): agentAsk asks a coding
 	// agent about a conversation ("a"), asking while it runs;
@@ -418,6 +421,10 @@ func NewModel(client Client, opts ...Option) Model {
 	m := Model{client: client, polling: client != nil, pollToken: 1}
 	for _, opt := range opts {
 		opt(&m)
+	}
+	if m.compose != nil {
+		// A compose pane never shows the inbox either.
+		m.polling = false
 	}
 	if m.openID != "" {
 		// A single-conversation pane never shows the inbox, so it does
@@ -478,7 +485,7 @@ func (m Model) renderer() *lipgloss.Renderer {
 }
 
 func (m Model) Init() tea.Cmd {
-	if m.client == nil {
+	if m.client == nil || m.compose != nil {
 		return nil
 	}
 	if m.openID != "" {
@@ -514,6 +521,7 @@ func Run(client Client, input io.Reader, output io.Writer, opts ...Option) error
 	model.confirmChatSend = confirmChatSend
 	model.voiceRecordCmds = voiceRecordCommands
 	model.render = lipgloss.NewRenderer(output)
+	model = model.startMailDraft()
 	output = lockOutput(output)
 	model.notifyEnabled = resolveNotifyEnabled(notify, os.Getenv)
 	model.notifyWriter = output

@@ -31,3 +31,32 @@ title = "Toggle bunker"
 description = "Open, focus or close the bunker side panel"
 contexts = ["workspace"]
 command = ["bunker", "herdr", "toggle"]
+
+# A new mail prefilled from a mailto: URL, as a popup over the layout:
+# "bunker compose" quits when the message is sent or Esc closes the
+# editor, and herdr closes the popup with it. The URL arrives as
+# BUNKER_MAILTO, passed with "--env" by the "mailto" action below.
+[[panes]]
+id = "compose"
+title = "bunker: nuevo correo"
+placement = "popup"
+width = "80%"
+height = "80%"
+command = ["bunker", "compose"]
+
+# Run by the mailto link handler: reads HERDR_PLUGIN_CLICKED_URL and opens
+# the "compose" popup on it.
+[[actions]]
+id = "mailto"
+title = "Compose mail in bunker"
+description = "Open a new bunker mail prefilled from a mailto: link"
+command = ["bunker", "herdr", "mailto"]
+
+# Ctrl-click on a mailto: link (an OSC 8 hyperlink, such as the sender
+# addresses bunker itself shows) composes it in bunker instead of handing
+# it to the system mail client.
+[[link_handlers]]
+id = "mailto"
+title = "Compose in bunker"
+pattern = "(?i)^mailto:"
+action = "mailto"
