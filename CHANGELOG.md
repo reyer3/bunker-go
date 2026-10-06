@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.20.0](https://github.com/reyer3/bunker-go/compare/v0.19.0...v0.20.0) (2026-10-05)
+
+
+### Features
+
+* list conversations awaiting a reply ([#151](https://github.com/reyer3/bunker-go/issues/151)) ([538e82e](https://github.com/reyer3/bunker-go/commit/538e82ed6520865d490fab18eac116ed2b825d0d))
+* to-dos for what I promised and what others owe me ([#150](https://github.com/reyer3/bunker-go/issues/150)) ([5ae4713](https://github.com/reyer3/bunker-go/commit/5ae4713548e68ccd1ed07e7b9c082919e34bc032))
+* **tui:** Pendientes section with to-dos and chats awaiting a reply ([#153](https://github.com/reyer3/bunker-go/issues/153)) ([e306120](https://github.com/reyer3/bunker-go/commit/e306120f2939ab127f59159c444a80ae4fc8a82d))
+
+
+### Bug Fixes
+
+* **whatsapp:** messages sent to a number land in that person's chat ([#154](https://github.com/reyer3/bunker-go/issues/154)) ([40aea20](https://github.com/reyer3/bunker-go/commit/40aea20ae29367d4550b4a883d7fc1275d51a85a))
+
 ## [0.19.0](https://github.com/reyer3/bunker-go/compare/v0.18.0...v0.19.0) (2026-10-05)
 
 
