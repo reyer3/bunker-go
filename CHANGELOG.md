@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.21.0](https://github.com/reyer3/bunker-go/compare/v0.20.0...v0.21.0) (2026-10-07)
+
+
+### Features
+
+* configurable accent colors and mailto links from herdr ([#155](https://github.com/reyer3/bunker-go/issues/155)) ([931f10d](https://github.com/reyer3/bunker-go/commit/931f10d92c6baaed2c84c6ac5365b4bb9901f53d))
+* **tui:** queue chat sends so typing never waits on delivery ([#156](https://github.com/reyer3/bunker-go/issues/156)) ([3ceb052](https://github.com/reyer3/bunker-go/commit/3ceb05204284be571bd90d16c2ebb2c2bdcdb39c))
+* **whatsapp:** show video calls as video and answer them as voice ([#158](https://github.com/reyer3/bunker-go/issues/158)) ([5797d7a](https://github.com/reyer3/bunker-go/commit/5797d7a8a9279934366c8aa5256da8d2d1ff0229))
+
 ## [0.20.0](https://github.com/reyer3/bunker-go/compare/v0.19.0...v0.20.0) (2026-10-05)
 
 
