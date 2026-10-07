@@ -54,17 +54,25 @@ treated as local, as every client did before.
   writes the file on its own machine with the same rules as a local
   download (`--force`, the 100 MB cap, `0600`, no partial file). The
   daemon deletes the staged copy at the end, and any copy left idle for
-  10 minutes (a client that died halfway) on the next staged download.
+  10 minutes (a client that died halfway) on the next staged download or
+  upload.
 - Avatars work remotely: the PNG comes back inline and the client keeps
   its own copy under `$BUNKER_CACHE_DIR/remote-avatars` (else
   `~/.cache/bunker-go/remote-avatars`), returning that path.
-- Sending attachments, voice notes or status media from a remote client
-  is not supported yet: `send`/`reply` with `--attach`/`--media`, voice
-  replies and `status post --media` (dry runs included) are refused
-  before the daemon is asked, with "rpc: sending files from a remote
-  client is not supported yet (the daemon cannot read this machine's
-  files)". The daemon would otherwise open those paths on its own
-  machine. Text-only sends work remotely as usual.
+- Sending attachments, voice notes and status media works remotely:
+  `send`/`reply` with `--attach`/`--media`, voice replies and
+  `status post --media` first upload each file into the daemon's
+  `<state dir>/staging/<token>/` (`0700` dir, `0600` file) in 4 MiB
+  chunks, checked against the client's size and sha256, under the file's
+  original name (the attachment name the recipient sees). Each file is at
+  most 100 MB (the channel's own limit still applies). A missing or
+  unreadable file fails before anything is uploaded or sent. Dry runs
+  upload too, because the daemon inspects the files to build the plan;
+  the plan still shows the client's own paths. The client deletes its
+  uploads once the call returns, whatever the outcome, and the daemon
+  sweeps any left idle for 10 minutes. The daemon only accepts a path
+  inside its staging dir when it is a finished upload, so no client can
+  make it send a staged download or a half-written file.
 
 ## `bunker daemon [--fake]`
 

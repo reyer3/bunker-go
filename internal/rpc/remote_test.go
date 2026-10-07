@@ -8,15 +8,18 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/reyer3/bunker-go/internal/channel/fake"
 	"github.com/reyer3/bunker-go/internal/core"
+	"github.com/reyer3/bunker-go/internal/oggfixture"
 	"github.com/reyer3/bunker-go/internal/store"
 )
 
@@ -28,6 +31,74 @@ type remoteTestDaemon struct {
 	stagingDir string
 	avatarDir  string
 	adapter    *fake.Adapter
+	media      *mediaFake
+}
+
+// sentFile is one file the daemon handed an adapter: its path there and
+// the bytes it held at that moment (the upload is released right after).
+type sentFile struct {
+	path string
+	data []byte
+}
+
+// mediaFake adds media, voice and status capture to the fake adapter,
+// reading each file while the send is in progress, so a test sees
+// exactly what the daemon would have delivered.
+type mediaFake struct {
+	*fake.Adapter
+	mu       sync.Mutex
+	media    []sentFile
+	voice    []sentFile
+	statuses []sentFile
+}
+
+func readSent(paths ...string) ([]sentFile, error) {
+	var out []sentFile
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sentFile{path: p, data: data})
+	}
+	return out, nil
+}
+
+func (m *mediaFake) SendMedia(ctx context.Context, out core.Outgoing) (core.Receipt, error) {
+	files, err := readSent(out.Attachments...)
+	if err != nil {
+		return core.Receipt{}, err
+	}
+	m.mu.Lock()
+	m.media = append(m.media, files...)
+	m.mu.Unlock()
+	return m.Adapter.Send(ctx, out)
+}
+
+func (m *mediaFake) SendVoice(ctx context.Context, out core.Outgoing) (core.Receipt, error) {
+	files, err := readSent(out.Attachments...)
+	if err != nil {
+		return core.Receipt{}, err
+	}
+	m.mu.Lock()
+	m.voice = append(m.voice, files...)
+	m.mu.Unlock()
+	return m.Adapter.SendVoice(ctx, out)
+}
+
+func (m *mediaFake) PostStatus(ctx context.Context, status core.Status) (core.Receipt, error) {
+	files, err := readSent(status.Media)
+	if err != nil {
+		return core.Receipt{}, err
+	}
+	m.mu.Lock()
+	m.statuses = append(m.statuses, files...)
+	m.mu.Unlock()
+	return m.Adapter.PostStatus(ctx, status)
+}
+
+func (m *mediaFake) AttachmentPolicy() core.AttachmentPolicy {
+	return core.AttachmentPolicy{MaxBytes: map[string]int64{core.AnyMIME: core.MaxUploadBytes}}
 }
 
 func startRemoteTestDaemon(t *testing.T, data []byte) remoteTestDaemon {
@@ -50,13 +121,15 @@ func startRemoteTestDaemon(t *testing.T, data []byte) remoteTestDaemon {
 	reg := core.NewRegistry()
 	adapter := fake.New(core.ChannelMail, "cl")
 	adapter.SetAttachmentData(item.ID, 0, data)
-	reg.Register(adapter)
+	media := &mediaFake{Adapter: adapter}
+	reg.Register(media)
 	svc := core.NewService(st, reg)
 	d := remoteTestDaemon{
 		socket:     filepath.Join(dir, "bunker.sock"),
 		stagingDir: filepath.Join(dir, "staging"),
 		avatarDir:  filepath.Join(dir, "avatars"),
 		adapter:    adapter,
+		media:      media,
 	}
 	svc.SetStagingDir(d.stagingDir)
 	svc.SetAvatarCacheDir(d.avatarDir)
@@ -370,60 +443,268 @@ func TestRemoteClientAvatarWritesLocalCopy(t *testing.T) {
 	}
 }
 
-// TestRemoteClientRefusesToSendFiles covers the send side until upload
-// support lands: the daemon would open these paths on its own machine
-// (and send its own file if the same path exists there), so a remote
-// client refuses before the daemon hears anything, dry runs included.
-func TestRemoteClientRefusesToSendFiles(t *testing.T) {
-	tests := []struct {
-		name string
-		send func(context.Context, *Client) error
-	}{
-		{"send with an attachment", func(ctx context.Context, c *Client) error {
-			out := core.Outgoing{Channel: core.ChannelMail, Account: "cl", To: []string{"to@example.test"}, Body: "x", Attachments: []string{"/home/u/a.pdf"}}
-			_, _, err := c.Send(ctx, out, false)
-			return err
-		}},
-		{"dry-run send with an attachment", func(ctx context.Context, c *Client) error {
-			out := core.Outgoing{Channel: core.ChannelMail, Account: "cl", To: []string{"to@example.test"}, Attachments: []string{"/home/u/a.pdf"}}
-			_, _, err := c.Send(ctx, out, true)
-			return err
-		}},
-		{"reply with an attachment", func(ctx context.Context, c *Client) error {
-			_, _, err := c.Reply(ctx, "mail:cl:att", "x", nil, []string{"/home/u/a.pdf"}, true)
-			return err
-		}},
-		{"reply with a voice note", func(ctx context.Context, c *Client) error {
-			_, _, err := c.Reply(core.WithVoice(ctx), "mail:cl:att", "", nil, []string{"/home/u/note.ogg"}, false)
-			return err
-		}},
-		{"status with media", func(ctx context.Context, c *Client) error {
-			_, _, err := c.PostStatus(ctx, core.ChannelMail, "cl", core.Status{Text: "x", Media: "/home/u/p.jpg"}, true)
-			return err
-		}},
+// writeClientFile writes data under name in a dir only the client side
+// of a test uses, standing in for a file on the laptop.
+func writeClientFile(t *testing.T, name string, data []byte) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("BUNKER_REMOTE", "1")
-			var mu sync.Mutex
-			var calls []string
-			socket := startScriptedServer(t, func(req Request) Response {
-				mu.Lock()
-				calls = append(calls, req.Method)
-				mu.Unlock()
-				return Response{Result: json.RawMessage(`{}`)}
-			})
-			client := dialRemoteTest(t, socket)
-			err := tt.send(context.Background(), client)
-			if !errors.Is(err, core.ErrUnsupported) {
-				t.Fatalf("err = %v, want ErrUnsupported", err)
+	return path
+}
+
+func assertStagingEmpty(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("ReadDir(staging): %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("staging dir holds %d entries after the send, want every upload released", len(entries))
+	}
+}
+
+// TestRemoteClientSendsLargeAttachmentThroughUploads is the headline
+// upload case: a client on another machine sends a file larger than the
+// protocol's 8 MB line cap that only it can read. It reaches the daemon
+// in chunks, under its original name, byte for byte.
+func TestRemoteClientSendsLargeAttachmentThroughUploads(t *testing.T) {
+	t.Setenv("BUNKER_REMOTE", "1")
+	d := startRemoteTestDaemon(t, []byte("x"))
+	client := dialRemoteTest(t, d.socket)
+	data := make([]byte, 9<<20+4321)
+	for i := range data {
+		data[i] = byte(i*13 + i>>9)
+	}
+	local := writeClientFile(t, "Informe final.pdf", data)
+
+	out := core.Outgoing{Channel: core.ChannelMail, Account: "cl", To: []string{"to@example.test"}, Subject: "s", Body: "see attached", Attachments: []string{local}}
+	plan, receipt, err := client.Send(context.Background(), out, false)
+	if err != nil || receipt.ID == "" {
+		t.Fatalf("Send = %+v, %v; want a receipt", receipt, err)
+	}
+	if len(plan.Attachments) != 1 || plan.Attachments[0].Name != "Informe final.pdf" || plan.Attachments[0].Size != int64(len(data)) {
+		t.Fatalf("plan attachments = %+v, want Informe final.pdf of %d bytes", plan.Attachments, len(data))
+	}
+	if len(plan.Media) != 1 || plan.Media[0] != local {
+		t.Fatalf("plan media = %v, want the client's own path %s", plan.Media, local)
+	}
+	d.media.mu.Lock()
+	sent := d.media.media
+	d.media.mu.Unlock()
+	if len(sent) != 1 || filepath.Base(sent[0].path) != "Informe final.pdf" || !bytes.Equal(sent[0].data, data) {
+		t.Fatalf("adapter got %d files, want Informe final.pdf with the %d client bytes", len(sent), len(data))
+	}
+	if !strings.HasPrefix(sent[0].path, d.stagingDir+string(filepath.Separator)) {
+		t.Fatalf("adapter opened %s, want a file in the daemon's staging dir", sent[0].path)
+	}
+	assertStagingEmpty(t, d.stagingDir)
+}
+
+func TestRemoteClientRepliesWithVoiceNote(t *testing.T) {
+	t.Setenv("BUNKER_REMOTE", "1")
+	d := startRemoteTestDaemon(t, []byte("x"))
+	client := dialRemoteTest(t, d.socket)
+	ogg := oggfixture.Bytes(3 * time.Second)
+	local := writeClientFile(t, "nota.ogg", ogg)
+
+	plan, _, err := client.Reply(core.WithVoice(context.Background()), "mail:cl:att", "", nil, []string{local}, false)
+	if err != nil {
+		t.Fatalf("Reply voice: %v", err)
+	}
+	if !plan.Voice || len(plan.Attachments) != 1 || plan.Attachments[0].Name != "nota.ogg" || plan.Attachments[0].DurationMS != 3000 {
+		t.Fatalf("plan = %+v, want a 3 s voice note nota.ogg", plan)
+	}
+	d.media.mu.Lock()
+	voice := d.media.voice
+	d.media.mu.Unlock()
+	if len(voice) != 1 || filepath.Base(voice[0].path) != "nota.ogg" || !bytes.Equal(voice[0].data, ogg) {
+		t.Fatalf("adapter got %d voice notes, want nota.ogg with the client bytes", len(voice))
+	}
+	assertStagingEmpty(t, d.stagingDir)
+}
+
+func TestRemoteClientPostsStatusMedia(t *testing.T) {
+	t.Setenv("BUNKER_REMOTE", "1")
+	d := startRemoteTestDaemon(t, []byte("x"))
+	client := dialRemoteTest(t, d.socket)
+	data := []byte("\x89PNG\r\n\x1a\nnot really a picture")
+	local := writeClientFile(t, "foto.png", data)
+
+	if _, _, err := client.PostStatus(context.Background(), core.ChannelMail, "cl", core.Status{Text: "hola", Media: local}, false); err != nil {
+		t.Fatalf("PostStatus: %v", err)
+	}
+	d.media.mu.Lock()
+	statuses := d.media.statuses
+	d.media.mu.Unlock()
+	if len(statuses) != 1 || filepath.Base(statuses[0].path) != "foto.png" || !bytes.Equal(statuses[0].data, data) {
+		t.Fatalf("adapter got %d status files, want foto.png with the client bytes", len(statuses))
+	}
+	assertStagingEmpty(t, d.stagingDir)
+}
+
+// TestRemoteClientDryRunUploadsForThePlan: the daemon inspects files to
+// build a plan, so a dry run uploads them too, sends nothing, and leaves
+// no upload behind.
+func TestRemoteClientDryRunUploadsForThePlan(t *testing.T) {
+	t.Setenv("BUNKER_REMOTE", "1")
+	d := startRemoteTestDaemon(t, []byte("x"))
+	client := dialRemoteTest(t, d.socket)
+	local := writeClientFile(t, "presupuesto.txt", []byte("total: 10"))
+
+	plan, _, err := client.Reply(context.Background(), "mail:cl:att", "x", nil, []string{local}, true)
+	if err != nil {
+		t.Fatalf("dry-run Reply: %v", err)
+	}
+	if len(plan.Attachments) != 1 || plan.Attachments[0].Name != "presupuesto.txt" || plan.Attachments[0].Size != 9 {
+		t.Fatalf("plan attachments = %+v, want presupuesto.txt of 9 bytes", plan.Attachments)
+	}
+	if len(plan.Media) != 1 || plan.Media[0] != local {
+		t.Fatalf("plan media = %v, want the client's own path", plan.Media)
+	}
+	d.media.mu.Lock()
+	n := len(d.media.media)
+	d.media.mu.Unlock()
+	if n != 0 || len(d.adapter.SentMessages()) != 0 {
+		t.Fatal("a dry run sent something")
+	}
+	assertStagingEmpty(t, d.stagingDir)
+}
+
+// TestDaemonRefusesStagingPathThatIsNotAnUpload: whatever the client, a
+// path into the daemon's staging dir that no upload committed (here a
+// download token's file) is refused, so nobody can make the daemon send
+// another attachment it parked there.
+func TestDaemonRefusesStagingPathThatIsNotAnUpload(t *testing.T) {
+	t.Setenv("BUNKER_REMOTE", "0")
+	d := startRemoteTestDaemon(t, []byte("parked attachment"))
+	client := dialRemoteTest(t, d.socket)
+	if err := os.MkdirAll(d.stagingDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	parked := filepath.Join(d.stagingDir, "0123456789abcdef0123456789abcdef")
+	if err := os.WriteFile(parked, []byte("parked attachment"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := core.Outgoing{Channel: core.ChannelMail, Account: "cl", To: []string{"to@example.test"}, Body: "x", Attachments: []string{parked}}
+	if _, _, err := client.Send(context.Background(), out, false); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("Send err = %v, want ErrNotFound", err)
+	}
+	d.media.mu.Lock()
+	defer d.media.mu.Unlock()
+	if len(d.media.media) != 0 {
+		t.Fatal("the daemon sent its own staged file")
+	}
+}
+
+// scriptedUploads plays a daemon that accepts uploads, recording every
+// method; commitErr fails the commit of the n-th upload (1-based, 0:
+// never).
+func scriptedUploads(t *testing.T, failCommit int) (string, func() []string) {
+	t.Helper()
+	var mu sync.Mutex
+	var calls []string
+	opened := 0
+	socket := startScriptedServer(t, func(req Request) Response {
+		mu.Lock()
+		defer mu.Unlock()
+		calls = append(calls, req.Method)
+		switch req.Method {
+		case MethodUploadOpen:
+			opened++
+			return Response{Result: mustResult(t, uploadOpenResult{Token: fmt.Sprintf("%032x", opened)})}
+		case MethodUploadCommit:
+			var p uploadCommitParams
+			_ = json.Unmarshal(req.Params, &p)
+			if failCommit > 0 && p.Token == fmt.Sprintf("%032x", failCommit) {
+				return Response{Error: "core: upload sha256 mismatch"}
 			}
-			mu.Lock()
-			defer mu.Unlock()
-			if len(calls) != 0 {
-				t.Fatalf("daemon received %v, want no call at all", calls)
+			return Response{Result: mustResult(t, uploadCommitResult{Path: "/daemon/staging/" + p.Token + "/f"})}
+		}
+		return Response{Result: json.RawMessage(`{}`)}
+	})
+	return socket, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), calls...)
+	}
+}
+
+func TestRemoteClientMissingFileSendsNothing(t *testing.T) {
+	t.Setenv("BUNKER_REMOTE", "1")
+	socket, calls := scriptedUploads(t, 0)
+	client := dialRemoteTest(t, socket)
+	ok := writeClientFile(t, "ok.txt", []byte("ok"))
+	missing := filepath.Join(t.TempDir(), "missing.pdf")
+	out := core.Outgoing{Channel: core.ChannelMail, Account: "cl", To: []string{"to@example.test"}, Attachments: []string{ok, missing}}
+	_, _, err := client.Send(context.Background(), out, false)
+	if err == nil || !strings.Contains(err.Error(), "missing.pdf") {
+		t.Fatalf("err = %v, want an error naming missing.pdf", err)
+	}
+	if got := calls(); len(got) != 0 {
+		t.Fatalf("daemon received %v, want nothing (the file check comes first)", got)
+	}
+}
+
+func TestRemoteClientUploadFailureAbortsAndReleases(t *testing.T) {
+	t.Setenv("BUNKER_REMOTE", "1")
+	socket, calls := scriptedUploads(t, 2)
+	client := dialRemoteTest(t, socket)
+	a := writeClientFile(t, "a.txt", []byte("aaa"))
+	b := writeClientFile(t, "b.txt", []byte("bbb"))
+	out := core.Outgoing{Channel: core.ChannelMail, Account: "cl", To: []string{"to@example.test"}, Attachments: []string{a, b}}
+	if _, _, err := client.Send(context.Background(), out, false); err == nil {
+		t.Fatal("Send succeeded although an upload failed")
+	}
+	got := calls()
+	releases := 0
+	for _, m := range got {
+		if m == MethodSend {
+			t.Fatalf("daemon received send after a failed upload: %v", got)
+		}
+		if m == MethodUploadRelease {
+			releases++
+		}
+	}
+	if releases != 2 {
+		t.Fatalf("calls = %v, want both uploads released", got)
+	}
+}
+
+func TestRemoteClientReleasesUploadsAfterSendError(t *testing.T) {
+	t.Setenv("BUNKER_REMOTE", "1")
+	var mu sync.Mutex
+	var calls []string
+	socket := startScriptedServer(t, func(req Request) Response {
+		mu.Lock()
+		calls = append(calls, req.Method)
+		mu.Unlock()
+		switch req.Method {
+		case MethodUploadOpen:
+			return Response{Result: mustResult(t, uploadOpenResult{Token: "0123456789abcdef0123456789abcdef"})}
+		case MethodUploadCommit:
+			return Response{Result: mustResult(t, uploadCommitResult{Path: "/daemon/staging/x/a.txt"})}
+		case MethodPostStatus:
+			var p statusParams
+			_ = json.Unmarshal(req.Params, &p)
+			if p.Status.Media != "/daemon/staging/x/a.txt" {
+				return Response{Error: "status media " + p.Status.Media + " was not rewritten"}
 			}
-		})
+			return Response{Error: "adapter down"}
+		}
+		return Response{Result: json.RawMessage(`{}`)}
+	})
+	client := dialRemoteTest(t, socket)
+	local := writeClientFile(t, "a.txt", []byte("aaa"))
+	_, _, err := client.PostStatus(context.Background(), core.ChannelMail, "cl", core.Status{Media: local}, false)
+	if err == nil || !strings.Contains(err.Error(), "adapter down") {
+		t.Fatalf("err = %v, want the daemon's send error", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if last := calls[len(calls)-1]; last != MethodUploadRelease {
+		t.Fatalf("calls = %v, want the upload released after the failed status", calls)
 	}
 }
 

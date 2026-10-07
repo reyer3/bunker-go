@@ -81,6 +81,10 @@ const (
 	MethodDownloadChunk     = "download_chunk"
 	MethodDownloadClose     = "download_close"
 	MethodAvatarData        = "avatar_data"
+	MethodUploadOpen        = "upload_open"
+	MethodUploadChunk       = "upload_chunk"
+	MethodUploadCommit      = "upload_commit"
+	MethodUploadRelease     = "upload_release"
 )
 
 type listParams struct {
@@ -353,6 +357,42 @@ type downloadChunkResult struct {
 // downloadCloseParams is MethodDownloadClose's params: release Token's
 // staged file on the daemon.
 type downloadCloseParams struct {
+	Token string `json:"token"`
+}
+
+// uploadOpenParams is MethodUploadOpen's params: a remote client is
+// about to upload Size bytes whose sha256 is SHA256, to be sent as an
+// attachment called Name (core.Service.BeginUpload).
+type uploadOpenParams struct {
+	Name   string `json:"name"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256"`
+}
+type uploadOpenResult struct {
+	Token string `json:"token"`
+}
+
+// uploadChunkParams is MethodUploadChunk's params: the next at most
+// core.MaxStagedChunk bytes of Token's upload, starting at Offset (the
+// bytes sent so far), base64-encoded as []byte's JSON form.
+type uploadChunkParams struct {
+	Token  string `json:"token"`
+	Offset int64  `json:"offset"`
+	Data   []byte `json:"data"`
+}
+
+// uploadCommitParams is MethodUploadCommit's params: finish Token's
+// upload; the result's Path is the daemon-side file to name in a send.
+type uploadCommitParams struct {
+	Token string `json:"token"`
+}
+type uploadCommitResult struct {
+	Path string `json:"path"`
+}
+
+// uploadReleaseParams is MethodUploadRelease's params: delete Token's
+// upload on the daemon, finished or not.
+type uploadReleaseParams struct {
 	Token string `json:"token"`
 }
 

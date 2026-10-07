@@ -54,6 +54,10 @@ type Service struct {
 	// machine to read them, and the clock their TTL is measured with.
 	stagingDir   string
 	stagingClock func() time.Time
+	// uploadMu guards uploads, the uploads BeginUpload opened and
+	// CommitUpload has not finished (see upload.go).
+	uploadMu sync.Mutex
+	uploads  map[string]*pendingUpload
 
 	// presenceMu/presenceLeases/presenceAfterFunc back the availability
 	// lease PresenceKeepalive implements (see presence.go). presenceAfterFunc
@@ -599,13 +603,16 @@ func toLowerASCII(s string) string {
 // A real reply whose ctx carries an idempotency key (WithIdempotencyKey)
 // is sent at most once per key; see idempotencyCache.do.
 func (s *Service) Reply(ctx context.Context, id string, body string, cc []string, attachments []string, dryRun bool) (Plan, Receipt, error) {
+	if err := s.checkStagedPaths(attachments...); err != nil {
+		return Plan{}, Receipt{}, err
+	}
 	key := IdempotencyKey(ctx)
 	if dryRun || key == "" {
 		return s.reply(ctx, id, body, cc, attachments, dryRun)
 	}
 	parts := append([]string{"reply", id, body, "cc"}, cc...)
 	parts = append(parts, "attachments")
-	parts = append(parts, attachments...)
+	parts = append(parts, s.fingerprintPaths(attachments)...)
 	parts = append(parts, fmt.Sprint("voice=", IsVoice(ctx)))
 	return s.idempotency.do(ctx, key, requestFingerprint(parts...), func() (Plan, Receipt, error) {
 		return s.reply(ctx, id, body, cc, attachments, false)
@@ -702,6 +709,9 @@ func (s *Service) reply(ctx context.Context, id string, body string, cc []string
 // reports those per recipient, not as an error): a retry must not resend
 // to the ones that already got it, so it replays the same results.
 func (s *Service) Send(ctx context.Context, out Outgoing, dryRun bool) (Plan, Receipt, error) {
+	if err := s.checkStagedPaths(out.Attachments...); err != nil {
+		return Plan{}, Receipt{}, err
+	}
 	key := IdempotencyKey(ctx)
 	if dryRun || key == "" {
 		return s.send(ctx, out, dryRun)
@@ -711,7 +721,7 @@ func (s *Service) Send(ctx context.Context, out Outgoing, dryRun bool) (Plan, Re
 	parts = append(parts, "cc")
 	parts = append(parts, out.Cc...)
 	parts = append(parts, "attachments")
-	parts = append(parts, out.Attachments...)
+	parts = append(parts, s.fingerprintPaths(out.Attachments)...)
 	parts = append(parts, fmt.Sprint("voice=", out.Voice), fmt.Sprint("forward=", out.Forward))
 	return s.idempotency.do(ctx, key, requestFingerprint(parts...), func() (Plan, Receipt, error) {
 		return s.send(ctx, out, false)
@@ -1023,6 +1033,9 @@ func mergeLabels(current, add, remove []string) []string {
 // PostStatus publishes a status/story on channel/account. dryRun returns
 // the Plan alone.
 func (s *Service) PostStatus(ctx context.Context, channel Channel, account string, status Status, dryRun bool) (Plan, Receipt, error) {
+	if err := s.checkStagedPaths(status.Media); err != nil {
+		return Plan{}, Receipt{}, err
+	}
 	plan := Plan{
 		Action:  "status",
 		Channel: channel,
