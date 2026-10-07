@@ -15,11 +15,12 @@ import (
 	"github.com/reyer3/bunker-go/internal/secfile"
 )
 
-// StagingTTL is how long a staged download survives without being read.
-// A remote client reads its token chunk by chunk and releases it at the
-// end; one that dies halfway never does, so every StageDownload sweeps
-// files idle for longer than this. Each ReadStaged refreshes the clock,
-// so a slow but live transfer is never swept from under its reader.
+// StagingTTL is how long a staged download or upload survives unused.
+// A remote client reads (or writes) its token chunk by chunk and
+// releases it at the end; one that dies halfway never does, so every
+// StageDownload and BeginUpload sweeps entries idle for longer than
+// this. Each ReadStaged and WriteUploadChunk refreshes the clock, so a
+// slow but live transfer is never swept from under its client.
 const StagingTTL = 10 * time.Minute
 
 // MaxStagedChunk caps one ReadStaged call. Base64 inflates it to about
@@ -41,9 +42,9 @@ type StagedFile struct {
 	SHA256 string
 }
 
-// SetStagingDir sets where StageDownload keeps files for remote clients
-// (production wiring: <stateDir>/staging in cmd/bunker/daemon.go; a
-// t.TempDir() in tests). Like the avatar cache, staging refuses to run
+// SetStagingDir sets where StageDownload and BeginUpload keep files for
+// remote clients (production wiring: <stateDir>/staging in
+// cmd/bunker/daemon.go; a t.TempDir() in tests). Like the avatar cache, staging refuses to run
 // without it rather than guessing a default under a real HOME.
 func (s *Service) SetStagingDir(dir string) { s.stagingDir = dir }
 
@@ -179,22 +180,29 @@ func (s *Service) touchStaged(path string) {
 }
 
 // sweepStaging removes every staging entry idle for longer than
-// StagingTTL: tokens a client abandoned, and temp files a daemon crash
-// left mid-write. Running it lazily on each StageDownload bounds the
-// leftovers without a background goroutine the daemon has to own.
+// StagingTTL: download tokens and upload dirs a client abandoned, and
+// temp files a daemon crash left mid-write. Running it lazily on each
+// StageDownload and BeginUpload bounds the leftovers without a
+// background goroutine the daemon has to own. An upload dir is aged by
+// its own mtime, which every chunk refreshes; a swept upload still in
+// flight is forgotten too, so its next chunk fails with ErrNotFound
+// instead of writing to a deleted file.
 func (s *Service) sweepStaging() {
 	entries, err := os.ReadDir(s.stagingDir)
 	if err != nil {
 		return
 	}
 	now := s.stagingNow()
+	s.uploadMu.Lock()
+	defer s.uploadMu.Unlock()
 	for _, e := range entries {
 		info, err := e.Info()
 		if err != nil {
 			continue
 		}
 		if now.Sub(info.ModTime()) > StagingTTL {
-			_ = os.Remove(filepath.Join(s.stagingDir, e.Name()))
+			s.dropUploadLocked(e.Name())
+			_ = os.RemoveAll(filepath.Join(s.stagingDir, e.Name()))
 		}
 	}
 }
