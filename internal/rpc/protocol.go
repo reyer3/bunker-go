@@ -76,6 +76,11 @@ const (
 	MethodEdit              = "edit"
 	MethodDelete            = "delete"
 	MethodReact             = "react"
+	MethodFSProbe           = "fs_probe"
+	MethodDownloadOpen      = "download_open"
+	MethodDownloadChunk     = "download_chunk"
+	MethodDownloadClose     = "download_close"
+	MethodAvatarData        = "avatar_data"
 )
 
 type listParams struct {
@@ -281,11 +286,13 @@ type statusParams struct {
 // downloadParams is MethodDownload's params: save item ID's attachment
 // at Index to Path on the machine the daemon runs on. The daemon writes
 // the file itself instead of returning its bytes (see Client.Download
-// and core.Service.Download): the CLI and the daemon always run as the
-// same user on the same machine, so this is both simpler and keeps every
-// download under one enforced size cap, instead of also needing to fit
-// a 100 MB attachment through this line-delimited JSON protocol's much
-// smaller read buffer (see Server.handleConn's 8 MB scanner buffer).
+// and core.Service.Download): for a client on the daemon's machine this
+// is both simpler and keeps every download under one enforced size cap,
+// instead of fitting a 100 MB attachment through this line-delimited
+// JSON protocol's much smaller read buffer (see Server.handleConn's 8 MB
+// scanner buffer). A client on another machine (a forwarded socket)
+// cannot see Path, so it uses the download_open/chunk/close methods
+// below instead (see Client.Download).
 type downloadParams struct {
 	ID    string `json:"id"`
 	Index int    `json:"index"`
@@ -294,6 +301,67 @@ type downloadParams struct {
 }
 type downloadResult struct {
 	Result core.DownloadResult `json:"result"`
+}
+
+// fsProbeParams is MethodFSProbe's params: the client wrote Nonce into
+// Path on its own machine and asks whether the daemon reads the same
+// bytes there, which only happens when both share one filesystem. The
+// answer is a bare bool so the probe never discloses a file's content.
+type fsProbeParams struct {
+	Path  string `json:"path"`
+	Nonce string `json:"nonce"`
+}
+type fsProbeResult struct {
+	Readable bool `json:"readable"`
+}
+
+// minProbeNonce is the shortest nonce fs_probe accepts, so the probe
+// cannot be turned into a cheap "is this short file equal to X" oracle.
+const minProbeNonce = 16
+
+// downloadOpenParams is MethodDownloadOpen's params: stage item ID's
+// attachment at Index on the daemon (core.Service.StageDownload), capped
+// at MaxBytes (zero: the daemon's default), for a remote client to read
+// in chunks.
+type downloadOpenParams struct {
+	ID       string `json:"id"`
+	Index    int    `json:"index"`
+	MaxBytes int64  `json:"max_bytes,omitempty"`
+}
+type downloadOpenResult struct {
+	Token  string `json:"token"`
+	Size   int64  `json:"size"`
+	Name   string `json:"name"`
+	MIME   string `json:"mime"`
+	SHA256 string `json:"sha256"`
+}
+
+// downloadChunkParams is MethodDownloadChunk's params: at most Length
+// (<= core.MaxStagedChunk) bytes of Token's staged file from Offset.
+type downloadChunkParams struct {
+	Token  string `json:"token"`
+	Offset int64  `json:"offset"`
+	Length int64  `json:"length"`
+}
+
+// downloadChunkResult carries the bytes base64-encoded ([]byte's JSON
+// form); fewer than asked means the end of the file.
+type downloadChunkResult struct {
+	Data []byte `json:"data"`
+}
+
+// downloadCloseParams is MethodDownloadClose's params: release Token's
+// staged file on the daemon.
+type downloadCloseParams struct {
+	Token string `json:"token"`
+}
+
+// avatarDataResult is MethodAvatarData's result (params: avatarParams):
+// the avatar PNG's bytes inline, for a remote client to cache locally.
+// Avatars are a few KB, far below the line buffer, so they skip staging.
+type avatarDataResult struct {
+	Generated bool   `json:"generated"`
+	Data      []byte `json:"data"`
 }
 
 // avatarParams is MethodAvatar's params: the same (channel, account,
