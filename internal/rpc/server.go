@@ -3,9 +3,11 @@ package rpc
 import (
 	"bufio"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 
@@ -244,6 +246,59 @@ func (s *Server) call(ctx context.Context, req Request) (any, error) {
 		}
 		return avatarResult{Result: res}, nil
 
+	case MethodFSProbe:
+		var p fsProbeParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		if len(p.Nonce) < minProbeNonce {
+			return nil, fmt.Errorf("rpc: fs_probe nonce shorter than %d bytes", minProbeNonce)
+		}
+		return fsProbeResult{Readable: probeFile(p.Path, p.Nonce)}, nil
+
+	case MethodDownloadOpen:
+		var p downloadOpenParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		staged, err := s.svc.StageDownload(ctx, p.ID, p.Index, core.DownloadOptions{MaxBytes: p.MaxBytes})
+		if err != nil {
+			return nil, err
+		}
+		return downloadOpenResult{Token: staged.Token, Size: staged.Size, Name: staged.Name, MIME: staged.MIME, SHA256: staged.SHA256}, nil
+
+	case MethodDownloadChunk:
+		var p downloadChunkParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		data, err := s.svc.ReadStaged(p.Token, p.Offset, p.Length)
+		if err != nil {
+			return nil, err
+		}
+		return downloadChunkResult{Data: data}, nil
+
+	case MethodDownloadClose:
+		var p downloadCloseParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		if err := s.svc.ReleaseStaged(p.Token); err != nil {
+			return nil, err
+		}
+		return struct{}{}, nil
+
+	case MethodAvatarData:
+		var p avatarParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		res, data, err := s.svc.AvatarData(ctx, p.Channel, p.Account, p.Thread)
+		if err != nil {
+			return nil, err
+		}
+		return avatarDataResult{Generated: res.Generated, Data: data}, nil
+
 	case MethodThread:
 		var p threadParams
 		if err := json.Unmarshal(req.Params, &p); err != nil {
@@ -464,6 +519,24 @@ func (s *Server) call(ctx context.Context, req Request) (any, error) {
 	default:
 		return nil, fmt.Errorf("rpc: unknown method %q", req.Method)
 	}
+}
+
+// probeFile reports whether path's content is exactly nonce. It reads at
+// most one byte more than nonce (enough to tell a longer file apart) and
+// treats any open or read failure as "not readable": a client on another
+// machine names a path this machine does not have, which is the answer,
+// not an error.
+func probeFile(path, nonce string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	got, err := io.ReadAll(io.LimitReader(f, int64(len(nonce))+1))
+	if err != nil {
+		return false
+	}
+	return subtle.ConstantTimeCompare(got, []byte(nonce)) == 1
 }
 
 func errResponse(id string, err error) Response {

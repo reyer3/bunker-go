@@ -20,6 +20,16 @@ type Client struct {
 	scanner *bufio.Scanner
 	enc     *json.Encoder
 	seq     int
+
+	// remoteMu guards the cached answer to "does the daemon run on
+	// another machine?" (see isRemote in remote.go). It is separate from
+	// mu because deciding it makes calls of its own.
+	remoteMu    sync.Mutex
+	remoteKnown bool
+	remote      bool
+	// avatarDir is where a remote client keeps its copies of avatars;
+	// empty means a default under config.CacheDir (tests set their own).
+	avatarDir string
 }
 
 // Dial connects to the server listening on socketPath.
@@ -172,8 +182,12 @@ func (c *Client) Counts(ctx context.Context) (map[core.Channel]map[string]int, e
 
 // Reply answers item id with body, optionally carrying Cc recipients and
 // attaching local files. An idempotency key in ctx (core.WithIdempotencyKey)
-// goes on the wire so the daemon sends at most once per key.
+// goes on the wire so the daemon sends at most once per key. A remote
+// client refuses attachments and voice notes (see refuseRemoteFiles).
 func (c *Client) Reply(ctx context.Context, id, body string, cc, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
+	if err := c.refuseRemoteFiles(ctx, len(attachments) > 0 || core.IsVoice(ctx)); err != nil {
+		return core.Plan{}, core.Receipt{}, err
+	}
 	var res planReceiptResult
 	params := replyParams{ID: id, Body: body, Cc: cc, Attachments: attachments, DryRun: dryRun, IdempotencyKey: core.IdempotencyKey(ctx), Voice: core.IsVoice(ctx)}
 	err := c.call(ctx, MethodReply, params, &res)
@@ -184,8 +198,12 @@ func (c *Client) Reply(ctx context.Context, id, body string, cc, attachments []s
 }
 
 // Send delivers a fresh outgoing message. An idempotency key in ctx
-// (core.WithIdempotencyKey) goes on the wire, as for Reply.
+// (core.WithIdempotencyKey) goes on the wire, as for Reply. A remote
+// client refuses attachments and voice notes (see refuseRemoteFiles).
 func (c *Client) Send(ctx context.Context, out core.Outgoing, dryRun bool) (core.Plan, core.Receipt, error) {
+	if err := c.refuseRemoteFiles(ctx, len(out.Attachments) > 0 || out.Voice); err != nil {
+		return core.Plan{}, core.Receipt{}, err
+	}
 	var res planReceiptResult
 	err := c.call(ctx, MethodSend, sendParams{Outgoing: out, DryRun: dryRun, IdempotencyKey: core.IdempotencyKey(ctx)}, &res)
 	if err != nil {
@@ -348,8 +366,12 @@ func (c *Client) AwaitingReply(ctx context.Context, filter core.AwaitingFilter) 
 	return res.Awaiting, nil
 }
 
-// PostStatus publishes a status/story on channel/account.
+// PostStatus publishes a status/story on channel/account. A remote
+// client refuses status media (see refuseRemoteFiles).
 func (c *Client) PostStatus(ctx context.Context, channel core.Channel, account string, status core.Status, dryRun bool) (core.Plan, core.Receipt, error) {
+	if err := c.refuseRemoteFiles(ctx, status.Media != ""); err != nil {
+		return core.Plan{}, core.Receipt{}, err
+	}
 	var res planReceiptResult
 	err := c.call(ctx, MethodPostStatus, statusParams{Channel: channel, Account: account, Status: status, DryRun: dryRun}, &res)
 	if err != nil {
@@ -359,14 +381,23 @@ func (c *Client) PostStatus(ctx context.Context, channel core.Channel, account s
 }
 
 // Download saves item id's attachment at index to destPath on the
-// machine the daemon runs on: the daemon writes the file itself (see
-// downloadParams), so this call never streams the attachment's bytes
-// back over the socket. opts.MaxBytes is not carried over the wire (the
-// CLI exposes no flag for it); the daemon's own DefaultMaxDownloadBytes
-// cap always applies remotely.
+// machine this client runs on. When the daemon runs here too, it writes
+// the file itself (see downloadParams), so the attachment's bytes never
+// cross the socket; opts.MaxBytes is not carried over the wire then (the
+// CLI exposes no flag for it) and the daemon's DefaultMaxDownloadBytes
+// cap applies. When the daemon is on another machine (see isRemote), it
+// stages the attachment and this client pulls it in chunks and writes
+// destPath itself (see downloadRemote).
 func (c *Client) Download(ctx context.Context, id string, index int, destPath string, opts core.DownloadOptions) (core.DownloadResult, error) {
+	remote, err := c.isRemote(ctx)
+	if err != nil {
+		return core.DownloadResult{}, err
+	}
+	if remote {
+		return c.downloadRemote(ctx, id, index, destPath, opts)
+	}
 	var res downloadResult
-	err := c.call(ctx, MethodDownload, downloadParams{ID: id, Index: index, Path: destPath, Force: opts.Force}, &res)
+	err = c.call(ctx, MethodDownload, downloadParams{ID: id, Index: index, Path: destPath, Force: opts.Force}, &res)
 	if err != nil {
 		return core.DownloadResult{}, err
 	}
@@ -482,12 +513,21 @@ func (c *Client) Search(ctx context.Context, channel core.Channel, account strin
 }
 
 // Avatar returns a local PNG path for (channel, account, thread)'s
-// conversation avatar, written by the daemon itself (see avatarResult and
-// core.Service.Avatar) — like Download, the bytes never travel over the
-// socket.
+// conversation avatar. When the daemon runs on this machine, the path is
+// in the daemon's own cache (see avatarResult and core.Service.Avatar)
+// and, like Download, the bytes never travel over the socket; when it
+// runs on another machine, the bytes come back inline and the path is a
+// copy in this machine's cache (see avatarRemote).
 func (c *Client) Avatar(ctx context.Context, channel core.Channel, account, thread string) (core.AvatarResult, error) {
+	remote, err := c.isRemote(ctx)
+	if err != nil {
+		return core.AvatarResult{}, err
+	}
+	if remote {
+		return c.avatarRemote(ctx, channel, account, thread)
+	}
 	var res avatarResult
-	err := c.call(ctx, MethodAvatar, avatarParams{Channel: channel, Account: account, Thread: thread}, &res)
+	err = c.call(ctx, MethodAvatar, avatarParams{Channel: channel, Account: account, Thread: thread}, &res)
 	if err != nil {
 		return core.AvatarResult{}, err
 	}

@@ -31,6 +31,41 @@ back to reading the store directly, and `daemon` itself.
 - State dir (SQLite store): `$BUNKER_STATE_DIR`, else
   `~/.local/state/bunker-go/`.
 
+### Remote clients (a forwarded socket)
+
+The CLI, TUI and MCP server can drive a daemon on another machine: point
+`BUNKER_SOCKET` at a unix socket forwarded to it, for example
+`ssh -N -L /tmp/bunker-remote.sock:/run/user/1000/bunker-go.sock host`
+and `BUNKER_SOCKET=/tmp/bunker-remote.sock bunker`.
+
+Everything that does not touch a file works the same. For the calls that
+do, the client finds out once per connection, on the first such call,
+whether the daemon shares its filesystem: it writes a random nonce to a
+temp file and asks the daemon (`fs_probe`) whether it reads the same
+bytes at that path. The daemon only answers yes or no; it never returns a
+file's content. `BUNKER_REMOTE=1` skips the probe and treats the daemon
+as remote, `BUNKER_REMOTE=0` as local. A daemon older than this probe is
+treated as local, as every client did before.
+
+- Downloads (`bunker download`, the TUI's `d`, voice notes, inline media,
+  the MCP `download` tool) work remotely: the daemon fetches the
+  attachment once into `<state dir>/staging/` (`0700`), the client pulls
+  it over the socket in 4 MiB chunks, checks its size and sha256, and
+  writes the file on its own machine with the same rules as a local
+  download (`--force`, the 100 MB cap, `0600`, no partial file). The
+  daemon deletes the staged copy at the end, and any copy left idle for
+  10 minutes (a client that died halfway) on the next staged download.
+- Avatars work remotely: the PNG comes back inline and the client keeps
+  its own copy under `$BUNKER_CACHE_DIR/remote-avatars` (else
+  `~/.cache/bunker-go/remote-avatars`), returning that path.
+- Sending attachments, voice notes or status media from a remote client
+  is not supported yet: `send`/`reply` with `--attach`/`--media`, voice
+  replies and `status post --media` (dry runs included) are refused
+  before the daemon is asked, with "rpc: sending files from a remote
+  client is not supported yet (the daemon cannot read this machine's
+  files)". The daemon would otherwise open those paths on its own
+  machine. Text-only sends work remotely as usual.
+
 ## `bunker daemon [--fake]`
 
 Runs the daemon: opens the SQLite store, wires one adapter per configured
@@ -1711,9 +1746,11 @@ can open a file bunker-go only ever described in `list`/`read` output.
   `download` refuses and exits non-zero rather than silently clobbering
   something already there.
 
-The daemon writes the file itself (it and the CLI always run as the same
-user on the same machine), through a temp file plus rename in `path`'s
-own directory, at mode `0600`, capped at 100 MB by default; when the
+When the daemon runs on the same machine as the CLI, it writes the file
+itself; when it runs on another machine (see "Remote clients" above), the
+CLI writes it from chunks the daemon serves. Either way the file goes
+through a temp file plus rename in `path`'s own directory, at mode
+`0600`, capped at 100 MB by default; when the
 attachment's declared size is known, the actual byte count must match it
 exactly or the download is rejected and no partial file is left behind.
 
@@ -1798,7 +1835,9 @@ not an error.
 {"result": {"Path": "/home/alice/.cache/bunker-go/avatars/3f2a....png", "Generated": false}}
 ```
 
-Non-JSON output is just the path on its own line.
+Non-JSON output is just the path on its own line. From a remote client
+(see "Remote clients" above) the path is the client's own copy, not the
+daemon's cache entry.
 
 ## `bunker thread <channel> <account> <thread> [--before RFC3339] [--limit N] [--json]`
 
