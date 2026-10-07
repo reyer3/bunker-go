@@ -2,7 +2,9 @@ package core_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -121,5 +123,24 @@ func TestCallDurationAndFormat(t *testing.T) {
 		if got := core.FormatCallDuration(d); got != want {
 			t.Errorf("FormatCallDuration(%v) = %q, want %q", d, got, want)
 		}
+	}
+}
+
+// Video is omitted for voice calls, so the JSON of every existing voice
+// call is unchanged.
+func TestCallVideoJSON(t *testing.T) {
+	voice, err := json.Marshal(core.Call{ID: "v"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(voice), "video") {
+		t.Errorf("voice call JSON = %s, want no video field", voice)
+	}
+	video, err := json.Marshal(core.Call{ID: "v", Video: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(video), `"video":true`) {
+		t.Errorf("video call JSON = %s, want \"video\":true", video)
 	}
 }

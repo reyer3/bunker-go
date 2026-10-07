@@ -133,7 +133,11 @@ func formatCall(c core.Call) string {
 	if c.PeerName != "" {
 		peer = fmt.Sprintf("%s (%s)", c.PeerName, c.Peer)
 	}
-	s := fmt.Sprintf("%s %s/%s %s %s %s", c.ID, c.Channel, c.Account, c.Direction, peer, c.State)
+	direction := c.Direction
+	if c.Video {
+		direction += " video"
+	}
+	s := fmt.Sprintf("%s %s/%s %s %s %s", c.ID, c.Channel, c.Account, direction, peer, c.State)
 	if !c.ConnectedAt.IsZero() {
 		s += " " + core.FormatCallDuration(c.Duration(time.Now()))
 	}

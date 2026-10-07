@@ -40,6 +40,14 @@ type liveCall interface {
 	Answer() error
 	Reject() error
 	Hangup() error
+	// IsVideo reports whether the call carries video either way: a video
+	// offer, or a voice call upgraded while live. It takes the engine's own
+	// lock, so it is never asked while holding callMu.
+	IsVideo() bool
+	// SetVideoEnabled turns our camera flow on or off (video state 1/0)
+	// without touching the peer's video. Like IsVideo, it takes the
+	// engine's lock, so it is never called while holding callMu.
+	SetVideoEnabled(enabled bool) error
 	// OnReady fires once media is flowing; audio is attached only then,
 	// so no microphone audio is buffered while the call is still ringing.
 	OnReady(fn func())
@@ -81,6 +89,9 @@ type callRecord struct {
 	// audioOpened is set once the audio helpers were started, so a
 	// repeated OnReady never spawns a second set.
 	audioOpened bool
+	// cameraOff is set once our camera was turned off on an answered
+	// video call, so a repeated OnReady never signals it twice.
+	cameraOff bool
 	// mediaTimer is the no-media watchdog, armed when the call is
 	// answered/accepted and stopped when media arrives or the call ends.
 	mediaTimer func() bool
@@ -246,6 +257,7 @@ func (a *Adapter) handleIncomingCall(live liveCall) {
 // starting a separate, number-named conversation per device.
 func (a *Adapter) trackCall(ctx context.Context, live liveCall, direction, state string) core.Call {
 	peer := live.Peer().ToNonAD()
+	video := live.IsVideo()
 	item := core.Item{
 		ID:        itemID(a.account, peer.String(), "call-"+live.ID()),
 		Channel:   core.ChannelWhatsApp,
@@ -272,6 +284,7 @@ func (a *Adapter) trackCall(ctx context.Context, live liveCall, direction, state
 			Direction: direction,
 			State:     state,
 			StartedAt: item.Timestamp,
+			Video:     video,
 		},
 	}
 	a.callMu.Lock()
@@ -287,12 +300,14 @@ func (a *Adapter) trackCall(ctx context.Context, live liveCall, direction, state
 
 // setCallState moves callID to state, optionally marking it answered.
 func (a *Adapter) setCallState(callID, state string, answered bool) core.Call {
+	video := a.liveVideo(callID)
 	a.callMu.Lock()
 	defer a.callMu.Unlock()
 	rec, ok := a.liveCalls[callID]
 	if !ok {
 		return core.Call{}
 	}
+	rec.info.Video = rec.info.Video || video
 	// Media can start (OnReady -> active) before the accept/answer path
 	// gets here; never move an active call back to connecting.
 	if rec.info.State != core.CallStateActive {
@@ -303,6 +318,17 @@ func (a *Adapter) setCallState(callID, state string, answered bool) core.Call {
 		rec.mediaTimer = a.afterFunc(callMediaTimeout, func() { a.noMedia(callID) })
 	}
 	return rec.info
+}
+
+// liveVideo asks callID's live call whether it carries video, outside
+// callMu (see liveCall.IsVideo). The answer only ever turns a call into a
+// video call, never back: the engine forgets a call as it ends, and the
+// call's item and history should still say it was a video call.
+func (a *Adapter) liveVideo(callID string) bool {
+	a.callMu.Lock()
+	rec, ok := a.liveCalls[callID]
+	a.callMu.Unlock()
+	return ok && rec.live.IsVideo()
 }
 
 // noMedia flags a call that was answered but never received a packet from
@@ -344,11 +370,13 @@ func audioOpenProblem(err error) string {
 
 // startCallAudio opens the microphone and speaker once media flows.
 func (a *Adapter) startCallAudio(callID string) {
+	video := a.liveVideo(callID)
 	a.callMu.Lock()
 	rec, ok := a.liveCalls[callID]
 	audio := a.callAudio
-	opened := false
+	opened, cameraOff := false, false
 	if ok {
+		rec.info.Video = rec.info.Video || video
 		rec.info.State = core.CallStateActive
 		rec.answered = true
 		if rec.info.ConnectedAt.IsZero() {
@@ -362,12 +390,17 @@ func (a *Adapter) startCallAudio(callID string) {
 		}
 		opened = rec.audioOpened
 		rec.audioOpened = true
+		cameraOff = rec.info.Direction == core.CallIncoming && rec.info.Video && !rec.cameraOff
+		rec.cameraOff = rec.cameraOff || cameraOff
 	}
 	a.callMu.Unlock()
 	if !ok {
 		return
 	}
 	a.callLog().Info("call media is flowing", "call_id", callID)
+	if cameraOff {
+		a.turnCameraOff(rec.live)
+	}
 	if audio == nil || opened {
 		return
 	}
@@ -385,6 +418,24 @@ func (a *Adapter) startCallAudio(callID string) {
 	rec.src, rec.sink = src, sink
 	a.callMu.Unlock()
 	rec.live.AttachAudio(src, sink)
+}
+
+// turnCameraOff answers an incoming video call as voice: bunker sends no
+// camera frames yet, so leaving our video on would show the peer a frozen
+// picture. meowcaller accepts a video offer with our video on and has no
+// voice-only accept, so the camera is muted right after: SetVideoEnabled
+// (state 0) is meowcaller's camera mute, which leaves the peer's video and
+// the call's video label alone, while StopVideo (state 6) is the
+// transition out of video. It runs on OnReady, not right after Answer:
+// Answer only defers the <accept> until the caller's mute_v2, and a video
+// state sent before that accept would reach the peer ahead of the call
+// itself. A failure costs the peer a frozen picture, never the call or
+// its audio.
+func (a *Adapter) turnCameraOff(live liveCall) {
+	if err := live.SetVideoEnabled(false); err != nil {
+		a.callLog().Error("could not turn the camera off on a video call, the peer may see a frozen picture",
+			"call_id", live.ID(), "error", err)
+	}
 }
 
 // endCall forgets callID, releases its audio and rewrites its item as a
@@ -439,20 +490,27 @@ func (a *Adapter) writeCallItem(ctx context.Context, rec *callRecord) {
 		"wa_call":    rec.info.Direction,
 		"wa_state":   rec.info.State,
 	}
+	kind := "📞 Llamada"
+	if rec.info.Video {
+		// Set only on video calls, like Matrix's "undecryptable", so the
+		// Meta of voice calls is unchanged.
+		item.Meta["wa_video"] = "true"
+		kind = "📹 Videollamada"
+	}
 	incoming := rec.info.Direction == core.CallIncoming
 	switch {
 	case rec.info.State != core.CallStateEnded && incoming:
-		item.Body = "📞 Llamada entrante"
+		item.Body = kind + " entrante"
 		item.Unread = true
 	case rec.info.State != core.CallStateEnded:
-		item.Body = "📞 Llamada saliente"
+		item.Body = kind + " saliente"
 	case incoming && !rec.answered:
-		item.Body = "📞 Llamada perdida"
+		item.Body = kind + " perdida"
 		item.Unread = true
 	case rec.info.ConnectedAt.IsZero() && !incoming:
-		item.Body = "📞 Llamada sin respuesta"
+		item.Body = kind + " sin respuesta"
 	default:
-		item.Body = "📞 Llamada finalizada (" + core.FormatCallDuration(rec.info.Duration(time.Now())) + ")"
+		item.Body = kind + " finalizada (" + core.FormatCallDuration(rec.info.Duration(time.Now())) + ")"
 	}
 	a.cacheItem(item)
 

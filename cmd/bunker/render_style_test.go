@@ -98,6 +98,28 @@ func TestFormatCallSegment(t *testing.T) {
 	}
 }
 
+func TestFormatCallSegmentVideo(t *testing.T) {
+	now := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
+	ringing := core.Call{ID: "r", Direction: core.CallIncoming, State: core.CallStateRinging, PeerName: "Ana", Video: true}
+	active := core.Call{ID: "a", Direction: core.CallIncoming, State: core.CallStateActive, PeerName: "Ana", Video: true, ConnectedAt: now.Add(-155 * time.Second)}
+	calling := core.Call{ID: "c", Direction: core.CallOutgoing, State: core.CallStateCalling, PeerName: "Ana", Video: true}
+	for _, tt := range []struct {
+		name string
+		call core.Call
+		want string
+	}{
+		{"ringing", ringing, "📹 Ana"},
+		{"active", active, "📹 Ana 2:35"},
+		{"outgoing ringing", calling, "📹 → Ana"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := formatCallSegment([]core.Call{tt.call}, renderPlain, now); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFormatRenderUsesConfiguredPalette(t *testing.T) {
 	pal := style.ResolvePalette(map[string]string{"mail": "#7aa2f7", "dim": "#565f89"})
 	got := formatRender(testSegments(3, 0, 1), renderTmux, false, styledGlyphs, pal)
