@@ -293,7 +293,7 @@ func (c *Client) uploadFile(ctx context.Context, set *uploadSet, path string) (s
 		off += int64(n)
 	}
 	var commit uploadCommitResult
-	if err := c.call(ctx, MethodUploadCommit, uploadCommitParams{Token: open.Token}, &commit); err != nil {
+	if err := c.call(ctx, MethodUploadCommit, uploadCommitParams(open), &commit); err != nil {
 		return "", fmt.Errorf("rpc: upload %q: %w", path, err)
 	}
 	return commit.Path, nil
