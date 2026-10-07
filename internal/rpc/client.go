@@ -183,33 +183,36 @@ func (c *Client) Counts(ctx context.Context) (map[core.Channel]map[string]int, e
 // Reply answers item id with body, optionally carrying Cc recipients and
 // attaching local files. An idempotency key in ctx (core.WithIdempotencyKey)
 // goes on the wire so the daemon sends at most once per key. A remote
-// client refuses attachments and voice notes (see refuseRemoteFiles).
+// client uploads the attachments (or voice note) first (see uploadFiles).
 func (c *Client) Reply(ctx context.Context, id, body string, cc, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
-	if err := c.refuseRemoteFiles(ctx, len(attachments) > 0 || core.IsVoice(ctx)); err != nil {
+	attachments, uploads, err := c.uploadFiles(ctx, attachments...)
+	defer uploads.release(ctx)
+	if err != nil {
 		return core.Plan{}, core.Receipt{}, err
 	}
 	var res planReceiptResult
 	params := replyParams{ID: id, Body: body, Cc: cc, Attachments: attachments, DryRun: dryRun, IdempotencyKey: core.IdempotencyKey(ctx), Voice: core.IsVoice(ctx)}
-	err := c.call(ctx, MethodReply, params, &res)
-	if err != nil {
+	if err := c.call(ctx, MethodReply, params, &res); err != nil {
 		return core.Plan{}, core.Receipt{}, err
 	}
-	return res.Plan, res.Receipt, nil
+	return uploads.localPlan(res.Plan), res.Receipt, nil
 }
 
 // Send delivers a fresh outgoing message. An idempotency key in ctx
 // (core.WithIdempotencyKey) goes on the wire, as for Reply. A remote
-// client refuses attachments and voice notes (see refuseRemoteFiles).
+// client uploads the attachments (or voice note) first (see uploadFiles).
 func (c *Client) Send(ctx context.Context, out core.Outgoing, dryRun bool) (core.Plan, core.Receipt, error) {
-	if err := c.refuseRemoteFiles(ctx, len(out.Attachments) > 0 || out.Voice); err != nil {
-		return core.Plan{}, core.Receipt{}, err
-	}
-	var res planReceiptResult
-	err := c.call(ctx, MethodSend, sendParams{Outgoing: out, DryRun: dryRun, IdempotencyKey: core.IdempotencyKey(ctx)}, &res)
+	attachments, uploads, err := c.uploadFiles(ctx, out.Attachments...)
+	defer uploads.release(ctx)
 	if err != nil {
 		return core.Plan{}, core.Receipt{}, err
 	}
-	return res.Plan, res.Receipt, nil
+	out.Attachments = attachments
+	var res planReceiptResult
+	if err := c.call(ctx, MethodSend, sendParams{Outgoing: out, DryRun: dryRun, IdempotencyKey: core.IdempotencyKey(ctx)}, &res); err != nil {
+		return core.Plan{}, core.Receipt{}, err
+	}
+	return uploads.localPlan(res.Plan), res.Receipt, nil
 }
 
 // EditMessage replaces the text of our own message id. An idempotency key
@@ -367,17 +370,25 @@ func (c *Client) AwaitingReply(ctx context.Context, filter core.AwaitingFilter) 
 }
 
 // PostStatus publishes a status/story on channel/account. A remote
-// client refuses status media (see refuseRemoteFiles).
+// client uploads the status media first (see uploadFiles).
 func (c *Client) PostStatus(ctx context.Context, channel core.Channel, account string, status core.Status, dryRun bool) (core.Plan, core.Receipt, error) {
-	if err := c.refuseRemoteFiles(ctx, status.Media != ""); err != nil {
-		return core.Plan{}, core.Receipt{}, err
+	var media []string
+	if status.Media != "" {
+		media = []string{status.Media}
 	}
-	var res planReceiptResult
-	err := c.call(ctx, MethodPostStatus, statusParams{Channel: channel, Account: account, Status: status, DryRun: dryRun}, &res)
+	media, uploads, err := c.uploadFiles(ctx, media...)
+	defer uploads.release(ctx)
 	if err != nil {
 		return core.Plan{}, core.Receipt{}, err
 	}
-	return res.Plan, res.Receipt, nil
+	if len(media) == 1 {
+		status.Media = media[0]
+	}
+	var res planReceiptResult
+	if err := c.call(ctx, MethodPostStatus, statusParams{Channel: channel, Account: account, Status: status, DryRun: dryRun}, &res); err != nil {
+		return core.Plan{}, core.Receipt{}, err
+	}
+	return uploads.localPlan(res.Plan), res.Receipt, nil
 }
 
 // Download saves item id's attachment at index to destPath on the

@@ -288,6 +288,48 @@ func (s *Server) call(ctx context.Context, req Request) (any, error) {
 		}
 		return struct{}{}, nil
 
+	case MethodUploadOpen:
+		var p uploadOpenParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		token, err := s.svc.BeginUpload(p.Name, p.Size, p.SHA256)
+		if err != nil {
+			return nil, err
+		}
+		return uploadOpenResult{Token: token}, nil
+
+	case MethodUploadChunk:
+		var p uploadChunkParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		if err := s.svc.WriteUploadChunk(p.Token, p.Offset, p.Data); err != nil {
+			return nil, err
+		}
+		return struct{}{}, nil
+
+	case MethodUploadCommit:
+		var p uploadCommitParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		path, err := s.svc.CommitUpload(p.Token)
+		if err != nil {
+			return nil, err
+		}
+		return uploadCommitResult{Path: path}, nil
+
+	case MethodUploadRelease:
+		var p uploadReleaseParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		if err := s.svc.ReleaseUpload(p.Token); err != nil {
+			return nil, err
+		}
+		return struct{}{}, nil
+
 	case MethodAvatarData:
 		var p avatarParams
 		if err := json.Unmarshal(req.Params, &p); err != nil {

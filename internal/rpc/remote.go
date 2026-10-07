@@ -25,8 +25,9 @@ import (
 // machine. Unset, Client probes the daemon (see isRemote).
 const remoteEnv = "BUNKER_REMOTE"
 
-// releaseTimeout bounds the download_close sent after a transfer, which
-// runs even when the caller's context is already canceled.
+// releaseTimeout bounds the download_close or upload_release sent after
+// a transfer, which runs even when the caller's context is already
+// canceled.
 const releaseTimeout = 10 * time.Second
 
 // isRemote reports whether the daemon runs on another machine (its socket
@@ -200,27 +201,134 @@ func (c *Client) avatarRemote(ctx context.Context, channel core.Channel, account
 	return core.AvatarResult{Path: path, Generated: res.Generated}, nil
 }
 
-// errRemoteFiles is what a remote client's send carrying a file path
-// fails with until upload support lands.
-var errRemoteFiles = fmt.Errorf("rpc: sending files from a remote client is not supported yet (the daemon cannot read this machine's files): %w", core.ErrUnsupported)
+// uploadSet tracks the uploads one send made: their tokens, released
+// once the send returns, and which daemon path stands for which of this
+// machine's files, so the plan shows the caller its own paths.
+type uploadSet struct {
+	c      *Client
+	tokens []string
+	local  map[string]string
+}
 
-// refuseRemoteFiles fails a send that carries this machine's file paths
-// (or a voice note, which always does) when the daemon runs on another
-// machine: the daemon would open those paths on its own filesystem, and
-// either fail obscurely or, if the same path exists there, send the
-// wrong file. It runs before any call, dry runs included, and decides
-// remoteness only when there is a file at stake, so a text-only send
-// never pays for (or fails on) the probe.
-func (c *Client) refuseRemoteFiles(ctx context.Context, hasFiles bool) error {
-	if !hasFiles {
-		return nil
+// uploadFiles prepares paths, files on this machine, for a send. A local
+// daemon opens them itself, so they are returned unchanged and nothing
+// is uploaded (remoteness is only decided when there is a file at
+// stake, so a text-only send never pays for the probe). A daemon on
+// another machine cannot read them: each one is uploaded into its
+// staging dir (upload_open/chunk/commit, sha256 checked there) and the
+// committed daemon-side path, named like the original, replaces it. Dry
+// runs upload too, since the daemon inspects the files to build the
+// plan. Every file is checked before anything is uploaded, so a missing
+// one fails without the daemon hearing about the send. The caller must
+// release the returned set once the send returns, whatever the outcome.
+func (c *Client) uploadFiles(ctx context.Context, paths ...string) ([]string, *uploadSet, error) {
+	set := &uploadSet{c: c, local: map[string]string{}}
+	if len(paths) == 0 {
+		return paths, set, nil
 	}
 	remote, err := c.isRemote(ctx)
+	if err != nil || !remote {
+		return paths, set, err
+	}
+	for _, p := range paths {
+		info, err := os.Stat(p)
+		if err != nil {
+			return nil, set, fmt.Errorf("rpc: attachment %q: %w", p, err)
+		}
+		if !info.Mode().IsRegular() {
+			return nil, set, fmt.Errorf("rpc: attachment %q is not a regular file", p)
+		}
+		if info.Size() > core.MaxUploadBytes {
+			return nil, set, fmt.Errorf("rpc: attachment %q is %d bytes, over the %d byte upload limit: %w", p, info.Size(), int64(core.MaxUploadBytes), core.ErrAttachmentTooLarge)
+		}
+	}
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		daemonPath, err := c.uploadFile(ctx, set, p)
+		if err != nil {
+			return nil, set, err
+		}
+		out[i] = daemonPath
+		set.local[daemonPath] = p
+	}
+	return out, set, nil
+}
+
+// uploadFile uploads one file and returns its committed daemon path. The
+// file is read twice, once for its sha256 (the daemon wants it up front
+// to verify the commit) and once to send it; if it changes in between,
+// the daemon's check fails the commit instead of sending a mix.
+func (c *Client) uploadFile(ctx context.Context, set *uploadSet, path string) (string, error) {
+	f, err := os.Open(path)
 	if err != nil {
-		return err
+		return "", fmt.Errorf("rpc: attachment %q: %w", path, err)
 	}
-	if remote {
-		return errRemoteFiles
+	defer f.Close()
+	h := sha256.New()
+	size, err := io.Copy(h, f)
+	if err != nil {
+		return "", fmt.Errorf("rpc: attachment %q: read: %w", path, err)
 	}
-	return nil
+	if size == 0 {
+		return "", fmt.Errorf("rpc: attachment %q is empty", path)
+	}
+	var open uploadOpenResult
+	params := uploadOpenParams{Name: filepath.Base(path), Size: size, SHA256: hex.EncodeToString(h.Sum(nil))}
+	if err := c.call(ctx, MethodUploadOpen, params, &open); err != nil {
+		return "", fmt.Errorf("rpc: upload %q: %w", path, err)
+	}
+	set.tokens = append(set.tokens, open.Token)
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return "", fmt.Errorf("rpc: attachment %q: %w", path, err)
+	}
+	buf := make([]byte, core.MaxStagedChunk)
+	for off := int64(0); off < size; {
+		n, err := io.ReadFull(f, buf[:min(int64(len(buf)), size-off)])
+		if err != nil {
+			return "", fmt.Errorf("rpc: attachment %q changed while uploading: %w", path, err)
+		}
+		if err := c.call(ctx, MethodUploadChunk, uploadChunkParams{Token: open.Token, Offset: off, Data: buf[:n]}, nil); err != nil {
+			return "", fmt.Errorf("rpc: upload %q: %w", path, err)
+		}
+		off += int64(n)
+	}
+	var commit uploadCommitResult
+	if err := c.call(ctx, MethodUploadCommit, uploadCommitParams{Token: open.Token}, &commit); err != nil {
+		return "", fmt.Errorf("rpc: upload %q: %w", path, err)
+	}
+	return commit.Path, nil
+}
+
+// release deletes the set's uploads on the daemon. It runs after the
+// send, even with the caller's context canceled, and is best effort: a
+// failed release must not turn a send that went out into an error the
+// caller might retry (and so send twice); the daemon's staging TTL
+// sweeps whatever is left.
+func (u *uploadSet) release(ctx context.Context) {
+	if len(u.tokens) == 0 {
+		return
+	}
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), releaseTimeout)
+	defer cancel()
+	for _, token := range u.tokens {
+		_ = u.c.call(rctx, MethodUploadRelease, uploadReleaseParams{Token: token}, nil)
+	}
+	u.tokens = nil
+}
+
+// localPlan puts this machine's paths back into plan.Media, which the
+// daemon filled with the staged copies' paths.
+func (u *uploadSet) localPlan(plan core.Plan) core.Plan {
+	if len(u.local) == 0 {
+		return plan
+	}
+	media := make([]string, len(plan.Media))
+	for i, m := range plan.Media {
+		media[i] = m
+		if p, ok := u.local[m]; ok {
+			media[i] = p
+		}
+	}
+	plan.Media = media
+	return plan
 }
