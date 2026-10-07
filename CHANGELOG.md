@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/reyer3/bunker-go/compare/v0.22.0...v0.23.0) (2026-10-07)
+
+
+### Features
+
+* **rpc:** send attachments, voice notes and status media from a remote client ([#161](https://github.com/reyer3/bunker-go/issues/161)) ([9c0155d](https://github.com/reyer3/bunker-go/commit/9c0155d73777165ce9f642e9cf5ffa4d0b53f4a5))
+
 ## [0.22.0](https://github.com/reyer3/bunker-go/compare/v0.21.0...v0.22.0) (2026-10-07)
 
 
