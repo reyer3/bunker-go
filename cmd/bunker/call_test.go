@@ -105,3 +105,15 @@ func TestCmdCallLatest(t *testing.T) {
 		t.Error("nothing should be controlled when no call matches")
 	}
 }
+
+func TestFormatCallMarksVideo(t *testing.T) {
+	voice := core.Call{ID: "IN1", Channel: core.ChannelWhatsApp, Account: "personal", Direction: core.CallIncoming, Peer: "519@s.whatsapp.net", State: core.CallStateRinging}
+	if got := formatCall(voice); got != "IN1 whatsapp/personal incoming 519@s.whatsapp.net ringing" {
+		t.Errorf("voice = %q", got)
+	}
+	video := voice
+	video.Video = true
+	if got := formatCall(video); got != "IN1 whatsapp/personal incoming video 519@s.whatsapp.net ringing" {
+		t.Errorf("video = %q", got)
+	}
+}

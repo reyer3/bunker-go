@@ -148,6 +148,9 @@ func (m Model) handleCallsLoaded(msg callsLoadedMsg) (tea.Model, tea.Cmd) {
 // interruption.
 func (m Model) notifyCall(c core.Call) tea.Cmd {
 	body := "Llamada entrante de " + callPeerName(c)
+	if c.Video {
+		body = "Videollamada entrante de " + callPeerName(c)
+	}
 	if m.messageNotify != nil {
 		notify := m.messageNotify
 		return func() tea.Msg { return callNotifiedMsg{err: notify(body)} }
@@ -252,15 +255,19 @@ func (m Model) callBannerLine() (string, bool) {
 	}
 	answer, reject, hangup := m.callKeyNames()
 	name := callPeerName(*c)
+	icon, kind, during := "📞", "Llamada", "En llamada"
+	if c.Video {
+		icon, kind, during = "📹", "Videollamada", "En videollamada"
+	}
 	switch {
 	case c.Direction == core.CallIncoming && c.State == core.CallStateRinging:
-		return fmt.Sprintf("📞 Llamada entrante de %s · %s contestar · %s rechazar", name, answer, reject), true
+		return fmt.Sprintf("%s %s entrante de %s · %s contestar · %s rechazar", icon, kind, name, answer, reject), true
 	case c.State == core.CallStateActive:
-		return fmt.Sprintf("📞 En llamada con %s · %s%s · %s colgar", name, core.FormatCallDuration(c.Duration(m.clock())), callAudioNote(*c), hangup), true
+		return fmt.Sprintf("%s %s con %s · %s%s · %s colgar", icon, during, name, core.FormatCallDuration(c.Duration(m.clock())), callAudioNote(*c), hangup), true
 	case c.State == core.CallStateConnecting:
-		return fmt.Sprintf("📞 Conectando con %s…%s · %s colgar", name, callAudioNote(*c), hangup), true
+		return fmt.Sprintf("%s Conectando con %s…%s · %s colgar", icon, name, callAudioNote(*c), hangup), true
 	}
-	return fmt.Sprintf("📞 Llamando a %s… · %s colgar", name, hangup), true
+	return fmt.Sprintf("%s Llamando a %s… · %s colgar", icon, name, hangup), true
 }
 
 // callAudioNote is the banner's " · sin audio: <why>" suffix, empty when

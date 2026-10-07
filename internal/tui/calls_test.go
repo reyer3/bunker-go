@@ -398,6 +398,42 @@ func TestCallsUnsupportedStopsPolling(t *testing.T) {
 	}
 }
 
+func TestVideoCallBannerAndNotification(t *testing.T) {
+	video := ringingCall()
+	video.Video = true
+
+	var bodies []string
+	model := callInbox(&callClient{})
+	model.messageNotify = func(body string) error { bodies = append(bodies, body); return nil }
+	model, cmd := deliverCalls(model, video)
+	runBatch(cmd)
+	if len(bodies) != 1 || bodies[0] != "Videollamada entrante de Alice" {
+		t.Errorf("notification bodies = %q", bodies)
+	}
+	if line := lastLine(model.View()); !strings.Contains(line, "📹 Videollamada entrante de Alice · a contestar · x rechazar") {
+		t.Errorf("ringing banner = %q", line)
+	}
+
+	for _, tt := range []struct {
+		name  string
+		state string
+		want  string
+	}{
+		{"connecting", core.CallStateConnecting, "📹 Conectando con Alice…"},
+		{"active", core.CallStateActive, "📹 En videollamada con Alice · 1:35 · h colgar"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := video
+			c.State = tt.state
+			c.ConnectedAt = callsNow.Add(-95 * time.Second)
+			m, _ := deliverCalls(callInbox(&callClient{}), c)
+			if line := lastLine(m.View()); !strings.Contains(line, tt.want) {
+				t.Errorf("banner = %q, want %q", line, tt.want)
+			}
+		})
+	}
+}
+
 func TestIncomingCallNotifiesOnce(t *testing.T) {
 	t.Run("osc 777", func(t *testing.T) {
 		var out bytes.Buffer

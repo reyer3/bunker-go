@@ -25,10 +25,21 @@ type fakeLiveCall struct {
 	sink                       meowcaller.AudioSink
 	endOnHangup                bool // fire onEnd synchronously from Hangup/Reject, like a racing engine
 	readyOnAnswer              bool // fire onReady from inside Answer, like media racing the answer
+	video                      bool // the offer (or a later upgrade) carries video
 }
 
 func (c *fakeLiveCall) ID() string      { return c.id }
 func (c *fakeLiveCall) Peer() types.JID { return c.peer }
+func (c *fakeLiveCall) IsVideo() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.video
+}
+func (c *fakeLiveCall) setVideo(v bool) {
+	c.mu.Lock()
+	c.video = v
+	c.mu.Unlock()
+}
 func (c *fakeLiveCall) Answer() error {
 	c.mu.Lock()
 	c.answered++
@@ -232,6 +243,71 @@ func TestIncomingCallMissed(t *testing.T) {
 	}
 	if audio.opens != 0 || len(a.ActiveCalls()) != 0 {
 		t.Fatal("missed call left audio or state behind")
+	}
+}
+
+func TestIncomingVideoCallIsMarkedVideo(t *testing.T) {
+	a, engine, _, sink := newCallAdapter(t)
+	live := &fakeLiveCall{id: "VID1", peer: callPeer, video: true}
+	engine.incoming(live)
+
+	calls := a.ActiveCalls()
+	if len(calls) != 1 || !calls[0].Video {
+		t.Fatalf("ActiveCalls = %+v, want one video call", calls)
+	}
+	item := lastUpsert(t, sink)
+	if item.Body != "📹 Videollamada entrante" || item.Meta["wa_video"] != "true" || !item.Unread {
+		t.Fatalf("ringing video item = %+v", item)
+	}
+
+	live.onEnd("timeout")
+	if item := lastUpsert(t, sink); item.Body != "📹 Videollamada perdida" || item.Meta["wa_video"] != "true" {
+		t.Fatalf("missed video item = %+v", item)
+	}
+}
+
+func TestVoiceCallIsNotMarkedVideo(t *testing.T) {
+	a, engine, _, sink := newCallAdapter(t)
+	engine.incoming(&fakeLiveCall{id: "IN1", peer: callPeer})
+
+	if calls := a.ActiveCalls(); len(calls) != 1 || calls[0].Video {
+		t.Fatalf("ActiveCalls = %+v, want one voice call", calls)
+	}
+	item := lastUpsert(t, sink)
+	if item.Body != "📞 Llamada entrante" {
+		t.Fatalf("voice item body = %q", item.Body)
+	}
+	if _, ok := item.Meta["wa_video"]; ok {
+		t.Fatalf("voice item Meta = %+v, want no wa_video", item.Meta)
+	}
+}
+
+// A voice call the peer upgrades to video is marked video from the next
+// state change on, and stays so once ended (the engine forgets the call
+// then, so it would read as voice again).
+func TestCallUpgradedToVideoIsMarkedVideo(t *testing.T) {
+	a, engine, _, sink := newCallAdapter(t)
+	live := &fakeLiveCall{id: "OUT1", peer: callPeer}
+	engine.next = live
+	if _, err := a.PlaceCall(context.Background(), "51999888777"); err != nil {
+		t.Fatal(err)
+	}
+	live.onPeerAccept()
+	if a.ActiveCalls()[0].Video {
+		t.Fatal("voice call marked video before any upgrade")
+	}
+	live.setVideo(true)
+	live.onReady()
+	if !a.ActiveCalls()[0].Video {
+		t.Fatal("upgraded call not marked video once media flowed")
+	}
+	live.setVideo(false)
+	ended, err := a.ControlCall(context.Background(), "OUT1", core.CallHangup)
+	if err != nil || !ended.Video {
+		t.Fatalf("ended call = %+v (%v), want it still marked video", ended, err)
+	}
+	if item := lastUpsert(t, sink); !strings.HasPrefix(item.Body, "📹 Videollamada finalizada (") {
+		t.Fatalf("final item body = %q", item.Body)
 	}
 }
 

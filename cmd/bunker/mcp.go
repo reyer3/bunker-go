@@ -403,7 +403,7 @@ func newMCPServer(dial mcpDialer, allowSend bool) *mcp.Server {
 			return nil, mcpContactsOut{Contacts: contacts}, err
 		})
 
-	mcp.AddTool(server, &mcp.Tool{Name: "calls", Description: "Live voice calls.", Annotations: readOnly},
+	mcp.AddTool(server, &mcp.Tool{Name: "calls", Description: "Live voice and video calls.", Annotations: readOnly},
 		func(ctx context.Context, _ *mcp.CallToolRequest, _ mcpNoInput) (*mcp.CallToolResult, mcpCallsOut, error) {
 			calls, err := withBackend(ctx, dial, func(ctx context.Context, b Backend) ([]core.Call, error) { return b.Calls(ctx) })
 			if calls == nil {

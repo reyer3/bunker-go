@@ -85,6 +85,9 @@ func TestMCPListsTools(t *testing.T) {
 			t.Fatalf("tool %q missing", name)
 		}
 	}
+	if !strings.Contains(have["calls"].Description, "video") {
+		t.Errorf("calls description = %q, want it to say video calls are listed too", have["calls"].Description)
+	}
 	if !have["read"].Annotations.ReadOnlyHint || !have["health"].Annotations.ReadOnlyHint || have["send"].Annotations.ReadOnlyHint {
 		t.Error("reads must be marked read-only and sends must not")
 	}

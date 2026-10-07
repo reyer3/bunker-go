@@ -1087,6 +1087,12 @@ call ok: 3EB0C4... whatsapp/personal outgoing +51999999999@s.whatsapp.net callin
 `"no llega audio del otro lado (sin medios)"`; see
 [Troubleshooting call audio](#troubleshooting-call-audio).
 
+`video` (omitted for voice calls) is `true` on a video call: the offer
+carried video, or the peer upgraded the call to video while it was live.
+It only labels the call: bunker does not carry video media yet, so a
+video call's audio works as on a voice call and no picture is sent or
+shown.
+
 `Direction` is `incoming` or `outgoing`; `State` moves `ringing`/`calling`
 → `connecting` → `active` → `ended`. `StartedAt` is when the call started
 ringing, `ConnectedAt` when media started flowing (zero until then) and
@@ -1107,8 +1113,10 @@ to its conversation as an item, so it shows in `list`, `counts` and the
 tmux segment: `📞 Llamada entrante` (unread) while ringing, then
 `📞 Llamada perdida` (still unread) if nobody answered, or
 `📞 Llamada finalizada (m:ss)` once an answered call ends. An outgoing call
-nobody answered becomes `📞 Llamada sin respuesta`. Its `Meta`
-carries `wa_call_id`, `wa_call` (direction) and `wa_state`.
+nobody answered becomes `📞 Llamada sin respuesta`. A video call says
+`📹 Videollamada` instead (`📹 Videollamada entrante`, `📹 Videollamada
+perdida`, ...). Its `Meta` carries `wa_call_id`, `wa_call` (direction) and
+`wa_state`, plus `wa_video` = `true` on a video call only.
 
 ## `bunker calls [--json]`
 
@@ -1118,6 +1126,9 @@ none). A connected call also shows how long it has been connected:
 ```
 3EB0C4... whatsapp/wa outgoing Ana (51999999999@s.whatsapp.net) active 2:35
 ```
+
+A video call says `video` after its direction
+(`3EB0C4... whatsapp/wa incoming video Ana (...) ringing`).
  `--json` returns `{"calls": [...]}` with the shape above.
 
 ## `bunker call audio-test [--account A] [--seconds N] [--json]`
@@ -1241,8 +1252,10 @@ masters, which still works.
 The side panel drives the same calls (`calls`, `call`, `call answer|reject|hangup`
 over the socket), still opt-in per account with `calls = true`. It polls
 `calls` every 3 s (every second while one is live, so the duration counts),
-and only when the daemon connection supports them. Video calls and screen
-sharing are not part of it. Audio still runs on the daemon's machine.
+and only when the daemon connection supports them. Video calls are shown and
+marked as video (📹, `Videollamada`), but carrying video media is not
+supported yet: only their audio works. Screen sharing is not part of it.
+Audio still runs on the daemon's machine.
 
 - **Place:** `Alt+C` in a WhatsApp chat (a chat's composer takes every plain
   key, hence Alt, like `Alt+E`/`Alt+X`). It asks the daemon for a dry-run plan,
@@ -1264,9 +1277,12 @@ sharing are not part of it. Audio still runs on the daemon's machine.
   `📞 Llamada entrante de Ana · a contestar · x rechazar`. `a` answers and `x`
   rejects. A desktop notification (`Llamada entrante de Ana`) fires once per
   call, through the same path as new messages (herdr's notifier when present,
-  else OSC 777), without the focus and rate limits messages have.
+  else OSC 777), without the focus and rate limits messages have. A video
+  call reads `📹 Videollamada entrante de Ana · …` and notifies
+  `Videollamada entrante de Ana`.
 - **Active:** the banner becomes `📞 En llamada con Ana · 1:35 · h colgar`
-  (`Llamando a…` / `Conectando con…` before media flows). `h` hangs up.
+  (`📹 En videollamada con Ana · …` on a video call; `Llamando a…` /
+  `Conectando con…` before media flows). `h` hangs up.
 - **Keys where you type:** in a chat, the reply/mail editors, the filter and
   the palette plain keys are text, so the banner shows `Alt+A`, `Alt+X` and
   `Alt+H` there. The keys act only while they apply: `a`/`x` (and `Alt+A`/`Alt+X`)
@@ -2620,6 +2636,8 @@ Styles:
 | Incoming call ringing | `📞 Ana` (bold and blinking with `--tmux`) |
 | Call connected | `📞 Ana 2:35`, with its connected time |
 | Your own call still ringing | `📞 → Ana` |
+
+A video call shows `📹` instead of `📞` (`📹 Ana`, `📹 Ana 2:35`, `📹 → Ana`).
 
 `--hide-empty` never hides a call. The caller's name is stripped of `#`
 and control characters before it reaches the status line. Calls come

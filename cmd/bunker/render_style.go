@@ -71,7 +71,8 @@ const callColor = "#e06c75"
 // formatCallSegment renders the most relevant call for the status line
 // (issue #15): a ringing incoming call first ("📞 Ana"), else a live one
 // with its connected time ("📞 Ana 2:35"), else an outgoing call still
-// ringing ("📞 → Ana"). It returns "" when there is no call.
+// ringing ("📞 → Ana"). A video call shows 📹 instead of 📞. It returns ""
+// when there is no call.
 func formatCallSegment(calls []core.Call, style renderStyle, now time.Time) string {
 	var pick *core.Call
 	rank := func(c core.Call) int {
@@ -105,14 +106,18 @@ func formatCallSegment(calls []core.Call, style renderStyle, now time.Time) stri
 		}
 		return r
 	}, name)
-	text := "📞 " + name
+	icon := "📞"
+	if pick.Video {
+		icon = "📹"
+	}
+	text := icon + " " + name
 	switch rank(*pick) {
 	case 2:
 		if d := pick.Duration(now); d > 0 {
 			text += " " + core.FormatCallDuration(d)
 		}
 	case 1:
-		text = "📞 → " + name
+		text = icon + " → " + name
 	}
 	switch style {
 	case renderTmux:

@@ -24,8 +24,8 @@ const (
 	CallStateEnded      = "ended"
 )
 
-// Call is one live (or just-ended) voice call on a channel that supports
-// them (today only WhatsApp, see Caller). ID is the channel's own call id,
+// Call is one live (or just-ended) voice or video call on a channel that
+// supports them (today only WhatsApp, see Caller). ID is the channel's own call id,
 // unique across every account the daemon runs, so answer/reject/hangup
 // only need it (see Service.ControlCall).
 type Call struct {
@@ -48,6 +48,11 @@ type Call struct {
 	// Empty while audio is fine. It is how a connected but silent call is
 	// told apart from a working one in "bunker calls" and the TUI.
 	AudioError string `json:"audio_error,omitempty"`
+	// Video marks a video call: the offer carried video, or the call was
+	// upgraded to video while live. It only labels the call; whether video
+	// media is actually carried is separate. Voice calls omit it, so their
+	// JSON is unchanged.
+	Video bool `json:"video,omitempty"`
 }
 
 // Duration is how long the call has been (or was) connected as of now:
