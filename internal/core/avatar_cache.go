@@ -46,6 +46,13 @@ func avatarCacheKey(channel Channel, account, thread string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// AvatarCacheKey is avatarCacheKey for callers outside core: a remote
+// RPC client names its local copy of an avatar the same way the daemon
+// names its cache entry.
+func AvatarCacheKey(channel Channel, account, thread string) string {
+	return avatarCacheKey(channel, account, thread)
+}
+
 func (s *Service) avatarPNGPath(key string) string {
 	return filepath.Join(s.avatarCacheDir, key+".png")
 }

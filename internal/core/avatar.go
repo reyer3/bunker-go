@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"io"
+	"os"
 	"sync"
 	"time"
 
@@ -208,6 +210,34 @@ func (s *Service) Avatar(ctx context.Context, channel Channel, account, thread s
 	}
 	s.evictAvatarCacheIfNeeded()
 	return AvatarResult{Path: s.avatarPNGPath(key), Generated: false}, nil
+}
+
+// MaxAvatarDataBytes caps the PNG AvatarData returns. Avatars are
+// resized to avatarSize pixels, so a real one is a few KB; the cap only
+// bounds a corrupted cache entry that would otherwise travel inline.
+const MaxAvatarDataBytes = 1 << 20
+
+// AvatarData is Avatar plus the PNG's bytes, for a client on another
+// machine that cannot open the daemon's cache path and keeps its own
+// copy instead.
+func (s *Service) AvatarData(ctx context.Context, channel Channel, account, thread string) (AvatarResult, []byte, error) {
+	res, err := s.Avatar(ctx, channel, account, thread)
+	if err != nil {
+		return AvatarResult{}, nil, err
+	}
+	f, err := os.Open(res.Path)
+	if err != nil {
+		return AvatarResult{}, nil, fmt.Errorf("core: open avatar: %w", err)
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, MaxAvatarDataBytes+1))
+	if err != nil {
+		return AvatarResult{}, nil, fmt.Errorf("core: read avatar: %w", err)
+	}
+	if len(data) > MaxAvatarDataBytes {
+		return AvatarResult{}, nil, fmt.Errorf("core: avatar %s exceeds %d bytes: %w", res.Path, MaxAvatarDataBytes, ErrAttachmentTooLarge)
+	}
+	return res, data, nil
 }
 
 // fallbackAvatar renders and caches the generated brand-color/initial

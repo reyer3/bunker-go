@@ -71,6 +71,9 @@ func runDaemon(ctx context.Context, stateDir, avatarCacheDir, socketPath string,
 
 	svc := core.NewService(st, reg)
 	svc.SetAvatarCacheDir(avatarCacheDir)
+	// Attachments a client on another machine downloads wait here
+	// between download_open and download_close (core/staging.go).
+	svc.SetStagingDir(filepath.Join(stateDir, "staging"))
 	health := core.NewHealthTracker()
 	svc.SetHealthTracker(health)
 	checker := newUpdateChecker(currentBuild(), cfg, fakeMode, stateDir, stderr)

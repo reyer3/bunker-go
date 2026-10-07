@@ -49,6 +49,12 @@ type Service struct {
 	avatarLimiter       *avatarLimiter
 	avatarCacheCapBytes int64
 
+	// stagingDir and stagingClock back StageDownload/ReadStaged (see
+	// staging.go): where attachments wait for a client on another
+	// machine to read them, and the clock their TTL is measured with.
+	stagingDir   string
+	stagingClock func() time.Time
+
 	// presenceMu/presenceLeases/presenceAfterFunc back the availability
 	// lease PresenceKeepalive implements (see presence.go). presenceAfterFunc
 	// mirrors time.AfterFunc's shape so tests can inject a fake timer and
