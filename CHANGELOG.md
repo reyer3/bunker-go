@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/reyer3/bunker-go/compare/v0.21.0...v0.22.0) (2026-10-07)
+
+
+### Features
+
+* **rpc:** download attachments and avatars from a remote daemon ([#159](https://github.com/reyer3/bunker-go/issues/159)) ([ba866de](https://github.com/reyer3/bunker-go/commit/ba866de4e0c4f2e595755777cea544f5750417fd))
+
 ## [0.21.0](https://github.com/reyer3/bunker-go/compare/v0.20.0...v0.21.0) (2026-10-07)
 
 
