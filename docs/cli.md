@@ -1091,7 +1091,11 @@ call ok: 3EB0C4... whatsapp/personal outgoing +51999999999@s.whatsapp.net callin
 carried video, or the peer upgraded the call to video while it was live.
 It only labels the call: bunker does not carry video media yet, so a
 video call's audio works as on a voice call and no picture is sent or
-shown.
+shown. Answering a video call answers it as voice: once media flows,
+bunker turns its camera off, so the peer sees the camera as off rather
+than a frozen picture; the call keeps `video` = `true`. If the camera
+cannot be turned off, the call still goes on with audio and the daemon
+logs the error.
 
 `Direction` is `incoming` or `outgoing`; `State` moves `ringing`/`calling`
 → `connecting` → `active` → `ended`. `StartedAt` is when the call started
@@ -1254,7 +1258,8 @@ over the socket), still opt-in per account with `calls = true`. It polls
 `calls` every 3 s (every second while one is live, so the duration counts),
 and only when the daemon connection supports them. Video calls are shown and
 marked as video (📹, `Videollamada`), but carrying video media is not
-supported yet: only their audio works. Screen sharing is not part of it.
+supported yet: answering one answers it as voice with the camera off, and
+only its audio works. Screen sharing is not part of it.
 Audio still runs on the daemon's machine.
 
 - **Place:** `Alt+C` in a WhatsApp chat (a chat's composer takes every plain

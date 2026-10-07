@@ -44,6 +44,10 @@ type liveCall interface {
 	// offer, or a voice call upgraded while live. It takes the engine's own
 	// lock, so it is never asked while holding callMu.
 	IsVideo() bool
+	// SetVideoEnabled turns our camera flow on or off (video state 1/0)
+	// without touching the peer's video. Like IsVideo, it takes the
+	// engine's lock, so it is never called while holding callMu.
+	SetVideoEnabled(enabled bool) error
 	// OnReady fires once media is flowing; audio is attached only then,
 	// so no microphone audio is buffered while the call is still ringing.
 	OnReady(fn func())
@@ -85,6 +89,9 @@ type callRecord struct {
 	// audioOpened is set once the audio helpers were started, so a
 	// repeated OnReady never spawns a second set.
 	audioOpened bool
+	// cameraOff is set once our camera was turned off on an answered
+	// video call, so a repeated OnReady never signals it twice.
+	cameraOff bool
 	// mediaTimer is the no-media watchdog, armed when the call is
 	// answered/accepted and stopped when media arrives or the call ends.
 	mediaTimer func() bool
@@ -367,7 +374,7 @@ func (a *Adapter) startCallAudio(callID string) {
 	a.callMu.Lock()
 	rec, ok := a.liveCalls[callID]
 	audio := a.callAudio
-	opened := false
+	opened, cameraOff := false, false
 	if ok {
 		rec.info.Video = rec.info.Video || video
 		rec.info.State = core.CallStateActive
@@ -383,12 +390,17 @@ func (a *Adapter) startCallAudio(callID string) {
 		}
 		opened = rec.audioOpened
 		rec.audioOpened = true
+		cameraOff = rec.info.Direction == core.CallIncoming && rec.info.Video && !rec.cameraOff
+		rec.cameraOff = rec.cameraOff || cameraOff
 	}
 	a.callMu.Unlock()
 	if !ok {
 		return
 	}
 	a.callLog().Info("call media is flowing", "call_id", callID)
+	if cameraOff {
+		a.turnCameraOff(rec.live)
+	}
 	if audio == nil || opened {
 		return
 	}
@@ -406,6 +418,24 @@ func (a *Adapter) startCallAudio(callID string) {
 	rec.src, rec.sink = src, sink
 	a.callMu.Unlock()
 	rec.live.AttachAudio(src, sink)
+}
+
+// turnCameraOff answers an incoming video call as voice: bunker sends no
+// camera frames yet, so leaving our video on would show the peer a frozen
+// picture. meowcaller accepts a video offer with our video on and has no
+// voice-only accept, so the camera is muted right after: SetVideoEnabled
+// (state 0) is meowcaller's camera mute, which leaves the peer's video and
+// the call's video label alone, while StopVideo (state 6) is the
+// transition out of video. It runs on OnReady, not right after Answer:
+// Answer only defers the <accept> until the caller's mute_v2, and a video
+// state sent before that accept would reach the peer ahead of the call
+// itself. A failure costs the peer a frozen picture, never the call or
+// its audio.
+func (a *Adapter) turnCameraOff(live liveCall) {
+	if err := live.SetVideoEnabled(false); err != nil {
+		a.callLog().Error("could not turn the camera off on a video call, the peer may see a frozen picture",
+			"call_id", live.ID(), "error", err)
+	}
 }
 
 // endCall forgets callID, releases its audio and rewrites its item as a

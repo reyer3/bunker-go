@@ -3,6 +3,8 @@ package whatsapp
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -26,6 +28,10 @@ type fakeLiveCall struct {
 	endOnHangup                bool // fire onEnd synchronously from Hangup/Reject, like a racing engine
 	readyOnAnswer              bool // fire onReady from inside Answer, like media racing the answer
 	video                      bool // the offer (or a later upgrade) carries video
+	// events records Answer and SetVideoEnabled in order, so a test can
+	// tell the camera was turned off only after the call was answered.
+	events   []string
+	videoErr error // SetVideoEnabled's answer
 }
 
 func (c *fakeLiveCall) ID() string      { return c.id }
@@ -43,11 +49,23 @@ func (c *fakeLiveCall) setVideo(v bool) {
 func (c *fakeLiveCall) Answer() error {
 	c.mu.Lock()
 	c.answered++
+	c.events = append(c.events, "answer")
 	c.mu.Unlock()
 	if c.readyOnAnswer && c.onReady != nil {
 		c.onReady()
 	}
 	return nil
+}
+func (c *fakeLiveCall) SetVideoEnabled(enabled bool) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.events = append(c.events, fmt.Sprintf("video=%t", enabled))
+	return c.videoErr
+}
+func (c *fakeLiveCall) recorded() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.events...)
 }
 func (c *fakeLiveCall) Reject() error {
 	c.mu.Lock()
@@ -308,6 +326,71 @@ func TestCallUpgradedToVideoIsMarkedVideo(t *testing.T) {
 	}
 	if item := lastUpsert(t, sink); !strings.HasPrefix(item.Body, "📹 Videollamada finalizada (") {
 		t.Fatalf("final item body = %q", item.Body)
+	}
+}
+
+// Answering a video offer must leave our camera off: bunker sends no
+// frames yet, so the peer would otherwise stare at a frozen picture. The
+// camera goes off once media flows (after the deferred accept), never
+// before the answer, and only once.
+func TestAnsweredVideoCallTurnsCameraOff(t *testing.T) {
+	a, engine, _, _ := newCallAdapter(t)
+	live := &fakeLiveCall{id: "VID1", peer: callPeer, video: true}
+	engine.incoming(live)
+
+	if _, err := a.ControlCall(context.Background(), "VID1", core.CallAnswer); err != nil {
+		t.Fatal(err)
+	}
+	live.onReady()
+	live.onReady()
+
+	if got, want := live.recorded(), []string{"answer", "video=false"}; !slices.Equal(got, want) {
+		t.Fatalf("live call events = %v, want %v", got, want)
+	}
+	call := a.ActiveCalls()[0]
+	if !call.Video || call.State != core.CallStateActive || call.AudioError != "" {
+		t.Fatalf("answered video call = %+v, want an active video call with no error", call)
+	}
+}
+
+func TestAnsweredVoiceCallLeavesVideoAlone(t *testing.T) {
+	a, engine, _, _ := newCallAdapter(t)
+	live := &fakeLiveCall{id: "IN1", peer: callPeer}
+	engine.incoming(live)
+
+	if _, err := a.ControlCall(context.Background(), "IN1", core.CallAnswer); err != nil {
+		t.Fatal(err)
+	}
+	live.onReady()
+
+	if got, want := live.recorded(), []string{"answer"}; !slices.Equal(got, want) {
+		t.Fatalf("live call events = %v, want %v", got, want)
+	}
+}
+
+// A camera that cannot be turned off costs the peer a frozen picture, not
+// the call: audio still starts, and the failure is logged loudly.
+func TestCameraOffFailureKeepsCallWithAudio(t *testing.T) {
+	logs := captureSlogDefault(t)
+	a, engine, audio, _ := newCallAdapter(t)
+	live := &fakeLiveCall{id: "VID1", peer: callPeer, video: true, videoErr: errors.New("relay gone")}
+	engine.incoming(live)
+
+	if _, err := a.ControlCall(context.Background(), "VID1", core.CallAnswer); err != nil {
+		t.Fatal(err)
+	}
+	live.onReady()
+
+	call := a.ActiveCalls()[0]
+	if call.State != core.CallStateActive || !call.Video {
+		t.Fatalf("call = %+v, want it active and still video", call)
+	}
+	if audio.opens != 1 || live.src == nil || live.sink == nil {
+		t.Fatalf("audio opens=%d src=%v sink=%v, want audio attached", audio.opens, live.src, live.sink)
+	}
+	out := logs.String()
+	if !strings.Contains(out, "level=ERROR") || !strings.Contains(out, "relay gone") || !strings.Contains(out, "camera") {
+		t.Fatalf("log = %q, want an error about the camera with its cause", out)
 	}
 }
 
