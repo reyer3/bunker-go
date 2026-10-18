@@ -148,7 +148,7 @@ func (c *inboxClient) Read(_ context.Context, id string, receipt bool) (core.Ite
 	return c.readResult, c.readErr
 }
 
-func (c *inboxClient) Reply(context.Context, string, string, []string, []string, bool) (core.Plan, core.Receipt, error) {
+func (c *inboxClient) Reply(context.Context, string, string, []string, []string, []string, bool) (core.Plan, core.Receipt, error) {
 	c.otherCalls++
 	return core.Plan{}, core.Receipt{}, nil
 }

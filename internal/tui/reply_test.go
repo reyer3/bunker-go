@@ -45,10 +45,10 @@ type replyClient struct {
 }
 
 type replyCall struct {
-	id, body    string
-	cc, attach  []string
-	dryRun      bool
-	hasDeadline bool
+	id, body        string
+	cc, bcc, attach []string
+	dryRun          bool
+	hasDeadline     bool
 }
 
 type outgoingCall struct {
@@ -75,9 +75,9 @@ func (c *replyClient) Send(ctx context.Context, out core.Outgoing, dryRun bool) 
 	return c.outgoingSent, c.outgoingSentRcpt, c.outgoingSentErr
 }
 
-func (c *replyClient) Reply(ctx context.Context, id, body string, cc, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
+func (c *replyClient) Reply(ctx context.Context, id, body string, cc, bcc, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
 	_, hasDeadline := ctx.Deadline()
-	c.calls = append(c.calls, replyCall{id: id, body: body, cc: cc, attach: attachments, dryRun: dryRun, hasDeadline: hasDeadline})
+	c.calls = append(c.calls, replyCall{id: id, body: body, cc: cc, bcc: bcc, attach: attachments, dryRun: dryRun, hasDeadline: hasDeadline})
 	if c.block != nil {
 		<-c.block
 	}

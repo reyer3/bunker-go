@@ -118,7 +118,7 @@ func TestServiceReplyStoresSentItemWithOriginalThreadName(t *testing.T) {
 	reg.Register(&spyAdapter{channel: core.ChannelWhatsApp, account: "personal"})
 	svc := core.NewService(store, reg)
 
-	_, receipt, err := svc.Reply(context.Background(), item.ID, "hola", nil, nil, false)
+	_, receipt, err := svc.Reply(context.Background(), item.ID, "hola", nil, nil, nil, false)
 	if err != nil {
 		t.Fatalf("Reply: %v", err)
 	}

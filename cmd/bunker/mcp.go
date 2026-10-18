@@ -228,6 +228,8 @@ type (
 		Channel     string   `json:"channel" jsonschema:"mail, whatsapp or matrix"`
 		Account     string   `json:"account" jsonschema:"account to send from"`
 		To          string   `json:"to" jsonschema:"an address, or a contact name resolved within that account"`
+		Cc          []string `json:"cc,omitempty" jsonschema:"mail only: additional visible recipients, comma-separated address strings"`
+		Bcc         []string `json:"bcc,omitempty" jsonschema:"mail only: hidden recipients that never appear in the message headers or body, comma-separated address strings"`
 		Text        string   `json:"text,omitempty" jsonschema:"the message; may be empty when attachments are given"`
 		Subject     string   `json:"subject,omitempty" jsonschema:"mail only"`
 		Attachments []string `json:"attachments,omitempty" jsonschema:"local files to attach, as absolute paths (no ~, no relative paths); the plan lists each one's name, MIME type and size"`
@@ -236,6 +238,8 @@ type (
 	}
 	mcpReplyIn struct {
 		ID          string   `json:"id" jsonschema:"the item to reply to"`
+		Cc          []string `json:"cc,omitempty" jsonschema:"mail only: additional visible recipients, comma-separated address strings"`
+		Bcc         []string `json:"bcc,omitempty" jsonschema:"mail only: hidden recipients that never appear in the message headers or body, comma-separated address strings"`
 		Text        string   `json:"text,omitempty" jsonschema:"the reply; may be empty when attachments are given"`
 		Attachments []string `json:"attachments,omitempty" jsonschema:"local files to attach, as absolute paths (no ~, no relative paths); the plan lists each one's name, MIME type and size"`
 		Confirm     bool     `json:"confirm,omitempty" jsonschema:"false (default) returns the plan only; true sends, and only works when the server runs with --allow-send"`
@@ -428,7 +432,7 @@ func newMCPServer(dial mcpDialer, allowSend bool) *mcp.Server {
 				if err != nil {
 					return core.Plan{}, core.Receipt{}, err
 				}
-				return b.Send(ctx, core.Outgoing{Channel: channel, Account: in.Account, To: []string{to}, Subject: in.Subject, Body: in.Text, Attachments: in.Attachments, Forward: in.Forward}, dryRun)
+				return b.Send(ctx, core.Outgoing{Channel: channel, Account: in.Account, To: []string{to}, Cc: in.Cc, Bcc: in.Bcc, Subject: in.Subject, Body: in.Text, Attachments: in.Attachments, Forward: in.Forward}, dryRun)
 			})
 		})
 
@@ -438,7 +442,7 @@ func newMCPServer(dial mcpDialer, allowSend bool) *mcp.Server {
 				return nil, mcpPlanOut{}, err
 			}
 			return mcpOutbound(ctx, dial, allowSend, in.Confirm, func(ctx context.Context, b Backend, dryRun bool) (core.Plan, core.Receipt, error) {
-				return b.Reply(ctx, in.ID, in.Text, nil, in.Attachments, dryRun)
+				return b.Reply(ctx, in.ID, in.Text, in.Cc, in.Bcc, in.Attachments, dryRun)
 			})
 		})
 

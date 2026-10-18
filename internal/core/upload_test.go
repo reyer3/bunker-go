@@ -333,7 +333,7 @@ func TestServiceRefusesStagingPathsThatAreNotCommittedUploads(t *testing.T) {
 			if _, _, err := svc.Send(ctx, out, dryRun); !errors.Is(err, core.ErrNotFound) {
 				t.Errorf("Send(%s, dry=%v) err = %v, want ErrNotFound", p, dryRun, err)
 			}
-			if _, _, err := svc.Reply(ctx, "mail:cl:1", "x", nil, []string{p}, dryRun); !errors.Is(err, core.ErrNotFound) {
+			if _, _, err := svc.Reply(ctx, "mail:cl:1", "x", nil, nil, []string{p}, dryRun); !errors.Is(err, core.ErrNotFound) {
 				t.Errorf("Reply(%s, dry=%v) err = %v, want ErrNotFound", p, dryRun, err)
 			}
 			if _, _, err := svc.PostStatus(ctx, core.ChannelMail, "cl", core.Status{Media: p}, dryRun); !errors.Is(err, core.ErrNotFound) {

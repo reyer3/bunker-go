@@ -152,7 +152,7 @@ func (c *queryClient) Read(ctx context.Context, id string, receipt bool) (core.I
 	return client.Read(ctx, id, true)
 }
 
-func (c *queryClient) Reply(ctx context.Context, id, body string, cc, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
+func (c *queryClient) Reply(ctx context.Context, id, body string, cc, bcc, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
 	if err := c.acquire(ctx); err != nil {
 		return core.Plan{}, core.Receipt{}, err
 	}
@@ -161,7 +161,7 @@ func (c *queryClient) Reply(ctx context.Context, id, body string, cc, attachment
 	if err != nil {
 		return core.Plan{}, core.Receipt{}, err
 	}
-	return client.Reply(ctx, id, body, cc, attachments, dryRun)
+	return client.Reply(ctx, id, body, cc, bcc, attachments, dryRun)
 }
 
 func (c *queryClient) Organize(ctx context.Context, id string, op core.OrganizeOp, dryRun bool) (core.Plan, error) {

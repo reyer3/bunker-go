@@ -124,7 +124,7 @@ func TestClientReadFetchesOverSocket(t *testing.T) {
 
 func TestClientReplyDryRunNeverReachesAdapter(t *testing.T) {
 	client, adapter, _ := startTestServer(t)
-	plan, receipt, err := client.Reply(context.Background(), "mail:cl:1", "reply body", nil, nil, true)
+	plan, receipt, err := client.Reply(context.Background(), "mail:cl:1", "reply body", nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Reply: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestClientReplyDryRunNeverReachesAdapter(t *testing.T) {
 
 func TestClientReplyExecutesOverSocket(t *testing.T) {
 	client, adapter, _ := startTestServer(t)
-	_, receipt, err := client.Reply(context.Background(), "mail:cl:1", "reply body", nil, nil, false)
+	_, receipt, err := client.Reply(context.Background(), "mail:cl:1", "reply body", nil, nil, nil, false)
 	if err != nil {
 		t.Fatalf("Reply: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestClientReplyExecutesOverSocket(t *testing.T) {
 // round-trip through the JSON-RPC wire, not just the in-process Service.
 func TestClientReplyWithCcReachesAdapterOverSocket(t *testing.T) {
 	client, adapter, _ := startTestServer(t)
-	_, _, err := client.Reply(context.Background(), "mail:cl:1", "reply body", []string{"cc@x.cl"}, nil, false)
+	_, _, err := client.Reply(context.Background(), "mail:cl:1", "reply body", []string{"cc@x.cl"}, nil, nil, false)
 	if err != nil {
 		t.Fatalf("Reply: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestClientReplyUnsupportedCapabilityReturnsErrUnsupported(t *testing.T) {
 	client := dialUntilReady(t, socket)
 	defer client.Close()
 
-	_, _, err = client.Reply(context.Background(), item.ID, "x", nil, nil, true)
+	_, _, err = client.Reply(context.Background(), item.ID, "x", nil, nil, nil, true)
 	if !errors.Is(err, core.ErrUnsupported) {
 		t.Fatalf("err = %v, want ErrUnsupported", err)
 	}
@@ -610,7 +610,7 @@ func dialUntilReady(t *testing.T, socket string) *rpc.Client {
 // binary, but every field must still round-trip through the socket.
 func TestClientReplyPlanAndReceiptSurviveTheWire(t *testing.T) {
 	client, _, _ := startTestServer(t)
-	plan, receipt, err := client.Reply(context.Background(), "mail:cl:1", "reply body", []string{"cc@x.cl"}, nil, false)
+	plan, receipt, err := client.Reply(context.Background(), "mail:cl:1", "reply body", []string{"cc@x.cl"}, nil, nil, false)
 	if err != nil {
 		t.Fatalf("Reply: %v", err)
 	}

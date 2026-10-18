@@ -14,7 +14,7 @@ type Client interface {
 	List(context.Context, core.Filter) ([]core.Item, error)
 	Counts(context.Context) (map[core.Channel]map[string]int, error)
 	Read(context.Context, string, bool) (core.Item, error)
-	Reply(context.Context, string, string, []string, []string, bool) (core.Plan, core.Receipt, error)
+	Reply(context.Context, string, string, []string, []string, []string, bool) (core.Plan, core.Receipt, error)
 	Organize(context.Context, string, core.OrganizeOp, bool) (core.Plan, error)
 	// Send backs K6's mail thread editor (reply/reply-all/forward), which
 	// needs an editable To/Cc/Subject unlike Reply's server-derived

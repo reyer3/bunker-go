@@ -327,6 +327,69 @@ func TestMCPSendWhenAllowed(t *testing.T) {
 	}
 }
 
+// TestMCPSendWithCcAndBcc covers T4: MCP send carries Cc and Bcc to the
+// backend's Outgoing, and the dry-run plan lists them.
+func TestMCPSendWithCcAndBcc(t *testing.T) {
+	backend := mcpBackend()
+	s := mcpSession(t, backend, false)
+
+	res, _ := callTool(t, s, "send", map[string]any{
+		"channel": "mail", "account": "cl", "to": "jose@example.cl",
+		"text": "hola",
+		"cc":   []any{"ana@example.cl"},
+		"bcc":  []any{"beto@example.cl", "carla@example.cl"},
+	})
+	if res.IsError {
+		t.Fatalf("send with cc/bcc should plan: %s", toolText(res))
+	}
+	if len(backend.sendCalls) != 1 {
+		t.Fatalf("sendCalls = %d, want 1", len(backend.sendCalls))
+	}
+	sent := backend.sendCalls[0]
+	if len(sent.Cc) != 1 || sent.Cc[0] != "ana@example.cl" {
+		t.Fatalf("Outgoing.Cc = %+v, want [ana@example.cl]", sent.Cc)
+	}
+	if len(sent.Bcc) != 2 || sent.Bcc[0] != "beto@example.cl" || sent.Bcc[1] != "carla@example.cl" {
+		t.Fatalf("Outgoing.Bcc = %+v, want [beto@example.cl carla@example.cl]", sent.Bcc)
+	}
+	for _, dry := range backend.sendDryRuns {
+		if !dry {
+			t.Fatal("a plans-only server sent for real")
+		}
+	}
+}
+
+// TestMCPReplyWithCcAndBcc covers T4: MCP reply carries Cc and Bcc to the
+// backend.
+func TestMCPReplyWithCcAndBcc(t *testing.T) {
+	backend := mcpBackend()
+	// Add a mail item to reply to.
+	backend.items["mail:cl:1"] = core.Item{
+		ID: "mail:cl:1", Channel: core.ChannelMail, Account: "cl",
+		From: core.Address{ID: "them@example.cl"},
+	}
+	s := mcpSession(t, backend, false)
+
+	res, _ := callTool(t, s, "reply", map[string]any{
+		"id": "mail:cl:1", "text": "listo",
+		"cc":  []any{"ana@example.cl"},
+		"bcc": []any{"beto@example.cl"},
+	})
+	if res.IsError {
+		t.Fatalf("reply with cc/bcc should plan: %s", toolText(res))
+	}
+	if len(backend.replyCalls) != 1 {
+		t.Fatalf("replyCalls = %d, want 1", len(backend.replyCalls))
+	}
+	rc := backend.replyCalls[0]
+	if len(rc.Cc) != 1 || rc.Cc[0] != "ana@example.cl" {
+		t.Fatalf("reply Cc = %+v, want [ana@example.cl]", rc.Cc)
+	}
+	if len(rc.Bcc) != 1 || rc.Bcc[0] != "beto@example.cl" {
+		t.Fatalf("reply Bcc = %+v, want [beto@example.cl]", rc.Bcc)
+	}
+}
+
 func TestMCPDaemonDown(t *testing.T) {
 	dial := func(context.Context) (Backend, io.Closer, error) {
 		return nil, nil, errors.New("cannot reach bunker daemon")

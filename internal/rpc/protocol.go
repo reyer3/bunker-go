@@ -150,6 +150,7 @@ type replyParams struct {
 	ID             string   `json:"id"`
 	Body           string   `json:"body"`
 	Cc             []string `json:"cc"`
+	Bcc            []string `json:"bcc"`
 	Attachments    []string `json:"attachments"`
 	DryRun         bool     `json:"dryRun"`
 	IdempotencyKey string   `json:"idempotency_key,omitempty"`

@@ -113,6 +113,7 @@ func startRemoteTestDaemon(t *testing.T, data []byte) remoteTestDaemon {
 		ID:          "mail:cl:att",
 		Channel:     core.ChannelMail,
 		Account:     "cl",
+		From:        core.Address{ID: "them@x.cl"},
 		Attachments: []core.Attachment{{Name: "big.bin", MIME: "application/octet-stream", Size: int64(len(data))}},
 	}
 	if err := st.Upsert(context.Background(), item); err != nil {
@@ -509,7 +510,7 @@ func TestRemoteClientRepliesWithVoiceNote(t *testing.T) {
 	ogg := oggfixture.Bytes(3 * time.Second)
 	local := writeClientFile(t, "nota.ogg", ogg)
 
-	plan, _, err := client.Reply(core.WithVoice(context.Background()), "mail:cl:att", "", nil, []string{local}, false)
+	plan, _, err := client.Reply(core.WithVoice(context.Background()), "mail:cl:att", "", nil, nil, []string{local}, false)
 	if err != nil {
 		t.Fatalf("Reply voice: %v", err)
 	}
@@ -553,7 +554,7 @@ func TestRemoteClientDryRunUploadsForThePlan(t *testing.T) {
 	client := dialRemoteTest(t, d.socket)
 	local := writeClientFile(t, "presupuesto.txt", []byte("total: 10"))
 
-	plan, _, err := client.Reply(context.Background(), "mail:cl:att", "x", nil, []string{local}, true)
+	plan, _, err := client.Reply(context.Background(), "mail:cl:att", "x", nil, nil, []string{local}, true)
 	if err != nil {
 		t.Fatalf("dry-run Reply: %v", err)
 	}
@@ -747,7 +748,7 @@ func TestRemoteSendGuardReturnsDetectionErrors(t *testing.T) {
 	t.Setenv("BUNKER_REMOTE", "maybe")
 	socket := startScriptedServer(t, func(Request) Response { return Response{Result: json.RawMessage(`{}`)} })
 	client := dialRemoteTest(t, socket)
-	_, _, err := client.Reply(context.Background(), "mail:cl:att", "x", nil, []string{"/home/u/a.pdf"}, true)
+	_, _, err := client.Reply(context.Background(), "mail:cl:att", "x", nil, nil, []string{"/home/u/a.pdf"}, true)
 	if err == nil || errors.Is(err, core.ErrUnsupported) {
 		t.Fatalf("err = %v, want the BUNKER_REMOTE parse error as is", err)
 	}

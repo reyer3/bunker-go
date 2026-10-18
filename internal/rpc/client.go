@@ -184,14 +184,14 @@ func (c *Client) Counts(ctx context.Context) (map[core.Channel]map[string]int, e
 // attaching local files. An idempotency key in ctx (core.WithIdempotencyKey)
 // goes on the wire so the daemon sends at most once per key. A remote
 // client uploads the attachments (or voice note) first (see uploadFiles).
-func (c *Client) Reply(ctx context.Context, id, body string, cc, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
+func (c *Client) Reply(ctx context.Context, id, body string, cc, bcc []string, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
 	attachments, uploads, err := c.uploadFiles(ctx, attachments...)
 	defer uploads.release(ctx)
 	if err != nil {
 		return core.Plan{}, core.Receipt{}, err
 	}
 	var res planReceiptResult
-	params := replyParams{ID: id, Body: body, Cc: cc, Attachments: attachments, DryRun: dryRun, IdempotencyKey: core.IdempotencyKey(ctx), Voice: core.IsVoice(ctx)}
+	params := replyParams{ID: id, Body: body, Cc: cc, Bcc: bcc, Attachments: attachments, DryRun: dryRun, IdempotencyKey: core.IdempotencyKey(ctx), Voice: core.IsVoice(ctx)}
 	if err := c.call(ctx, MethodReply, params, &res); err != nil {
 		return core.Plan{}, core.Receipt{}, err
 	}

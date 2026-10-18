@@ -523,7 +523,7 @@ func cmdReply(ctx context.Context, backend Backend, args []string, stdin io.Read
 			return fail(*jsonOut, stdout, stderr, err)
 		}
 	}
-	plan, receipt, err := backend.Reply(core.WithIdempotencyKey(ctx, *idemKey), positionals[0], body, collectCc(cc), attach, *dryRun)
+	plan, receipt, err := backend.Reply(core.WithIdempotencyKey(ctx, *idemKey), positionals[0], body, collectCc(cc), nil, attach, *dryRun)
 	if err != nil {
 		return fail(*jsonOut, stdout, stderr, err)
 	}
