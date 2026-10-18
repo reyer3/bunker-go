@@ -47,7 +47,7 @@ type Backend interface {
 	Search(ctx context.Context, channel core.Channel, account string, criteria core.SearchCriteria) ([]core.Item, error)
 	// PlaceCall, ControlCall and Calls drive voice calls (core.Caller):
 	// `bunker call`, `bunker call answer|reject|hangup` and `bunker calls`.
-	PlaceCall(ctx context.Context, channel core.Channel, account, to string, dryRun bool) (core.Plan, core.Call, error)
+	PlaceCall(ctx context.Context, channel core.Channel, account, to string, video, dryRun bool) (core.Plan, core.Call, error)
 	ControlCall(ctx context.Context, id string, action core.CallAction, dryRun bool) (core.Plan, core.Call, error)
 	Calls(ctx context.Context) ([]core.Call, error)
 	// Contacts lists address-book entries and conversations matching a

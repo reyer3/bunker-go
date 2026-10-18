@@ -45,7 +45,7 @@ func (c *callClient) Calls(context.Context) ([]core.Call, error) {
 	return c.live, c.listErr
 }
 
-func (c *callClient) PlaceCall(_ context.Context, channel core.Channel, account, to string, dryRun bool) (core.Plan, core.Call, error) {
+func (c *callClient) PlaceCall(_ context.Context, channel core.Channel, account, to string, video, dryRun bool) (core.Plan, core.Call, error) {
 	c.placed = append(c.placed, placeRecord{channel, account, to, dryRun})
 	if c.placeErr != nil {
 		return core.Plan{}, core.Call{}, c.placeErr

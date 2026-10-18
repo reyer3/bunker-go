@@ -124,7 +124,9 @@ func NewFromAccount(acc config.Account) (core.Adapter, error) {
 		audio := commandAudioFromOptions(acc.Options)
 		audio.log = log
 		headless := headlessFlag(boolOption(acc.Options, "headless", false))
-		adapter.EnableCalls(meowEngine{client}, audio, headless, nilMediaSession{})
+		video := commandVideoFromOptions(acc.Options)
+		video.log = log
+		adapter.EnableCalls(meowEngine{client}, audio, headless, nilMediaSession{}, video)
 	}
 	return adapter, nil
 }

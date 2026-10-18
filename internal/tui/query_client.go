@@ -440,9 +440,9 @@ func (c *queryClient) Calls(ctx context.Context) ([]core.Call, error) {
 	return calls, err
 }
 
-func (c *queryClient) PlaceCall(ctx context.Context, channel core.Channel, account, to string, dryRun bool) (core.Plan, core.Call, error) {
+func (c *queryClient) PlaceCall(ctx context.Context, channel core.Channel, account, to string, video, dryRun bool) (core.Plan, core.Call, error) {
 	return c.callAction(ctx, func(cc CallClient) (core.Plan, core.Call, error) {
-		return cc.PlaceCall(ctx, channel, account, to, dryRun)
+		return cc.PlaceCall(ctx, channel, account, to, video, dryRun)
 	})
 }
 

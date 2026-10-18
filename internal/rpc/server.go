@@ -399,7 +399,7 @@ func (s *Server) call(ctx context.Context, req Request) (any, error) {
 		if err := json.Unmarshal(req.Params, &p); err != nil {
 			return nil, fmt.Errorf("rpc: bad params: %w", err)
 		}
-		plan, call, err := s.svc.PlaceCall(ctx, p.Channel, p.Account, p.To, p.DryRun)
+		plan, call, err := s.svc.PlaceCall(ctx, p.Channel, p.Account, p.To, p.Video, p.DryRun)
 		if err != nil {
 			return nil, err
 		}
