@@ -100,6 +100,7 @@ type placeCallCall struct {
 	Channel core.Channel
 	Account string
 	To      string
+	Video   bool
 	DryRun  bool
 }
 
@@ -109,12 +110,15 @@ type controlCallCall struct {
 	DryRun bool
 }
 
-func (f *fakeBackend) PlaceCall(ctx context.Context, channel core.Channel, account, to string, dryRun bool) (core.Plan, core.Call, error) {
-	f.placeCallCalls = append(f.placeCallCalls, placeCallCall{channel, account, to, dryRun})
+func (f *fakeBackend) PlaceCall(ctx context.Context, channel core.Channel, account, to string, video, dryRun bool) (core.Plan, core.Call, error) {
+	f.placeCallCalls = append(f.placeCallCalls, placeCallCall{channel, account, to, video, dryRun})
 	if f.callErr != nil {
 		return core.Plan{}, core.Call{}, f.callErr
 	}
 	plan := core.Plan{Action: "call", Channel: channel, Account: account, Target: to}
+	if video {
+		plan.Action = "call video"
+	}
 	if dryRun {
 		return plan, core.Call{}, nil
 	}

@@ -253,10 +253,10 @@ func (c *Client) Organize(ctx context.Context, id string, op core.OrganizeOp, dr
 	return res.Plan, nil
 }
 
-// PlaceCall starts a voice call to to on channel/account.
-func (c *Client) PlaceCall(ctx context.Context, channel core.Channel, account, to string, dryRun bool) (core.Plan, core.Call, error) {
+// PlaceCall starts a voice or video call to to on channel/account.
+func (c *Client) PlaceCall(ctx context.Context, channel core.Channel, account, to string, video, dryRun bool) (core.Plan, core.Call, error) {
 	var res planCallResult
-	err := c.call(ctx, MethodCall, callParams{Channel: channel, Account: account, To: to, DryRun: dryRun}, &res)
+	err := c.call(ctx, MethodCall, callParams{Channel: channel, Account: account, To: to, Video: video, DryRun: dryRun}, &res)
 	if err != nil {
 		return core.Plan{}, core.Call{}, err
 	}

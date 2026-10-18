@@ -204,6 +204,7 @@ type callParams struct {
 	Channel core.Channel `json:"channel"`
 	Account string       `json:"account"`
 	To      string       `json:"to"`
+	Video   bool         `json:"video,omitempty"`
 	DryRun  bool         `json:"dryRun"`
 }
 

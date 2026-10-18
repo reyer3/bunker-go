@@ -123,7 +123,9 @@ func NewFromAccount(acc config.Account) (core.Adapter, error) {
 		client := meowcaller.NewClient(cli.Client, meowcaller.WithLogger(meowLogger(log)))
 		audio := commandAudioFromOptions(acc.Options)
 		audio.log = log
-		adapter.EnableCalls(meowEngine{client}, audio)
+		video := commandVideoFromOptions(acc.Options)
+		video.log = log
+		adapter.EnableCalls(meowEngine{client}, audio, video)
 	}
 	return adapter, nil
 }

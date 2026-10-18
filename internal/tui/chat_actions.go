@@ -263,7 +263,7 @@ func placeCallAction(client Client, channel core.Channel, account, to string, to
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
-		plan, call, err = cc.PlaceCall(ctx, channel, account, to, dryRun)
+		plan, call, err = cc.PlaceCall(ctx, channel, account, to, false, dryRun)
 		err = callActionError(err)
 	}
 	if dryRun {

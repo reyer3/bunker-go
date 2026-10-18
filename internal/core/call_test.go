@@ -46,14 +46,14 @@ func newCallService(adapters ...core.Adapter) *core.Service {
 func TestServicePlaceCallDryRunNeverCallsAdapter(t *testing.T) {
 	spy := &callerAdapter{channel: core.ChannelWhatsApp, account: "personal"}
 	svc := newCallService(spy)
-	plan, call, err := svc.PlaceCall(context.Background(), core.ChannelWhatsApp, "personal", "+51999", true)
+	plan, call, err := svc.PlaceCall(context.Background(), core.ChannelWhatsApp, "personal", "+51999", false, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(spy.placed) != 0 || call.ID != "" || plan.Action != "call" || plan.Target != "+51999" {
 		t.Fatalf("dry-run placed=%v call=%+v plan=%+v", spy.placed, call, plan)
 	}
-	if _, call, err = svc.PlaceCall(context.Background(), core.ChannelWhatsApp, "personal", "+51999", false); err != nil || call.ID != "C1" {
+	if _, call, err = svc.PlaceCall(context.Background(), core.ChannelWhatsApp, "personal", "+51999", false, false); err != nil || call.ID != "C1" {
 		t.Fatalf("PlaceCall = %+v, %v", call, err)
 	}
 }
@@ -62,13 +62,13 @@ func TestServicePlaceCallUnsupported(t *testing.T) {
 	disabled := &callerAdapter{channel: core.ChannelWhatsApp, account: "personal", canErr: core.ErrUnsupported}
 	mail := &spyAdapter{channel: core.ChannelMail, account: "cl"}
 	svc := newCallService(disabled, mail)
-	if _, _, err := svc.PlaceCall(context.Background(), core.ChannelWhatsApp, "personal", "+51999", true); !errors.Is(err, core.ErrUnsupported) {
+	if _, _, err := svc.PlaceCall(context.Background(), core.ChannelWhatsApp, "personal", "+51999", false, true); !errors.Is(err, core.ErrUnsupported) {
 		t.Fatalf("disabled caller dry-run = %v, want ErrUnsupported", err)
 	}
-	if _, _, err := svc.PlaceCall(context.Background(), core.ChannelMail, "cl", "x@y.cl", true); !errors.Is(err, core.ErrUnsupported) {
+	if _, _, err := svc.PlaceCall(context.Background(), core.ChannelMail, "cl", "x@y.cl", false, true); !errors.Is(err, core.ErrUnsupported) {
 		t.Fatalf("mail call = %v, want ErrUnsupported", err)
 	}
-	if _, _, err := svc.PlaceCall(context.Background(), core.ChannelWhatsApp, "personal", "  ", true); err == nil {
+	if _, _, err := svc.PlaceCall(context.Background(), core.ChannelWhatsApp, "personal", "  ", false, true); err == nil {
 		t.Fatal("empty recipient accepted")
 	}
 }
