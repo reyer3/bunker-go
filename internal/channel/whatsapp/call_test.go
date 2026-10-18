@@ -149,7 +149,7 @@ func newCallAdapter(t *testing.T) (*Adapter, *fakeCallEngine, *fakeCallAudio, *s
 	a.sink = sink
 	engine := &fakeCallEngine{}
 	audio := &fakeCallAudio{}
-	a.EnableCalls(engine, audio)
+	a.EnableCalls(engine, audio, nilHeadless{})
 	return a, engine, audio, sink
 }
 

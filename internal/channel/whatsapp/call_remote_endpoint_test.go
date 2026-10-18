@@ -2,48 +2,8 @@ package whatsapp
 
 import (
 	"context"
-	"errors"
 	"testing"
-
-	"github.com/purpshell/meowcaller"
 )
-
-// mediaEndpoint is one side of a call's media: capture (microphone) and
-// playback (speaker). It may be local (parec/pacat on this machine) or
-// remote (a desktop client over the tailnet). The interface is intentionally
-// narrow: Open starts the endpoint for one call and returns the frames the
-// engine consumes/produces. Close releases it. Check reports why it cannot
-// work before a call starts (missing helper, missing device, no permission).
-type mediaEndpoint interface {
-	// Open starts capture/playback for callID. problem reports helper
-	// failure mid-call. ctx lets the engine cancel a blocked open.
-	Open(ctx context.Context, callID string, problem func(short string, err error)) (meowcaller.AudioSource, meowcaller.AudioSink, error)
-	// Check reports, before any call starts, why this endpoint cannot give
-	// a call sound.
-	Check() error
-}
-
-// mediaSession is one media owner per call. It is acquired atomically with
-// an authenticated identity and a short-lived, call-scoped credential.
-// Only the owner may attach capture/playback; observers can see call state
-// but not listen or inject audio.
-type mediaSession interface {
-	// Claim attempts to become this call's media owner. identity is the
-	// authenticated client (e.g. a desktop over SSH/tailnet). credential
-	// is call-scoped and single-use. ok is false when another client owns
-	// the media or the credential is stale/expired/replayed.
-	Claim(ctx context.Context, callID string, identity, credential string) (ok bool, endpoint mediaEndpoint, err error)
-	// Release gives up media ownership for callID. Idempotent.
-	Release(ctx context.Context, callID string) error
-	// Owner returns the current media owner's identity, or "" if none.
-	Owner(callID string) string
-}
-
-// headlessMode reports whether the daemon runs without a local desktop
-// (no local microphone/speaker should ever be opened for media).
-type headlessMode interface {
-	Headless() bool
-}
 
 // TestRemoteEndpointSelectionRED is RED: it defines the expected contract
 // for choosing a remote media endpoint over a local one, and must fail
@@ -64,7 +24,7 @@ func TestRemoteEndpointSelectionRED(t *testing.T) {
 	}
 
 	// No mediaSession exists on Adapter today: claiming remote media must
-	// fail to compile or return an error until T3-T4 exist.
+	// fail because nilMediaSession always rejects Claim.
 	var sess mediaSession = nilMediaSession{}
 	_, _, err := sess.Claim(context.Background(), live.ID(), "desktop-linux", "cred-1")
 	if err == nil {
@@ -72,8 +32,7 @@ func TestRemoteEndpointSelectionRED(t *testing.T) {
 	}
 
 	// The local audio interface must not auto-open when a remote endpoint
-	// owns the media. Today Open has no endpoint selector: it always opens
-	// local parec/pacat.
+	// owns the media. nilMediaEndpoint always fails, so no devices open.
 	var ep mediaEndpoint = nilMediaEndpoint{}
 	src, sink, openErr := ep.Open(context.Background(), live.ID(), func(string, error) {})
 	if openErr == nil && (src != nil || sink != nil) {
@@ -84,44 +43,19 @@ func TestRemoteEndpointSelectionRED(t *testing.T) {
 // TestNoHeadlessLocalCaptureRED is RED: it defines that a headless daemon
 // (no local desktop) never opens local microphone/speaker for call media,
 // even when OnReady fires. The media owner is the answering desktop.
-// It must fail because Adapter.startCallAudio unconditionally opens local
-// commandAudio when media is ready.
 func TestNoHeadlessLocalCaptureRED(t *testing.T) {
 	a, engine, audio, _ := newCallAdapter(t)
 	t.Cleanup(a.hangupAll)
+	a.headless = headlessFlag(true)
 	live := &fakeLiveCall{id: "HEADLESS", peer: callPeer}
 	engine.next = live
 	if _, err := a.PlaceCall(context.Background(), callPeer.String()); err != nil {
 		t.Fatal(err)
 	}
 	live.onReady()
-	// A headless daemon with a remote media owner must not open local
-	// devices. Today there is no headless flag and no remote endpoint:
-	// startCallAudio opens commandAudio unconditionally.
+	// A headless daemon with no media endpoint must not open local
+	// devices: startCallAudio checks headless before opening commandAudio.
 	if audio.opens != 0 {
-		t.Fatalf("headless daemon opened local audio (%d opens), want 0 (RED: T1 not implemented)", audio.opens)
+		t.Fatalf("headless daemon opened local audio (%d opens), want 0", audio.opens)
 	}
 }
-
-// nilMediaEndpoint is a stub so the test file references the interface
-// without implementing it (the interface itself is the RED).
-type nilMediaEndpoint struct{}
-
-func (nilMediaEndpoint) Open(context.Context, string, func(string, error)) (meowcaller.AudioSource, meowcaller.AudioSink, error) {
-	return nil, nil, errors.New("no media endpoint implementation (RED: T3/T4)")
-}
-func (nilMediaEndpoint) Check() error {
-	return errors.New("no media endpoint implementation (RED: T3/T4)")
-}
-
-// nilMediaSession is a stub so the test file references the interface
-// without implementing it.
-type nilMediaSession struct{}
-
-func (nilMediaSession) Claim(context.Context, string, string, string) (bool, mediaEndpoint, error) {
-	return false, nil, errors.New("no media session implementation (RED: T3)")
-}
-func (nilMediaSession) Release(context.Context, string) error {
-	return errors.New("no media session implementation (RED: T3)")
-}
-func (nilMediaSession) Owner(string) string { return "" }

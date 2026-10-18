@@ -145,7 +145,7 @@ func TestHelperDeathMidCallReportsExitAndStderr(t *testing.T) {
 	a := newTestAdapter("personal", &fakeWAClient{linked: true})
 	a.sink = newSpySink()
 	engine := &fakeCallEngine{}
-	a.EnableCalls(engine, audio)
+	a.EnableCalls(engine, audio, nilHeadless{})
 	live := &fakeLiveCall{id: "CALL1", peer: callPeer}
 	engine.next = live
 	if _, err := a.PlaceCall(context.Background(), "51999888777"); err != nil {
