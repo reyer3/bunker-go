@@ -134,7 +134,7 @@ func (a *Adapter) Send(ctx context.Context, out core.Outgoing) (core.Receipt, er
 	}
 	defer smtpClient.Close()
 
-	recipients := append(append([]string{}, out.To...), out.Cc...)
+	recipients := append(append(append([]string{}, out.To...), out.Cc...), out.Bcc...)
 	if err := smtpClient.SendMail(a.cfg.Username, recipients, bytes.NewReader(raw)); err != nil {
 		return core.Receipt{}, fmt.Errorf("mail: send: smtp submit: %w", err)
 	}

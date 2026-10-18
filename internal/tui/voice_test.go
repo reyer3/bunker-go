@@ -33,11 +33,11 @@ func (c *voiceClient) Download(_ context.Context, id string, _ int, destPath str
 	return core.DownloadResult{Path: destPath, Bytes: int64(len(data))}, nil
 }
 
-func (c *voiceClient) Reply(ctx context.Context, id, body string, cc, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
+func (c *voiceClient) Reply(ctx context.Context, id, body string, cc, bcc, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
 	c.mu.Lock()
 	c.voices = append(c.voices, core.IsVoice(ctx))
 	c.mu.Unlock()
-	return c.replyClient.Reply(ctx, id, body, cc, attachments, dryRun)
+	return c.replyClient.Reply(ctx, id, body, cc, bcc, attachments, dryRun)
 }
 
 var voiceNow = time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)

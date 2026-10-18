@@ -421,7 +421,7 @@ func TestServiceReplySetsComputedReplySubject(t *testing.T) {
 	reg.Register(spy)
 	svc := core.NewService(store, reg)
 
-	plan, _, err := svc.Reply(context.Background(), item.ID, "ack", nil, nil, true)
+	plan, _, err := svc.Reply(context.Background(), item.ID, "ack", nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Reply dry-run returned error: %v", err)
 	}
@@ -441,7 +441,7 @@ func TestServiceReplyAlreadyPrefixedSubjectIsNotDoubled(t *testing.T) {
 	reg.Register(spy)
 	svc := core.NewService(store, reg)
 
-	plan, _, err := svc.Reply(context.Background(), item.ID, "ack", nil, nil, true)
+	plan, _, err := svc.Reply(context.Background(), item.ID, "ack", nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Reply dry-run returned error: %v", err)
 	}
@@ -461,7 +461,7 @@ func TestServiceReplySubjectEmptyWhenOriginalHasNone(t *testing.T) {
 	reg.Register(spy)
 	svc := core.NewService(store, reg)
 
-	plan, _, err := svc.Reply(context.Background(), item.ID, "ack", nil, nil, true)
+	plan, _, err := svc.Reply(context.Background(), item.ID, "ack", nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Reply dry-run returned error: %v", err)
 	}
@@ -482,7 +482,7 @@ func TestServiceReplySetsPlanRecipientsToOriginalSender(t *testing.T) {
 	reg.Register(spy)
 	svc := core.NewService(store, reg)
 
-	plan, _, err := svc.Reply(context.Background(), item.ID, "ack", nil, nil, true)
+	plan, _, err := svc.Reply(context.Background(), item.ID, "ack", nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Reply dry-run returned error: %v", err)
 	}

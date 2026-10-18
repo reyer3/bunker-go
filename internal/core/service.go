@@ -602,26 +602,31 @@ func toLowerASCII(s string) string {
 //
 // A real reply whose ctx carries an idempotency key (WithIdempotencyKey)
 // is sent at most once per key; see idempotencyCache.do.
-func (s *Service) Reply(ctx context.Context, id string, body string, cc []string, attachments []string, dryRun bool) (Plan, Receipt, error) {
+func (s *Service) Reply(ctx context.Context, id string, body string, cc, bcc []string, attachments []string, dryRun bool) (Plan, Receipt, error) {
 	if err := s.checkStagedPaths(attachments...); err != nil {
 		return Plan{}, Receipt{}, err
 	}
 	key := IdempotencyKey(ctx)
 	if dryRun || key == "" {
-		return s.reply(ctx, id, body, cc, attachments, dryRun)
+		return s.reply(ctx, id, body, cc, bcc, attachments, dryRun)
 	}
 	parts := append([]string{"reply", id, body, "cc"}, cc...)
+	parts = append(parts, "bcc")
+	parts = append(parts, bcc...)
 	parts = append(parts, "attachments")
 	parts = append(parts, s.fingerprintPaths(attachments)...)
 	parts = append(parts, fmt.Sprint("voice=", IsVoice(ctx)))
 	return s.idempotency.do(ctx, key, requestFingerprint(parts...), func() (Plan, Receipt, error) {
-		return s.reply(ctx, id, body, cc, attachments, false)
+		return s.reply(ctx, id, body, cc, bcc, attachments, false)
 	})
 }
 
-func (s *Service) reply(ctx context.Context, id string, body string, cc []string, attachments []string, dryRun bool) (Plan, Receipt, error) {
+func (s *Service) reply(ctx context.Context, id string, body string, cc, bcc []string, attachments []string, dryRun bool) (Plan, Receipt, error) {
 	item, err := s.store.Get(ctx, id)
 	if err != nil {
+		return Plan{}, Receipt{}, err
+	}
+	if err := validateOutgoingRecipients([]string{item.From.ID}, cc, bcc); err != nil {
 		return Plan{}, Receipt{}, err
 	}
 
@@ -631,6 +636,7 @@ func (s *Service) reply(ctx context.Context, id string, body string, cc []string
 		Account:    item.Account,
 		Target:     id,
 		Cc:         cc,
+		Bcc:        bcc,
 		Subject:    replySubject(item.Subject),
 		Preview:    body,
 		Media:      attachments,
@@ -647,6 +653,7 @@ func (s *Service) reply(ctx context.Context, id string, body string, cc []string
 		Account:     item.Account,
 		To:          []string{item.From.ID},
 		Cc:          cc,
+		Bcc:         bcc,
 		Thread:      item.Thread,
 		ReplyTo:     id,
 		Subject:     item.Subject,
@@ -720,6 +727,8 @@ func (s *Service) Send(ctx context.Context, out Outgoing, dryRun bool) (Plan, Re
 	parts = append(parts, out.To...)
 	parts = append(parts, "cc")
 	parts = append(parts, out.Cc...)
+	parts = append(parts, "bcc")
+	parts = append(parts, out.Bcc...)
 	parts = append(parts, "attachments")
 	parts = append(parts, s.fingerprintPaths(out.Attachments)...)
 	parts = append(parts, fmt.Sprint("voice=", out.Voice), fmt.Sprint("forward=", out.Forward))
@@ -729,12 +738,16 @@ func (s *Service) Send(ctx context.Context, out Outgoing, dryRun bool) (Plan, Re
 }
 
 func (s *Service) send(ctx context.Context, out Outgoing, dryRun bool) (Plan, Receipt, error) {
+	if err := validateOutgoingRecipients(out.To, out.Cc, out.Bcc); err != nil {
+		return Plan{}, Receipt{}, err
+	}
 	plan := Plan{
 		Action:     "send",
 		Channel:    out.Channel,
 		Account:    out.Account,
 		Target:     fmt.Sprint(out.To),
 		Cc:         out.Cc,
+		Bcc:        out.Bcc,
 		Subject:    out.Subject,
 		Preview:    out.Body,
 		Media:      out.Attachments,
@@ -852,6 +865,9 @@ func (s *Service) sendFanout(ctx context.Context, adapter Adapter, plan Plan, ou
 	policy := fanoutPolicy(adapter)
 	if len(out.Cc) > 0 {
 		return Plan{}, Receipt{}, fmt.Errorf("core: send: %s has no Cc; a broadcast cannot carry %d Cc recipient(s): %w", out.Channel, len(out.Cc), ErrUnsupported)
+	}
+	if len(out.Bcc) > 0 {
+		return Plan{}, Receipt{}, fmt.Errorf("core: send: %s has no Bcc; a broadcast cannot carry %d Bcc recipient(s): %w", out.Channel, len(out.Bcc), ErrUnsupported)
 	}
 	if len(out.To) > policy.MaxRecipients {
 		return Plan{}, Receipt{}, fmt.Errorf("core: send: %d recipients exceeds the %d broadcast limit: %w", len(out.To), policy.MaxRecipients, ErrTooManyRecipients)
@@ -1061,4 +1077,23 @@ func (s *Service) PostStatus(ctx context.Context, channel Channel, account strin
 		return Plan{}, Receipt{}, fmt.Errorf("core: post status failed: %w", err)
 	}
 	return plan, receipt, nil
+}
+
+// validateOutgoingRecipients rejects an empty To list, empty addresses, and
+// addresses carrying newline characters (header injection) in To/Cc/Bcc.
+func validateOutgoingRecipients(to, cc, bcc []string) error {
+	if len(to) == 0 {
+		return fmt.Errorf("core: send: no recipient given: %w", ErrUnsupported)
+	}
+	for _, list := range [][]string{to, cc, bcc} {
+		for _, a := range list {
+			if a == "" {
+				return fmt.Errorf("core: send: empty recipient address: %w", ErrUnsupported)
+			}
+			if strings.ContainsAny(a, "\n\r") {
+				return fmt.Errorf("core: send: recipient address must not contain newlines: %w", ErrUnsupported)
+			}
+		}
+	}
+	return nil
 }

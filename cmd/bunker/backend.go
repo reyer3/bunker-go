@@ -22,7 +22,7 @@ type Backend interface {
 	Fetch(ctx context.Context, id string) (core.Item, error)
 	Read(ctx context.Context, id string, markReceipt bool) (core.Item, error)
 	Counts(ctx context.Context) (map[core.Channel]map[string]int, error)
-	Reply(ctx context.Context, id, body string, cc, attachments []string, dryRun bool) (core.Plan, core.Receipt, error)
+	Reply(ctx context.Context, id, body string, cc, bcc []string, attachments []string, dryRun bool) (core.Plan, core.Receipt, error)
 	Send(ctx context.Context, out core.Outgoing, dryRun bool) (core.Plan, core.Receipt, error)
 	Organize(ctx context.Context, id string, op core.OrganizeOp, dryRun bool) (core.Plan, error)
 	PostStatus(ctx context.Context, channel core.Channel, account string, status core.Status, dryRun bool) (core.Plan, core.Receipt, error)

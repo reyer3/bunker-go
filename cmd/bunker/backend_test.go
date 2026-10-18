@@ -319,6 +319,7 @@ type replyCall struct {
 	ID          string
 	Body        string
 	Cc          []string
+	Bcc         []string
 	Attachments []string
 	DryRun      bool
 }
@@ -380,8 +381,8 @@ func (f *fakeBackend) Counts(ctx context.Context) (map[core.Channel]map[string]i
 	return f.counts, nil
 }
 
-func (f *fakeBackend) Reply(ctx context.Context, id, body string, cc, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
-	f.replyCalls = append(f.replyCalls, replyCall{ID: id, Body: body, Cc: cc, Attachments: attachments, DryRun: dryRun})
+func (f *fakeBackend) Reply(ctx context.Context, id, body string, cc, bcc []string, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
+	f.replyCalls = append(f.replyCalls, replyCall{ID: id, Body: body, Cc: cc, Bcc: bcc, Attachments: attachments, DryRun: dryRun})
 	f.replyVoice = append(f.replyVoice, core.IsVoice(ctx))
 	f.sendKeys = append(f.sendKeys, core.IdempotencyKey(ctx))
 	if f.replyErr != nil {

@@ -229,7 +229,7 @@ func TestQueryClientDoesNotRetryMutationsOrBusinessErrors(t *testing.T) {
 	if _, err := client.List(context.Background(), core.Filter{}); err == nil || dials != 0 {
 		t.Fatalf("business error retried: err=%v dials=%d", err, dials)
 	}
-	_, _, _ = client.Reply(context.Background(), "id", "body", nil, nil, false)
+	_, _, _ = client.Reply(context.Background(), "id", "body", nil, nil, nil, false)
 	_, _ = client.Organize(context.Background(), "id", core.OrganizeOp{}, false)
 	_, _ = client.Download(context.Background(), "id", 0, "/tmp/x", core.DownloadOptions{})
 	if dials != 0 || first.otherCalls != 3 {
