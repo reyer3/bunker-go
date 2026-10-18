@@ -893,6 +893,179 @@ func TestServiceSendFanoutRejectsBccBeforeSendingAnything(t *testing.T) {
 	}
 }
 
+// TestServiceSendRiskLevelSimple is part of the dry-run enrichment (agent
+// decision support): a simple text send to one recipient is "bajo" risk.
+func TestServiceSendRiskLevelSimple(t *testing.T) {
+	store := newMemStore()
+	reg := core.NewRegistry()
+	spy := &spyAdapter{channel: core.ChannelMail, account: "cl"}
+	reg.Register(spy)
+	svc := core.NewService(store, reg)
+
+	out := core.Outgoing{
+		Channel: core.ChannelMail,
+		Account: "cl",
+		To:      []string{"a@b.cl"},
+		Body:    "hi",
+	}
+	plan, _, err := svc.Send(context.Background(), out, false)
+	if err != nil {
+		t.Fatalf("Send returned error: %v", err)
+	}
+	if plan.RiskLevel != "bajo" {
+		t.Fatalf("plan.RiskLevel = %q, want %q", plan.RiskLevel, "bajo")
+	}
+	if plan.SuggestedConfirmation != "" {
+		t.Fatalf("plan.SuggestedConfirmation = %q, want empty for bajo risk", plan.SuggestedConfirmation)
+	}
+	if plan.EstimatedSideEffects == "" {
+		t.Fatalf("plan.EstimatedSideEffects is empty, want a non-empty description")
+	}
+}
+
+// TestServiceSendRiskLevelMediumWithAttachments is part of the dry-run
+// enrichment: a send with attachments is "medio" risk.
+func TestServiceSendRiskLevelMediumWithAttachments(t *testing.T) {
+	store := newMemStore()
+	reg := core.NewRegistry()
+	policy := core.AttachmentPolicy{MaxBytes: map[string]int64{core.AnyMIME: 1 << 20}}
+	spy := &spyMediaAdapter{spyAdapter: spyAdapter{channel: core.ChannelMail, account: "cl"}, policy: policy}
+	reg.Register(spy)
+	svc := core.NewService(store, reg)
+
+	path := writeTestFile(t, "report.pdf", []byte("%PDF-1.4 fake pdf"))
+	out := core.Outgoing{
+		Channel:     core.ChannelMail,
+		Account:     "cl",
+		To:          []string{"a@b.cl"},
+		Body:        "hi",
+		Attachments: []string{path},
+	}
+	plan, _, err := svc.Send(context.Background(), out, false)
+	if err != nil {
+		t.Fatalf("Send returned error: %v", err)
+	}
+	if plan.RiskLevel != "medio" {
+		t.Fatalf("plan.RiskLevel = %q, want %q", plan.RiskLevel, "medio")
+	}
+	if plan.SuggestedConfirmation == "" {
+		t.Fatal("plan.SuggestedConfirmation is empty, want confirmation text for medio risk")
+	}
+	if !strings.Contains(plan.EstimatedSideEffects, "adjunta") {
+		t.Fatalf("plan.EstimatedSideEffects = %q, want to mention attachment", plan.EstimatedSideEffects)
+	}
+}
+
+// TestServiceSendRiskLevelHighBroadcast is part of the dry-run enrichment:
+// a send to multiple recipients is "alto" risk.
+func TestServiceSendRiskLevelHighBroadcast(t *testing.T) {
+	store := newMemStore()
+	reg := core.NewRegistry()
+	spy := &spyAdapter{channel: core.ChannelMail, account: "cl"}
+	reg.Register(spy)
+	svc := core.NewService(store, reg)
+
+	out := core.Outgoing{
+		Channel: core.ChannelMail,
+		Account: "cl",
+		To:      []string{"a@b.cl", "c@d.cl", "e@f.cl"},
+		Body:    "hi",
+	}
+	plan, _, err := svc.Send(context.Background(), out, false)
+	if err != nil {
+		t.Fatalf("Send returned error: %v", err)
+	}
+	if plan.RiskLevel != "alto" {
+		t.Fatalf("plan.RiskLevel = %q, want %q", plan.RiskLevel, "alto")
+	}
+	if plan.SuggestedConfirmation == "" {
+		t.Fatal("plan.SuggestedConfirmation is empty, want confirmation text for alto risk")
+	}
+	if !strings.Contains(plan.EstimatedSideEffects, "3 destinatarios") {
+		t.Fatalf("plan.EstimatedSideEffects = %q, want to mention 3 recipients", plan.EstimatedSideEffects)
+	}
+}
+
+// TestServiceSendRiskLevelMediumWithCc is part of the dry-run enrichment:
+// a send with Cc is "medio" risk.
+func TestServiceSendRiskLevelMediumWithCc(t *testing.T) {
+	store := newMemStore()
+	reg := core.NewRegistry()
+	spy := &spyAdapter{channel: core.ChannelMail, account: "cl"}
+	reg.Register(spy)
+	svc := core.NewService(store, reg)
+
+	out := core.Outgoing{
+		Channel: core.ChannelMail,
+		Account: "cl",
+		To:      []string{"a@b.cl"},
+		Cc:      []string{"c@d.cl"},
+		Body:    "hi",
+	}
+	plan, _, err := svc.Send(context.Background(), out, false)
+	if err != nil {
+		t.Fatalf("Send returned error: %v", err)
+	}
+	if plan.RiskLevel != "medio" {
+		t.Fatalf("plan.RiskLevel = %q, want %q", plan.RiskLevel, "medio")
+	}
+}
+
+// TestServiceReplyRiskLevelSimple is part of the dry-run enrichment: a
+// simple reply is "bajo" risk.
+func TestServiceReplyRiskLevelSimple(t *testing.T) {
+	item := core.Item{
+		ID:      "mail:cl:1",
+		Channel: core.ChannelMail,
+		Account: "cl",
+		From:    core.Address{ID: "them@x.cl"},
+	}
+	store := newMemStore(item)
+	reg := core.NewRegistry()
+	spy := &spyAdapter{channel: core.ChannelMail, account: "cl"}
+	reg.Register(spy)
+	svc := core.NewService(store, reg)
+
+	plan, _, err := svc.Reply(context.Background(), item.ID, "body", nil, nil, nil, false)
+	if err != nil {
+		t.Fatalf("Reply returned error: %v", err)
+	}
+	if plan.RiskLevel != "bajo" {
+		t.Fatalf("plan.RiskLevel = %q, want %q", plan.RiskLevel, "bajo")
+	}
+	if plan.EstimatedSideEffects == "" {
+		t.Fatalf("plan.EstimatedSideEffects is empty, want a non-empty description")
+	}
+}
+
+// TestServiceReplyRiskLevelMediumWithAttachments is part of the dry-run
+// enrichment: a reply with attachments is "medio" risk.
+func TestServiceReplyRiskLevelMediumWithAttachments(t *testing.T) {
+	item := core.Item{
+		ID:      "mail:cl:1",
+		Channel: core.ChannelMail,
+		Account: "cl",
+		From:    core.Address{ID: "them@x.cl"},
+	}
+	store := newMemStore(item)
+	reg := core.NewRegistry()
+	spy := &spyMediaAdapter{spyAdapter: spyAdapter{channel: core.ChannelMail, account: "cl"}, policy: imagePolicy(1 << 20)}
+	reg.Register(spy)
+	svc := core.NewService(store, reg)
+
+	path := writeTestFile(t, "pic.png", pngSignatureBytes)
+	plan, _, err := svc.Reply(context.Background(), item.ID, "body", nil, nil, []string{path}, false)
+	if err != nil {
+		t.Fatalf("Reply returned error: %v", err)
+	}
+	if plan.RiskLevel != "medio" {
+		t.Fatalf("plan.RiskLevel = %q, want %q", plan.RiskLevel, "medio")
+	}
+	if !strings.Contains(plan.EstimatedSideEffects, "adjunta") {
+		t.Fatalf("plan.EstimatedSideEffects = %q, want to mention attachment", plan.EstimatedSideEffects)
+	}
+}
+
 // TestServiceSendMediaRequiresMediaSenderCapability covers T11(e): an
 // adapter that only implements plain Sender (not MediaSender) must not
 // silently send text-only and drop the attachments — Service.Send has to

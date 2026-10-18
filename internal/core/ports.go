@@ -567,6 +567,20 @@ type Plan struct {
 	// Both serialize as integer nanoseconds (time.Duration's JSON form).
 	FanoutPauseMin time.Duration `json:"fanout_pause_min,omitempty"`
 	FanoutPauseMax time.Duration `json:"fanout_pause_max,omitempty"`
+	// RiskLevel estimates how risky this send/reply is: "bajo" (texto a un
+	// destinatario conocido), "medio" (varios destinatarios o adjuntos),
+	// "alto" (broadcast o respuesta a hilo largo). Empty when the channel
+	// does not carry enough information to compute it.
+	RiskLevel string `json:"risk_level,omitempty"`
+	// SuggestedConfirmation is human-readable text the agent or CLI can
+	// show before asking for confirm. Empty when no special confirmation
+	// wording is needed.
+	SuggestedConfirmation string `json:"suggested_confirmation,omitempty"`
+	// EstimatedSideEffects describes what this send/reply would change in
+	// the store or on the channel (e.g. "creates sent item", "marks thread
+	// read", "sends read receipt"). Empty when there are no side effects
+	// beyond delivering the message.
+	EstimatedSideEffects string `json:"estimated_side_effects,omitempty"`
 }
 
 // Store is the read/write persistence port the Service depends on. It

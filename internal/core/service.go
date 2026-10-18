@@ -660,6 +660,7 @@ func (s *Service) reply(ctx context.Context, id string, body string, cc, bcc []s
 		Body:        body,
 		Attachments: attachments,
 	}
+	plan.RiskLevel, plan.SuggestedConfirmation, plan.EstimatedSideEffects = assessSendRisk(out)
 
 	if IsVoice(ctx) {
 		out.Voice = true
@@ -754,6 +755,7 @@ func (s *Service) send(ctx context.Context, out Outgoing, dryRun bool) (Plan, Re
 		Recipients: append([]string{}, out.To...),
 		Forward:    out.Forward,
 	}
+	plan.RiskLevel, plan.SuggestedConfirmation, plan.EstimatedSideEffects = assessSendRisk(out)
 
 	// A forward goes to one target at a time (human pacing on chat
 	// channels): forwarding the same message to several people at once is
@@ -1077,6 +1079,69 @@ func (s *Service) PostStatus(ctx context.Context, channel Channel, account strin
 		return Plan{}, Receipt{}, fmt.Errorf("core: post status failed: %w", err)
 	}
 	return plan, receipt, nil
+}
+
+// assessSendRisk computes the dry-run risk assessment for an outgoing
+// message. It is used by Service.Send and Service.Reply to enrich the Plan
+// so an agent or CLI can decide whether to ask the user for confirm.
+func assessSendRisk(out Outgoing) (riskLevel, suggestedConfirmation, estimatedSideEffects string) {
+	// Build the side-effects description first; it is shared across risk levels.
+	var effects []string
+	if len(out.To) > 1 {
+		effects = append(effects, fmt.Sprintf("entrega a %d destinatarios", len(out.To)))
+	} else {
+		effects = append(effects, "entrega a un destinatario")
+	}
+	if len(out.Cc) > 0 {
+		effects = append(effects, fmt.Sprintf("copia oculta a %d destinatario(s)", len(out.Cc)))
+	}
+	if len(out.Bcc) > 0 {
+		effects = append(effects, fmt.Sprintf("copia oculta a %d destinatario(s)", len(out.Bcc)))
+	}
+	if len(out.Attachments) > 0 {
+		effects = append(effects, fmt.Sprintf("adjunta %d archivo(s)", len(out.Attachments)))
+	}
+	if out.Forward {
+		effects = append(effects, "marca como reenviado")
+	}
+	if out.Voice {
+		effects = append(effects, "envía como nota de voz")
+	}
+	estimatedSideEffects = strings.Join(effects, ", ")
+
+	// Determine the risk level.
+	risk := "bajo"
+	switch {
+	case len(out.To) > 1:
+		risk = "alto" // broadcast
+	case out.Forward && len(out.To) > 1:
+		risk = "alto" // bulk forward
+	case len(out.Attachments) > 0 || len(out.Cc) > 0 || len(out.Bcc) > 0:
+		risk = "medio" // attachments or extra recipients
+	}
+
+	// Suggested confirmation wording.
+	switch risk {
+	case "alto":
+		if len(out.To) > 1 {
+			suggestedConfirmation = fmt.Sprintf("¿Envías este mensaje a %d destinatarios? Es un broadcast y se entrega a todos.", len(out.To))
+		} else {
+			suggestedConfirmation = "¿Confirma el envío de este mensaje de alto riesgo?"
+		}
+	case "medio":
+		parts := []string{}
+		if len(out.Attachments) > 0 {
+			parts = append(parts, fmt.Sprintf("%d adjunto(s)", len(out.Attachments)))
+		}
+		if len(out.Cc) > 0 {
+			parts = append(parts, fmt.Sprintf("%d copia(s) visible(s)", len(out.Cc)))
+		}
+		if len(out.Bcc) > 0 {
+			parts = append(parts, fmt.Sprintf("%d copia(s) oculta(s)", len(out.Bcc)))
+		}
+		suggestedConfirmation = fmt.Sprintf("¿Envía este mensaje con %s?", strings.Join(parts, " y "))
+	}
+	return risk, suggestedConfirmation, estimatedSideEffects
 }
 
 // validateOutgoingRecipients rejects an empty To list, empty addresses, and
