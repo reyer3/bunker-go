@@ -24,6 +24,9 @@ func (m Model) baseView() string {
 	if m.picker != nil {
 		return m.pickerView()
 	}
+	if m.boardMode {
+		return wrapView(m.boardView(), m.width)
+	}
 	var out strings.Builder
 	if m.composing {
 		m.writeCompose(&out)

@@ -12,12 +12,15 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/reyer3/bunker-go/internal/config"
 	"github.com/reyer3/bunker-go/internal/core"
+	"github.com/reyer3/bunker-go/internal/p2p"
+	"github.com/reyer3/bunker-go/internal/relay"
 	"github.com/reyer3/bunker-go/internal/rpc"
 	"github.com/reyer3/bunker-go/internal/store"
 	"github.com/reyer3/bunker-go/internal/update"
@@ -27,6 +30,8 @@ func cmdDaemonMain(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("daemon", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fakeMode := fs.Bool("fake", false, "seed demo data via the in-memory fake channel instead of configured accounts")
+	relayAddr := fs.String("relay-addr", "127.0.0.1:0", "direccion en la que escucha el relay ligero de tableros compartidos (puerto 0 = asignado por el sistema)")
+	p2pListen := fs.String("p2p-listen", "", "direccion multiaddr del nodo libp2p para sincronizacion P2P de tableros (ej. /ip4/0.0.0.0/tcp/4001); vacio lo deshabilita")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -34,7 +39,7 @@ func cmdDaemonMain(args []string, stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := runDaemon(ctx, config.StateDir(), config.AvatarCacheDir(), rpc.DefaultSocketPath(), *fakeMode, stdout, stderr); err != nil {
+	if err := runDaemon(ctx, config.StateDir(), config.AvatarCacheDir(), rpc.DefaultSocketPath(), *fakeMode, *relayAddr, *p2pListen, stdout, stderr); err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
@@ -47,7 +52,7 @@ func cmdDaemonMain(args []string, stdout, stderr io.Writer) int {
 // shutdown. avatarCacheDir is passed explicitly (like stateDir/
 // socketPath) rather than read from config internally, so tests always
 // point it at their own temp dir and never a real ~/.cache.
-func runDaemon(ctx context.Context, stateDir, avatarCacheDir, socketPath string, fakeMode bool, stdout, stderr io.Writer) error {
+func runDaemon(ctx context.Context, stateDir, avatarCacheDir, socketPath string, fakeMode bool, relayAddr, p2pListen string, stdout, stderr io.Writer) error {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return fmt.Errorf("daemon: create state dir %s: %w", stateDir, err)
 	}
@@ -57,6 +62,23 @@ func runDaemon(ctx context.Context, stateDir, avatarCacheDir, socketPath string,
 		return fmt.Errorf("daemon: open store: %w", err)
 	}
 	defer st.Close()
+
+	// Shared boards (kanban) service backed by the same SQLite store.
+	// core.Store implements core.BoardStore, so boards, columns, tasks,
+	// comments, members and invite codes all live in bunker.db.
+	boardSvc = core.NewBoardService(st)
+
+	// Ligero relay de sincronizacion de tableros compartidos. Escucha en
+	// relayAddr (127.0.0.1:0 = puerto asignado por el sistema) y acepta
+	// conexiones de los dispositivos que se unen a un board.
+	boardRelay = relay.NewRelay(relayAddr)
+	if err := boardRelay.Start(ctx); err != nil {
+		return fmt.Errorf("daemon: start relay %s: %w", relayAddr, err)
+	}
+	defer boardRelay.Stop()
+	if addr := boardRelay.Addr(); addr != nil {
+		fmt.Fprintf(stdout, "bunker: relay listening on %s\n", addr.String())
+	}
 
 	reg, cfg, err := loadRegistry(fakeMode, stdout)
 	if err != nil {
@@ -70,6 +92,26 @@ func runDaemon(ctx context.Context, stateDir, avatarCacheDir, socketPath string,
 	}
 
 	svc := core.NewService(st, reg)
+	// Nodo libp2p para sincronizar tableros sin servidor central. Es
+	// opcional (--p2p-listen): si no se pide o falla, el daemon sigue con
+	// el relay. Un fallo de P2P nunca debe impedir guardar cambios.
+	var peer *p2p.Node
+	if strings.TrimSpace(p2pListen) != "" {
+		node, err := p2p.NewNode(p2pListen)
+		if err != nil {
+			fmt.Fprintf(stderr, "bunker: p2p deshabilitado: %v\n", err)
+		} else {
+			peer = node
+			defer func() {
+				if err := node.Stop(); err != nil {
+					fmt.Fprintf(stderr, "bunker: cerrar nodo p2p: %v\n", err)
+				}
+			}()
+			svc.SetBoardPeer(newPeerTransport(node))
+			fmt.Fprintf(stdout, "bunker: p2p listening on %s (peer %s)\n", node.Addr(), node.ID())
+		}
+	}
+
 	svc.SetAvatarCacheDir(avatarCacheDir)
 	// Attachments a client on another machine downloads wait here
 	// between download_open and download_close (core/staging.go).
@@ -78,6 +120,43 @@ func runDaemon(ctx context.Context, stateDir, avatarCacheDir, socketPath string,
 	svc.SetHealthTracker(health)
 	checker := newUpdateChecker(currentBuild(), cfg, fakeMode, stateDir, stderr)
 	svc.SetUpdateSource(checker)
+
+	// Notificar al relay cada cambio de tarea para que los demas miembros
+	// del board lo reciban en tiempo real. Se conecta tanto al Service que
+	// atiende el RPC (svc.boardSvc) como al boardSvc package-level usado
+	// por la CLI en proceso.
+	notifyBoard := func(ev core.BoardEvent) error {
+		msg := relay.RelayMessage{
+			BoardID:   ev.BoardID,
+			MemberID:  ev.MemberID,
+			Type:      ev.Type,
+			Payload:   ev.Payload,
+			Timestamp: ev.Timestamp,
+			Version:   ev.Version,
+		}
+		err := boardRelay.Publish(msg)
+
+		// Mismo evento por el nodo P2P, si está iniciado. El error de P2P
+		// no se propaga: el cambio ya está en el store y el relay central
+		// sigue siendo el camino principal.
+		if peer != nil {
+			p2pMsg := p2p.RelayMessage{
+				BoardID:   ev.BoardID,
+				MemberID:  ev.MemberID,
+				Type:      ev.Type,
+				Payload:   ev.Payload,
+				Timestamp: ev.Timestamp,
+				Version:   ev.Version,
+			}
+			if perr := peer.Publish(ev.BoardID, p2pMsg); perr != nil {
+				fmt.Fprintf(stderr, "bunker: p2p publicar %s: %v\n", ev.Type, perr)
+			}
+		}
+		return err
+	}
+	svc.SetBoardNotifier(notifyBoard)
+	boardSvc.SetBoardNotifier(notifyBoard)
+
 	srv := rpc.NewServer(svc)
 
 	wg := startAdapters(ctx, reg, st, stdout, stderr, health)

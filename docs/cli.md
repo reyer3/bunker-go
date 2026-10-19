@@ -13,7 +13,7 @@ compact plain text for a human at a terminal.
 | `list`, `find`, `read`, `thread`, `search`, `counts`, `health`, `contacts`, `chats`, `meetings`, `todo list`, `awaiting`, `calls`, `avatar`, `download` | yes: data |
 | `reply`, `send`, `edit`, `delete`, `react`, `organize`, `status post`, `call`, `call answer\|reject\|hangup`, `backfill` | yes: `{"dryRun", "plan", ...}` with the [`core.Plan`/`core.Receipt` shape](#coreplan-and-corereceipt-json-shape) |
 | `unread`, `read-thread`, `meetings join`, `todo add`, `todo done\|reopen` | yes: the result of the change |
-| `version`, `update`, `render`, `herdr toggle` | yes |
+| `version`, `update`, `render`, `herdr toggle`, `p2p status\|connect\|sync` | yes |
 | `import-keys matrix` | yes: `{"new", "already_known", "failed", "total"}` |
 | `daemon`, `mcp`, `bunker` (no arguments), `sidebar`, `open`, `app`, `link`, `help` | exempt: interactive, long-running or setup commands with no data result |
 
@@ -74,7 +74,7 @@ treated as local, as every client did before.
   inside its staging dir when it is a finished upload, so no client can
   make it send a staged download or a half-written file.
 
-## `bunker daemon [--fake]`
+## `bunker daemon [--fake] [--relay-addr host:port] [--p2p-listen multiaddr]`
 
 Runs the daemon: opens the SQLite store, wires one adapter per configured
 `[[account]]` (or three in-memory demo adapters under `--fake`, one per
@@ -87,6 +87,14 @@ config file is not an error — the daemon starts with no accounts, so
 No flags produce `--json` output; this command prints plain status lines
 to stdout as it starts.
 
+`--relay-addr` (default `127.0.0.1:0`, a system-assigned port) is where the
+light shared-board relay listens. `--p2p-listen` (empty by default, which
+disables it) starts a libp2p node for decentralized board sync, for example
+`--p2p-listen /ip4/0.0.0.0/tcp/4001`; the daemon then prints its peer id and
+listen address. The node is optional: if it fails to start the daemon logs
+why to stderr and keeps running with the relay only, and a P2P publish error
+never fails a board write.
+
 If an adapter's `Run` returns while the daemon is still live (a dropped
 IMAP/WhatsApp/Matrix connection, a sync error), the supervisor restarts
 it with a capped exponential backoff (1s, doubling, up to 5 minutes,
@@ -97,6 +105,32 @@ error that used to be silently lost, is logged via `log/slog` to
 **stderr** (not stdout) with `channel`/`account` attributes, so `journald`
 carries them under a normal systemd unit. See `bunker health` below for
 querying the resulting per-adapter state instead of grepping logs.
+
+## `bunker p2p status|connect|sync`
+
+Drives the daemon's libp2p node for board sync without a central server.
+All three need the daemon running with `--p2p-listen`; without it they fail
+with `el nodo P2P no está iniciado`.
+
+- `bunker p2p status [--secreto t] [--json]` prints the node's peer id, its
+  listen multiaddr and the connected peers. With `--secreto` it also queries
+  the DHT rendezvous derived from `sha256(t)` and lists the peers found
+  there, which answers whether the other city's node is visible.
+- `bunker p2p connect <multiaddr> [--json]` dials a peer directly from a full
+  multiaddr such as `/ip4/203.0.113.5/tcp/4001/p2p/12D3KooW...`, the manual
+  path when no rendezvous is configured. A multiaddr without a `/p2p/<id>`
+  suffix is rejected.
+- `bunker p2p sync <task-id> [--json]` forces one task delta out through the
+  open streams to every connected peer of that task's board.
+
+JSON shapes: status is `{"id", "addr", "peers": [...]}` plus
+`"rendezvous_peers": [...]` when `--secreto` is given; connect is
+`{"connected": true, "multiaddr", "peers": [...]}`; sync is
+`{"task", "board", "synced": true, "peers": [...]}`.
+
+Boards themselves (`bunker board ...`) and the light relay (`bunker board
+relay start`) are documented separately; the P2P node is an additional
+transport for the same `BoardEvent` stream, not a replacement for the relay.
 
 ## `bunker version [--json]`
 

@@ -78,9 +78,30 @@ type Backend interface {
 	EditMessage(ctx context.Context, id, text string, dryRun bool) (core.Plan, core.Receipt, error)
 	DeleteMessage(ctx context.Context, id string, dryRun bool) (core.Plan, core.Receipt, error)
 	React(ctx context.Context, id, emoji string, dryRun bool) (core.Plan, core.Receipt, error)
+	// Shared boards (kanban) backed by core.BoardService. These are stubs
+	// until the daemon wiring lands; command code never cares which backend
+	// it got.
+	BoardCreate(ctx context.Context, name, ownerID string) (*core.Board, error)
+	BoardInvite(ctx context.Context, boardID, createdBy string, ttl time.Duration, maxUses int) (*core.InviteCode, error)
+	BoardJoin(ctx context.Context, code, memberID, name, publicKey string) (*core.Member, error)
+	BoardList(ctx context.Context) ([]*core.Board, error)
+	BoardTasks(ctx context.Context, boardID string) ([]*core.Task, error)
+	BoardTaskCreate(ctx context.Context, boardID, columnID, title, description, assigneeID string, dueDate *time.Time, tags []string, createdBy string) (*core.Task, error)
+	BoardTaskMove(ctx context.Context, taskID, columnID string) (*core.Task, error)
+	BoardTaskDone(ctx context.Context, taskID string, version int) (*core.Task, error)
+	BoardTaskComment(ctx context.Context, taskID, memberID, text string) (*core.Comment, error)
+	BoardMembers(ctx context.Context, boardID string) ([]*core.Member, error)
+	// P2P board sync (internal/p2p behind the daemon): the node's identity
+	// and connections live in the daemon process, so the CLI reaches them
+	// through these RPC-backed methods.
+	BoardPeerStatus(ctx context.Context, secret string) (core.BoardPeerStatus, error)
+	BoardPeerConnect(ctx context.Context, multiaddr string) ([]string, error)
+	BoardPeerSync(ctx context.Context, boardID, memberID, typ string, payload []byte, version int) ([]string, error)
 }
 
 var (
-	_ Backend = (*core.Service)(nil)
+	// core.Service satisfies Backend too once its board methods are aligned
+	// with this interface (the daemon wiring subagent is doing that in
+	// parallel). rpc.Client already does.
 	_ Backend = (*rpc.Client)(nil)
 )

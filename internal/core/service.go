@@ -85,6 +85,13 @@ type Service struct {
 	// message's age against the channel's MessageWindows with; tests
 	// inject a fixed instant.
 	messageClock func() time.Time
+	// boardSvc is the shared-board service layer, wired when the store
+	// implements core.BoardStore (internal/store does). Nil means boards
+	// are not supported by this store.
+	boardSvc *BoardService
+	// boardPeer is the optional P2P transport the daemon registers with
+	// SetBoardPeer (internal/core/board_peer.go). Nil means P2P is off.
+	boardPeer BoardPeer
 }
 
 // SetQueryClock overrides the clock ListPage resolves relative query
@@ -122,9 +129,11 @@ func (s *Service) HealthReport(ctx context.Context) (HealthReport, error) {
 	return report, nil
 }
 
-// NewService wires a Service to its Store and Registry.
+// NewService wires a Service to its Store and Registry. When the store
+// implements core.BoardStore (internal/store does), an internal
+// BoardService is wired so the Service exposes the shared-board methods.
 func NewService(store Store, registry *Registry) *Service {
-	return &Service{
+	s := &Service{
 		store:               store,
 		registry:            registry,
 		sleep:               time.Sleep,
@@ -138,6 +147,10 @@ func NewService(store Store, registry *Registry) *Service {
 		idempotency:         newIdempotencyCache(),
 		messageClock:        time.Now,
 	}
+	if bs, ok := store.(BoardStore); ok {
+		s.boardSvc = NewBoardService(bs)
+	}
+	return s
 }
 
 // SetSleeper overrides how Service waits between fan-out recipients.
@@ -1161,4 +1174,116 @@ func validateOutgoingRecipients(to, cc, bcc []string) error {
 		}
 	}
 	return nil
+}
+
+// boardSvcOrErr returns s.boardSvc, or an error when this store does not
+// support shared boards.
+func (s *Service) boardSvcOrErr() (*BoardService, error) {
+	if s.boardSvc == nil {
+		return nil, fmt.Errorf("core: boards not supported by this store: %w", ErrUnsupported)
+	}
+	return s.boardSvc, nil
+}
+
+// SetBoardNotifier configura el notificador de cambios de tablero que
+// BoardService usa para avisar al relay (u otro distribuidor) tras crear,
+// mover, completar o comentar una tarea. Es un no-op si el store no soporta
+// tableros compartidos (boardSvc nil).
+func (s *Service) SetBoardNotifier(n BoardNotifier) {
+	if s.boardSvc != nil {
+		s.boardSvc.SetBoardNotifier(n)
+	}
+}
+
+// BoardCreate creates a new shared board with the given name and owner,
+// delegating to the internal BoardService.
+func (s *Service) BoardCreate(ctx context.Context, name, ownerID string) (*Board, error) {
+	bs, err := s.boardSvcOrErr()
+	if err != nil {
+		return nil, err
+	}
+	return bs.CreateBoard(ctx, name, ownerID)
+}
+
+// BoardInvite generates an invite code for the board. ttl is the code's
+// time-to-live (0 means the default 48h); maxUses 0 means unlimited.
+func (s *Service) BoardInvite(ctx context.Context, boardID, createdBy string, ttl time.Duration, maxUses int) (*InviteCode, error) {
+	bs, err := s.boardSvcOrErr()
+	if err != nil {
+		return nil, err
+	}
+	return bs.GenerateInviteCode(ctx, boardID, createdBy, ttl, maxUses)
+}
+
+// BoardJoin lets a member join a board using an invite code.
+func (s *Service) BoardJoin(ctx context.Context, code, memberID, name, publicKey string) (*Member, error) {
+	bs, err := s.boardSvcOrErr()
+	if err != nil {
+		return nil, err
+	}
+	return bs.JoinBoard(ctx, code, memberID, name, publicKey)
+}
+
+// BoardList returns every shared board.
+func (s *Service) BoardList(ctx context.Context) ([]*Board, error) {
+	bs, err := s.boardSvcOrErr()
+	if err != nil {
+		return nil, err
+	}
+	return bs.ListBoards(ctx)
+}
+
+// BoardTasks returns the tasks of a board.
+func (s *Service) BoardTasks(ctx context.Context, boardID string) ([]*Task, error) {
+	bs, err := s.boardSvcOrErr()
+	if err != nil {
+		return nil, err
+	}
+	return bs.ListTasks(ctx, boardID)
+}
+
+// BoardTaskCreate creates a task in a column of the board.
+func (s *Service) BoardTaskCreate(ctx context.Context, boardID, columnID, title, description, assigneeID string, dueDate *time.Time, tags []string, createdBy string) (*Task, error) {
+	bs, err := s.boardSvcOrErr()
+	if err != nil {
+		return nil, err
+	}
+	return bs.CreateTask(ctx, boardID, columnID, title, description, assigneeID, dueDate, tags, createdBy)
+}
+
+// BoardTaskMove moves a task to another column.
+func (s *Service) BoardTaskMove(ctx context.Context, taskID, columnID string) (*Task, error) {
+	bs, err := s.boardSvcOrErr()
+	if err != nil {
+		return nil, err
+	}
+	return bs.MoveTask(ctx, taskID, columnID)
+}
+
+// BoardTaskDone marks a task as done. version is the expected current
+// version for optimistic concurrency.
+func (s *Service) BoardTaskDone(ctx context.Context, taskID string, version int) (*Task, error) {
+	bs, err := s.boardSvcOrErr()
+	if err != nil {
+		return nil, err
+	}
+	return bs.DoneTask(ctx, taskID, version)
+}
+
+// BoardTaskComment appends a comment to a task.
+func (s *Service) BoardTaskComment(ctx context.Context, taskID, memberID, text string) (*Comment, error) {
+	bs, err := s.boardSvcOrErr()
+	if err != nil {
+		return nil, err
+	}
+	return bs.AddComment(ctx, taskID, memberID, text)
+}
+
+// BoardMembers returns all members of a board.
+func (s *Service) BoardMembers(ctx context.Context, boardID string) ([]*Member, error) {
+	bs, err := s.boardSvcOrErr()
+	if err != nil {
+		return nil, err
+	}
+	return bs.ListMembers(ctx, boardID)
 }

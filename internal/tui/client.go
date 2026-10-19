@@ -38,6 +38,18 @@ type Client interface {
 	// call, only the result (or a clear error).
 	Download(ctx context.Context, id string, index int, destPath string, opts core.DownloadOptions) (core.DownloadResult, error)
 	Close() error
+	// Shared boards (kanban): delegate to core.BoardService through the
+	// daemon (rpc.Client already implements these).
+	BoardCreate(ctx context.Context, name, ownerID string) (*core.Board, error)
+	BoardInvite(ctx context.Context, boardID, createdBy string, ttl time.Duration, maxUses int) (*core.InviteCode, error)
+	BoardJoin(ctx context.Context, code, memberID, name, publicKey string) (*core.Member, error)
+	BoardList(ctx context.Context) ([]*core.Board, error)
+	BoardTasks(ctx context.Context, boardID string) ([]*core.Task, error)
+	BoardTaskCreate(ctx context.Context, boardID, columnID, title, description, assigneeID string, dueDate *time.Time, tags []string, createdBy string) (*core.Task, error)
+	BoardTaskMove(ctx context.Context, taskID, columnID string) (*core.Task, error)
+	BoardTaskDone(ctx context.Context, taskID string, version int) (*core.Task, error)
+	BoardTaskComment(ctx context.Context, taskID, memberID, text string) (*core.Comment, error)
+	BoardMembers(ctx context.Context, boardID string) ([]*core.Member, error)
 }
 
 var (

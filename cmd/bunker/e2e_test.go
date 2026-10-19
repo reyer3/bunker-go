@@ -57,7 +57,7 @@ func TestEndToEndCLIAgainstFakeDaemon(t *testing.T) {
 	daemonOut := &bytes.Buffer{}
 	daemonErr := &bytes.Buffer{}
 	go func() {
-		daemonDone <- runDaemon(ctx, dir, filepath.Join(dir, "avatars"), socket, true, daemonOut, daemonErr)
+		daemonDone <- runDaemon(ctx, dir, filepath.Join(dir, "avatars"), socket, true, "127.0.0.1:0", "", daemonOut, daemonErr)
 	}()
 	t.Cleanup(func() {
 		cancel()

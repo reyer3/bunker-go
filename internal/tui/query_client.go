@@ -468,6 +468,106 @@ func (c *queryClient) callAction(ctx context.Context, do func(CallClient) (core.
 	return do(cc)
 }
 
+// Board read-only queries retry-after-redial like List and Counts.
+
+func (c *queryClient) BoardList(ctx context.Context) ([]*core.Board, error) {
+	return query(c, ctx, func(client Client) ([]*core.Board, error) { return client.BoardList(ctx) })
+}
+
+func (c *queryClient) BoardTasks(ctx context.Context, boardID string) ([]*core.Task, error) {
+	return query(c, ctx, func(client Client) ([]*core.Task, error) { return client.BoardTasks(ctx, boardID) })
+}
+
+func (c *queryClient) BoardMembers(ctx context.Context, boardID string) ([]*core.Member, error) {
+	return query(c, ctx, func(client Client) ([]*core.Member, error) { return client.BoardMembers(ctx, boardID) })
+}
+
+// Board writes are forwarded at most once, like Reply/Organize/Send.
+
+func (c *queryClient) BoardCreate(ctx context.Context, name, ownerID string) (*core.Board, error) {
+	if err := c.acquire(ctx); err != nil {
+		return nil, err
+	}
+	defer c.release()
+	client, err := c.activeClient()
+	if err != nil {
+		return nil, err
+	}
+	return client.BoardCreate(ctx, name, ownerID)
+}
+
+func (c *queryClient) BoardInvite(ctx context.Context, boardID, createdBy string, ttl time.Duration, maxUses int) (*core.InviteCode, error) {
+	if err := c.acquire(ctx); err != nil {
+		return nil, err
+	}
+	defer c.release()
+	client, err := c.activeClient()
+	if err != nil {
+		return nil, err
+	}
+	return client.BoardInvite(ctx, boardID, createdBy, ttl, maxUses)
+}
+
+func (c *queryClient) BoardJoin(ctx context.Context, code, memberID, name, publicKey string) (*core.Member, error) {
+	if err := c.acquire(ctx); err != nil {
+		return nil, err
+	}
+	defer c.release()
+	client, err := c.activeClient()
+	if err != nil {
+		return nil, err
+	}
+	return client.BoardJoin(ctx, code, memberID, name, publicKey)
+}
+
+func (c *queryClient) BoardTaskCreate(ctx context.Context, boardID, columnID, title, description, assigneeID string, dueDate *time.Time, tags []string, createdBy string) (*core.Task, error) {
+	if err := c.acquire(ctx); err != nil {
+		return nil, err
+	}
+	defer c.release()
+	client, err := c.activeClient()
+	if err != nil {
+		return nil, err
+	}
+	return client.BoardTaskCreate(ctx, boardID, columnID, title, description, assigneeID, dueDate, tags, createdBy)
+}
+
+func (c *queryClient) BoardTaskMove(ctx context.Context, taskID, columnID string) (*core.Task, error) {
+	if err := c.acquire(ctx); err != nil {
+		return nil, err
+	}
+	defer c.release()
+	client, err := c.activeClient()
+	if err != nil {
+		return nil, err
+	}
+	return client.BoardTaskMove(ctx, taskID, columnID)
+}
+
+func (c *queryClient) BoardTaskDone(ctx context.Context, taskID string, version int) (*core.Task, error) {
+	if err := c.acquire(ctx); err != nil {
+		return nil, err
+	}
+	defer c.release()
+	client, err := c.activeClient()
+	if err != nil {
+		return nil, err
+	}
+	return client.BoardTaskDone(ctx, taskID, version)
+}
+
+func (c *queryClient) BoardTaskComment(ctx context.Context, taskID, memberID, text string) (*core.Comment, error) {
+	if err := c.acquire(ctx); err != nil {
+		return nil, err
+	}
+	defer c.release()
+	client, err := c.activeClient()
+	if err != nil {
+		return nil, err
+	}
+	return client.BoardTaskComment(ctx, taskID, memberID, text)
+}
+
 func (c *queryClient) Close() error {
 	c.mu.Lock()
 	if c.closed {

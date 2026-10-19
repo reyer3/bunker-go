@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"time"
 
 	"github.com/reyer3/bunker-go/internal/core"
 )
@@ -557,6 +558,151 @@ func (s *Server) call(ctx context.Context, req Request) (any, error) {
 			return nil, err
 		}
 		return listResult{Items: items}, nil
+
+	case MethodP2PStatus:
+		var p p2pStatusParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		status, err := s.svc.BoardPeerStatus(ctx, p.Secret)
+		if err != nil {
+			return nil, err
+		}
+		return p2pStatusResult{Status: status}, nil
+
+	case MethodP2PConnect:
+		var p p2pConnectParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		peers, err := s.svc.BoardPeerConnect(ctx, p.Multiaddr)
+		if err != nil {
+			return nil, err
+		}
+		return p2pConnectResult{Connected: true, Peers: peers}, nil
+
+	case MethodP2PSync:
+		var p p2pSyncParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		peers, err := s.svc.BoardPeerSync(ctx, p.BoardID, p.MemberID, p.Type, p.Payload, p.Version)
+		if err != nil {
+			return nil, err
+		}
+		return p2pSyncResult{Published: true, Peers: peers}, nil
+
+	case MethodBoardCreate:
+		var p boardCreateParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		board, err := s.svc.BoardCreate(ctx, p.Name, p.OwnerID)
+		if err != nil {
+			return nil, err
+		}
+		return boardCreateResult{Board: board}, nil
+
+	case MethodBoardInvite:
+		var p boardInviteParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		invite, err := s.svc.BoardInvite(ctx, p.BoardID, p.CreatedBy, time.Duration(p.TTLSeconds)*time.Second, p.MaxUses)
+		if err != nil {
+			return nil, err
+		}
+		return boardInviteResult{Invite: invite}, nil
+
+	case MethodBoardJoin:
+		var p boardJoinParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		member, err := s.svc.BoardJoin(ctx, p.Code, p.MemberID, p.Name, p.PublicKey)
+		if err != nil {
+			return nil, err
+		}
+		return boardJoinResult{Member: member}, nil
+
+	case MethodBoardList:
+		var p boardListParams
+		if len(req.Params) > 0 {
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				return nil, fmt.Errorf("rpc: bad params: %w", err)
+			}
+		}
+		boards, err := s.svc.BoardList(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return boardListResult{Boards: boards}, nil
+
+	case MethodBoardTaskCreate:
+		var p boardTaskCreateParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		task, err := s.svc.BoardTaskCreate(ctx, p.BoardID, p.ColumnID, p.Title, p.Description, p.AssigneeID, p.DueDate, p.Tags, p.CreatedBy)
+		if err != nil {
+			return nil, err
+		}
+		return boardTaskCreateResult{Task: task}, nil
+
+	case MethodBoardTaskMove:
+		var p boardTaskMoveParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		task, err := s.svc.BoardTaskMove(ctx, p.TaskID, p.ColumnID)
+		if err != nil {
+			return nil, err
+		}
+		return boardTaskMoveResult{Task: task}, nil
+
+	case MethodBoardTaskDone:
+		var p boardTaskDoneParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		task, err := s.svc.BoardTaskDone(ctx, p.TaskID, p.Version)
+		if err != nil {
+			return nil, err
+		}
+		return boardTaskDoneResult{Task: task}, nil
+
+	case MethodBoardTaskComment:
+		var p boardTaskCommentParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		comment, err := s.svc.BoardTaskComment(ctx, p.TaskID, p.MemberID, p.Text)
+		if err != nil {
+			return nil, err
+		}
+		return boardTaskCommentResult{Comment: comment}, nil
+
+	case MethodBoardTasks:
+		var p boardTasksParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		tasks, err := s.svc.BoardTasks(ctx, p.BoardID)
+		if err != nil {
+			return nil, err
+		}
+		return boardTasksResult{Tasks: tasks}, nil
+
+	case MethodBoardMembers:
+		var p boardMembersParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		members, err := s.svc.BoardMembers(ctx, p.BoardID)
+		if err != nil {
+			return nil, err
+		}
+		return boardMembersResult{Members: members}, nil
 
 	default:
 		return nil, fmt.Errorf("rpc: unknown method %q", req.Method)

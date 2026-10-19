@@ -151,6 +151,42 @@ Commands:
                                                              (default 3; groups
                                                              left out, mail only
                                                              when it asked)
+  board create --name <nombre>                              crea un tablero
+                                                              compartido e imprime
+                                                              su ID
+  board invite --board <id> [--ttl h] [--max-uses n]        genera un codigo de
+                                                              invitacion e imprime
+                                                              el codigo
+  board join <codigo> [--member-id id] [--name n]           une el dispositivo
+                                                              al tablero
+                                                              [--public-key clave]
+  board list [--board <id>]                                 lista tableros o las
+                                                              tareas de un tablero
+  board task create --board <id> --column <id> --titulo t   crea una tarea
+              [--descripcion d] [--asignar id] [--vencimiento f]
+              [--etiqueta e]...
+  board task move --task <id> --column <id>                 mueve una tarea de
+                                                              columna
+  board task done --task <id> [--version n]                 marca tarea hecha
+                                                              (optimistic
+                                                              concurrency)
+  board task comment --task <id> --texto t                  anade comentario
+  board members [--board <id>]                              lista miembros
+  board relay start [--puerto p]                            relay ligero
+  p2p status [--secreto t] [--json]                         estado del nodo
+                                                             libp2p: peer id,
+                                                             direccion y peers
+                                                             conectados (con
+                                                             --secreto busca en
+                                                             el rendezvous DHT)
+  p2p connect <multiaddr> [--json]                          conecta a otro nodo
+                                                             por su multiaddr
+                                                             (/ip4/.../p2p/<id>)
+  p2p sync <task-id> [--json]                               fuerza el envio de
+                                                             un delta de tarea a
+                                                             los peers conectados
+                                                              (placeholder,
+                                                              bloquea)
   counts [--json]                                          unread counts
   health [--json]                                          per-adapter connection
                                                              state, since when,
@@ -266,6 +302,10 @@ func runWithBackend(ctx context.Context, backend Backend, args []string, stdin i
 		return cmdTodo(ctx, backend, args[1:], stdout, stderr)
 	case "awaiting":
 		return cmdAwaiting(ctx, backend, args[1:], stdout, stderr)
+	case "board":
+		return cmdBoard(ctx, backend, args[1:], stdout, stderr)
+	case "p2p":
+		return cmdP2P(ctx, backend, args[1:], stdout, stderr)
 	case "unread":
 		return cmdUnread(ctx, backend, args[1:], stdout, stderr)
 	default:

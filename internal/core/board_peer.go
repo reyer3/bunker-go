@@ -1,0 +1,112 @@
+package core
+
+import (
+	"context"
+	"fmt"
+)
+
+// BoardPeer es una capacidad opcional del daemon: un transporte P2P que
+// publica y recibe deltas de tableros compartidos sin servidor central.
+//
+// core no importa internal/p2p: el daemon (cmd/bunker) implementa este puerto
+// con el nodo libp2p y lo registra con SetBoardPeer. Sin peer registrado, los
+// métodos que dependen de él devuelven un error que envuelve ErrUnsupported.
+type BoardPeer interface {
+	// PeerID devuelve la identidad del nodo en la red P2P.
+	PeerID() string
+	// ListenAddr devuelve la dirección multiaddr de escucha.
+	ListenAddr() string
+	// ConnectedPeers devuelve los IDs de los peers conectados.
+	ConnectedPeers() []string
+	// Connect se conecta a un peer por su multiaddr completa
+	// (/ip4/.../tcp/.../p2p/<id>).
+	Connect(ctx context.Context, multiaddr string) error
+	// Publish envía un delta de board a todos los peers conectados.
+	Publish(boardID string, msg BoardPeerMessage) error
+	// FindPeers busca peers que compartan el secreto en el rendezvous.
+	FindPeers(ctx context.Context, secret string) ([]string, error)
+}
+
+// BoardPeerMessage es el delta que viaja por el transporte P2P. Sus campos
+// reflejan BoardEvent; el daemon lo traduce al mensaje concreto de su
+// implementación (hoy p2p.RelayMessage).
+type BoardPeerMessage struct {
+	BoardID   string
+	MemberID  string
+	Type      string
+	Payload   []byte
+	Timestamp int64
+	Version   int
+}
+
+// SetBoardPeer registra el transporte P2P del daemon.
+func (s *Service) SetBoardPeer(p BoardPeer) {
+	s.boardPeer = p
+}
+
+// BoardPeerStatus describe el estado del nodo P2P para `bunker p2p status`.
+type BoardPeerStatus struct {
+	PeerID          string   `json:"id"`
+	Addr            string   `json:"addr"`
+	Peers           []string `json:"peers"`
+	RendezvousPeers []string `json:"rendezvous_peers,omitempty"`
+}
+
+// BoardPeerStatus devuelve el estado del nodo P2P. secret es opcional: con un
+// secreto no vacío también busca peers en el rendezvous DHT.
+func (s *Service) BoardPeerStatus(ctx context.Context, secret string) (BoardPeerStatus, error) {
+	peer, err := s.boardPeerOrErr()
+	if err != nil {
+		return BoardPeerStatus{}, err
+	}
+	status := BoardPeerStatus{
+		PeerID: peer.PeerID(),
+		Addr:   peer.ListenAddr(),
+		Peers:  peer.ConnectedPeers(),
+	}
+	if secret != "" {
+		found, err := peer.FindPeers(ctx, secret)
+		if err != nil {
+			return BoardPeerStatus{}, err
+		}
+		status.RendezvousPeers = found
+	}
+	return status, nil
+}
+
+// BoardPeerConnect conecta el nodo P2P con otro por su multiaddr y devuelve
+// los peers conectados después del dial.
+func (s *Service) BoardPeerConnect(ctx context.Context, multiaddr string) ([]string, error) {
+	peer, err := s.boardPeerOrErr()
+	if err != nil {
+		return nil, err
+	}
+	if err := peer.Connect(ctx, multiaddr); err != nil {
+		return nil, err
+	}
+	return peer.ConnectedPeers(), nil
+}
+
+// BoardPeerSync publica un delta de board por el transporte P2P y devuelve
+// los peers a los que se intentó enviar. Es el nombre que expone el Backend
+// del CLI (`bunker p2p sync`).
+func (s *Service) BoardPeerSync(ctx context.Context, boardID, memberID, typ string, payload []byte, version int) ([]string, error) {
+	peer, err := s.boardPeerOrErr()
+	if err != nil {
+		return nil, err
+	}
+	msg := BoardPeerMessage{BoardID: boardID, MemberID: memberID, Type: typ, Payload: payload, Version: version}
+	if err := peer.Publish(boardID, msg); err != nil {
+		return nil, err
+	}
+	return peer.ConnectedPeers(), nil
+}
+
+// boardPeerOrErr devuelve el peer registrado o un error que envuelve
+// ErrUnsupported, igual que el resto de capacidades opcionales.
+func (s *Service) boardPeerOrErr() (BoardPeer, error) {
+	if s.boardPeer == nil {
+		return nil, fmt.Errorf("core: transporte P2P no configurado: %w", ErrUnsupported)
+	}
+	return s.boardPeer, nil
+}

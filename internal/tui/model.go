@@ -415,6 +415,24 @@ type Model struct {
 	updateNotice   string
 	updateNoticeAt time.Time
 	updateNoticed  bool
+
+	// Board (tablero compartido / kanban) view state. boardMode is true
+	// while a shared board view is on screen; boardList selects between
+	// the board list and a single board's kanban view.
+	boardMode      bool
+	boardList      bool
+	boards         []*core.Board
+	boardID        string
+	boardName      string
+	tasks          []*core.Task
+	members        []*core.Member
+	boardLoading   bool
+	boardErr       error
+	boardToken     uint64
+	boardInput     textinput.Model
+	boardInputKind int // 0 none, 1 create board, 2 join board, 3 create task title
+	boardNewCol    string
+	boardSelRow    int
 }
 
 // numTabs is "Todo" plus one tab per channelOrder entry.
