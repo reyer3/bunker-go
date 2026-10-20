@@ -457,7 +457,34 @@ func (a *Adapter) toItem(evt *event.Event) core.Item {
 			item.Attachments = append(item.Attachments, att)
 		}
 	}
+	// Element threads and quoted replies (m.relates_to): bunker blends a
+	// room into one conversation, so without these the reader cannot tell
+	// whom or which thread a message answers — the main thing group rooms
+	// lose. thread_root keeps the conversation's thread id (Meta keys hold
+	// full item ids, never raw event ids) and each target's sender name.
+	if rel := relatesTo(evt); rel != nil {
+		if parent := rel.GetThreadParent(); parent != "" {
+			item.Meta["thread_root"] = itemID(a.account, evt.RoomID, parent)
+			item.Meta["thread_root_name"] = a.cachedRelationName(evt.RoomID, parent)
+		}
+		if reply := rel.GetReplyTo(); reply != "" {
+			item.Meta["reply_to"] = itemID(a.account, evt.RoomID, reply)
+			item.Meta["reply_to_name"] = a.cachedRelationName(evt.RoomID, reply)
+		}
+	}
 	return item
+}
+
+// cachedRelationName resolves a related event's sender display name from
+// the in-memory item cache; empty when the room's history has not carried
+// that event through this session (callers hide the fallback). The cache
+// usually holds the target already: threads and replies follow earlier
+// messages, and the syncer stores each one as it arrives.
+func (a *Adapter) cachedRelationName(roomID id.RoomID, eventID id.EventID) string {
+	if cached, ok := a.cachedItem(itemID(a.account, roomID, eventID)); ok {
+		return strings.TrimSpace(cached.From.Name)
+	}
+	return ""
 }
 
 // displayNameForLocked resolves userID's display name in roomID from the
@@ -592,7 +619,20 @@ func (a *Adapter) Send(ctx context.Context, out core.Outgoing) (core.Receipt, er
 		if err != nil {
 			return core.Receipt{}, fmt.Errorf("matrix: reply target: %w", err)
 		}
-		content.RelatesTo = &event.RelatesTo{InReplyTo: &event.InReplyTo{EventID: replyEventID}}
+		if root := a.threadRootOf(out.ReplyTo); root != "" {
+			// Replying inside an Element thread: send the real
+			// m.thread relation (with the in_reply_to as fallback, so
+			// non-thread UIs still quote it) instead of unrolling the
+			// answer into the bare room stream. thread_root stores a
+			// full item id; the relation carries the raw event id.
+			_, _, rootEventID, err := parseItemID(root)
+			if err != nil {
+				return core.Receipt{}, fmt.Errorf("matrix: thread root: %w", err)
+			}
+			content.RelatesTo = (&event.RelatesTo{}).SetThread(rootEventID, replyEventID)
+		} else {
+			content.RelatesTo = &event.RelatesTo{InReplyTo: &event.InReplyTo{EventID: replyEventID}}
+		}
 	}
 
 	// Typing notification before delivering (T13d): proportional to the
@@ -622,6 +662,32 @@ func (a *Adapter) Send(ctx context.Context, out core.Outgoing) (core.Receipt, er
 // conversation even when the recipient was given in another form.
 func (a *Adapter) sentReceipt(roomID id.RoomID, eventID id.EventID) core.Receipt {
 	return core.Receipt{ID: itemID(a.account, roomID, eventID), Channel: core.ChannelMatrix, At: time.Now(), Thread: roomID.String()}
+}
+
+// threadRootOf reports the thread root id when the reply target lives in
+// an Element thread: the target itself carries thread_root, or it IS the
+// thread root (another cached item is threaded under it). Root events are
+// never tagged by the syncer — they carry no relation — so that second
+// case is resolved by scanning the in-memory cache; after a restart the
+// ordinary in_reply_to relation is used until the room re-syncs, which
+// every threading client accepts as a fallback.
+func (a *Adapter) threadRootOf(targetID string) string {
+	if _, _, _, err := parseItemID(targetID); err != nil {
+		return ""
+	}
+	if cached, ok := a.cachedItem(targetID); ok {
+		if root := cached.Meta["thread_root"]; root != "" {
+			return root
+		}
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, cached := range a.items {
+		if cached.Meta["thread_root"] == targetID {
+			return targetID
+		}
+	}
+	return ""
 }
 
 func (a *Adapter) resolveRoom(ctx context.Context, out core.Outgoing) (id.RoomID, error) {
