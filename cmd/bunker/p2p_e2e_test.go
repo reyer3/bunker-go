@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -53,6 +54,39 @@ func TestEndToEndP2PStatusAgainstFakeDaemon(t *testing.T) {
 	}
 	if status.Addr == "" {
 		t.Fatalf("addr vacía: %s", out)
+	}
+}
+
+// TestP2PStatusJSONHasNoRendezvousKey drives `bunker p2p status --json`
+// through the CLI entry point with the in-process fake backend and asserts the
+// removed DHT rendezvous no longer appears in the wire format.
+func TestP2PStatusJSONHasNoRendezvousKey(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runWithBackend(context.Background(), newFakeBackend(),
+		[]string{"p2p", "status", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("p2p status --json exit = %d, stderr = %s", code, stderr.String())
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(stdout.Bytes(), &raw); err != nil {
+		t.Fatalf("unmarshal %q: %v", stdout.String(), err)
+	}
+	if _, ok := raw["rendezvous_peers"]; ok {
+		t.Fatalf("p2p status --json still emits rendezvous_peers: %s", stdout.String())
+	}
+}
+
+// TestP2PStatusRejectsSecretFlag proves the removed --secreto flag fails
+// loudly as an unknown flag instead of being silently ignored.
+func TestP2PStatusRejectsSecretFlag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runWithBackend(context.Background(), newFakeBackend(),
+		[]string{"p2p", "status", "--secreto", "algo"}, strings.NewReader(""), &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("p2p status --secreto devolvió exit 0: %s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "unknown flag") {
+		t.Fatalf("stderr = %q, want unknown flag", stderr.String())
 	}
 }
 

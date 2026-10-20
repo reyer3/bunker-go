@@ -112,19 +112,16 @@ Drives the daemon's libp2p node for board sync without a central server.
 All three need the daemon running with `--p2p-listen`; without it they fail
 with `el nodo P2P no está iniciado`.
 
-- `bunker p2p status [--secreto t] [--json]` prints the node's peer id, its
-  listen multiaddr and the connected peers. With `--secreto` it also queries
-  the DHT rendezvous derived from `sha256(t)` and lists the peers found
-  there, which answers whether the other city's node is visible.
+- `bunker p2p status [--json]` prints the node's peer id, its listen
+  multiaddr and the connected peers. There is no automatic discovery: reaching
+  the other city's node is `bunker p2p connect`.
 - `bunker p2p connect <multiaddr> [--json]` dials a peer directly from a full
-  multiaddr such as `/ip4/203.0.113.5/tcp/4001/p2p/12D3KooW...`, the manual
-  path when no rendezvous is configured. A multiaddr without a `/p2p/<id>`
-  suffix is rejected.
+  multiaddr such as `/ip4/203.0.113.5/tcp/4001/p2p/12D3KooW...`. A multiaddr
+  without a `/p2p/<id>` suffix is rejected.
 - `bunker p2p sync <task-id> [--json]` forces one task delta out through the
   open streams to every connected peer of that task's board.
 
-JSON shapes: status is `{"id", "addr", "peers": [...]}` plus
-`"rendezvous_peers": [...]` when `--secreto` is given; connect is
+JSON shapes: status is `{"id", "addr", "peers": [...]}`; connect is
 `{"connected": true, "multiaddr", "peers": [...]}`; sync is
 `{"task", "board", "synced": true, "peers": [...]}`.
 

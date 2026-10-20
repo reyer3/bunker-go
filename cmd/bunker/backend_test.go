@@ -620,7 +620,7 @@ func (f *fakeBackend) BoardList(ctx context.Context) ([]*core.Board, error) {
 	return nil, nil
 }
 
-func (f *fakeBackend) BoardPeerStatus(ctx context.Context, secret string) (core.BoardPeerStatus, error) {
+func (f *fakeBackend) BoardPeerStatus(ctx context.Context) (core.BoardPeerStatus, error) {
 	if f.boardErr != nil {
 		return core.BoardPeerStatus{}, f.boardErr
 	}

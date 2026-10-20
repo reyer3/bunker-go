@@ -503,11 +503,9 @@ type healthResult struct {
 	LatestVersion   string               `json:"latest_version,omitempty"`
 }
 
-// p2pStatusParams is MethodP2PStatus's params: Secret is optional, and when
-// set also queries the DHT rendezvous derived from it.
-type p2pStatusParams struct {
-	Secret string `json:"secret,omitempty"`
-}
+// p2pStatusParams is MethodP2PStatus's params. It is empty: the P2P status
+// takes no secret, since automatic discovery is manual connect.
+type p2pStatusParams struct{}
 type p2pStatusResult struct {
 	Status core.BoardPeerStatus `json:"status"`
 }

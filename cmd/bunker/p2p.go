@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const p2pUsage = `usage: bunker p2p status [--secreto <texto>] [--json]
+const p2pUsage = `usage: bunker p2p status [--json]
        bunker p2p connect <multiaddr> [--json]
        bunker p2p sync <task-id> [--json]`
 
@@ -33,11 +33,10 @@ func cmdP2P(ctx context.Context, backend Backend, args []string, stdout, stderr 
 }
 
 // cmdP2PStatus reports the daemon node's peer id, listen address and
-// connected peers. With --secreto it also looks for peers sharing that secret
-// in the DHT rendezvous, which answers "¿ve el nodo de la otra ciudad?".
+// connected peers. There is no automatic discovery: reaching the other city's
+// node is `bunker p2p connect <multiaddr>`.
 func cmdP2PStatus(ctx context.Context, backend Backend, args []string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("p2p status", stderr)
-	secreto := fs.String("secreto", "", "string secreto compartido para buscar peers en el rendezvous")
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	positionals, err := parseInterspersed(fs, args)
 	if err != nil {
@@ -49,7 +48,7 @@ func cmdP2PStatus(ctx context.Context, backend Backend, args []string, stdout, s
 		return 2
 	}
 
-	status, err := backend.BoardPeerStatus(ctx, strings.TrimSpace(*secreto))
+	status, err := backend.BoardPeerStatus(ctx)
 	if err != nil {
 		return fail(*jsonOut, stdout, stderr, err)
 	}
@@ -63,12 +62,6 @@ func cmdP2PStatus(ctx context.Context, backend Backend, args []string, stdout, s
 	fmt.Fprintf(stdout, "Peers conectados: %d\n", len(status.Peers))
 	for _, p := range status.Peers {
 		fmt.Fprintf(stdout, "  %s\n", p)
-	}
-	if status.RendezvousPeers != nil {
-		fmt.Fprintf(stdout, "Peers en rendezvous: %d\n", len(status.RendezvousPeers))
-		for _, p := range status.RendezvousPeers {
-			fmt.Fprintf(stdout, "  %s\n", p)
-		}
 	}
 	return 0
 }

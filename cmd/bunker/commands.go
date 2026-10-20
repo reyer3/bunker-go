@@ -173,12 +173,10 @@ Commands:
   board task comment --task <id> --texto t                  anade comentario
   board members [--board <id>]                              lista miembros
   board relay start [--puerto p]                            relay ligero
-  p2p status [--secreto t] [--json]                         estado del nodo
+  p2p status [--json]                                       estado del nodo
                                                              libp2p: peer id,
                                                              direccion y peers
-                                                             conectados (con
-                                                             --secreto busca en
-                                                             el rendezvous DHT)
+                                                             conectados
   p2p connect <multiaddr> [--json]                          conecta a otro nodo
                                                              por su multiaddr
                                                              (/ip4/.../p2p/<id>)

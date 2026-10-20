@@ -23,8 +23,6 @@ type BoardPeer interface {
 	Connect(ctx context.Context, multiaddr string) error
 	// Publish envía un delta de board a todos los peers conectados.
 	Publish(boardID string, msg BoardPeerMessage) error
-	// FindPeers busca peers que compartan el secreto en el rendezvous.
-	FindPeers(ctx context.Context, secret string) ([]string, error)
 }
 
 // BoardPeerMessage es el delta que viaja por el transporte P2P. Sus campos
@@ -46,32 +44,24 @@ func (s *Service) SetBoardPeer(p BoardPeer) {
 
 // BoardPeerStatus describe el estado del nodo P2P para `bunker p2p status`.
 type BoardPeerStatus struct {
-	PeerID          string   `json:"id"`
-	Addr            string   `json:"addr"`
-	Peers           []string `json:"peers"`
-	RendezvousPeers []string `json:"rendezvous_peers,omitempty"`
+	PeerID string   `json:"id"`
+	Addr   string   `json:"addr"`
+	Peers  []string `json:"peers"`
 }
 
-// BoardPeerStatus devuelve el estado del nodo P2P. secret es opcional: con un
-// secreto no vacío también busca peers en el rendezvous DHT.
-func (s *Service) BoardPeerStatus(ctx context.Context, secret string) (BoardPeerStatus, error) {
+// BoardPeerStatus devuelve el estado del nodo P2P. El descubrimiento automático
+// está resuelto con `bunker p2p connect <multiaddr>`; no hay una DHT a la que
+// consultar, así que este estado no acepta un secreto.
+func (s *Service) BoardPeerStatus(ctx context.Context) (BoardPeerStatus, error) {
 	peer, err := s.boardPeerOrErr()
 	if err != nil {
 		return BoardPeerStatus{}, err
 	}
-	status := BoardPeerStatus{
+	return BoardPeerStatus{
 		PeerID: peer.PeerID(),
 		Addr:   peer.ListenAddr(),
 		Peers:  peer.ConnectedPeers(),
-	}
-	if secret != "" {
-		found, err := peer.FindPeers(ctx, secret)
-		if err != nil {
-			return BoardPeerStatus{}, err
-		}
-		status.RendezvousPeers = found
-	}
-	return status, nil
+	}, nil
 }
 
 // BoardPeerConnect conecta el nodo P2P con otro por su multiaddr y devuelve

@@ -49,22 +49,3 @@ func (t *peerTransport) Publish(boardID string, msg core.BoardPeerMessage) error
 		Version:   msg.Version,
 	})
 }
-
-// FindPeers looks for peers sharing secret in the DHT rendezvous.
-func (t *peerTransport) FindPeers(ctx context.Context, secret string) ([]string, error) {
-	rv, err := p2p.NewRendezvous(ctx, t.node)
-	if err != nil {
-		return nil, err
-	}
-	defer rv.Close()
-
-	found, err := rv.FindPeers(ctx, secret)
-	if err != nil {
-		return nil, err
-	}
-	ids := make([]string, 0, len(found))
-	for _, pi := range found {
-		ids = append(ids, pi.ID.String())
-	}
-	return ids, nil
-}

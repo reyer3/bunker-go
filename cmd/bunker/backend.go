@@ -94,7 +94,7 @@ type Backend interface {
 	// P2P board sync (internal/p2p behind the daemon): the node's identity
 	// and connections live in the daemon process, so the CLI reaches them
 	// through these RPC-backed methods.
-	BoardPeerStatus(ctx context.Context, secret string) (core.BoardPeerStatus, error)
+	BoardPeerStatus(ctx context.Context) (core.BoardPeerStatus, error)
 	BoardPeerConnect(ctx context.Context, multiaddr string) ([]string, error)
 	BoardPeerSync(ctx context.Context, boardID, memberID, typ string, payload []byte, version int) ([]string, error)
 }

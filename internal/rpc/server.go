@@ -564,7 +564,7 @@ func (s *Server) call(ctx context.Context, req Request) (any, error) {
 		if err := json.Unmarshal(req.Params, &p); err != nil {
 			return nil, fmt.Errorf("rpc: bad params: %w", err)
 		}
-		status, err := s.svc.BoardPeerStatus(ctx, p.Secret)
+		status, err := s.svc.BoardPeerStatus(ctx)
 		if err != nil {
 			return nil, err
 		}

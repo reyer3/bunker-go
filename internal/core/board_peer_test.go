@@ -13,7 +13,6 @@ import (
 type fakeBoardPeer struct {
 	connected   []string
 	published   []core.BoardPeerMessage
-	foundPeers  []string
 	connectAddr string
 }
 
@@ -28,26 +27,23 @@ func (f *fakeBoardPeer) Publish(boardID string, msg core.BoardPeerMessage) error
 	f.published = append(f.published, msg)
 	return nil
 }
-func (f *fakeBoardPeer) FindPeers(ctx context.Context, secret string) ([]string, error) {
-	return f.foundPeers, nil
-}
 
 // TestBoardPeerStatusWithoutPeerIsUnsupported prueba que un daemon sin nodo
 // P2P falla con ErrUnsupported en vez de devolver un estado vacío silencioso.
 func TestBoardPeerStatusWithoutPeerIsUnsupported(t *testing.T) {
 	svc := core.NewService(nil, core.NewRegistry())
-	if _, err := svc.BoardPeerStatus(context.Background(), ""); !errors.Is(err, core.ErrUnsupported) {
+	if _, err := svc.BoardPeerStatus(context.Background()); !errors.Is(err, core.ErrUnsupported) {
 		t.Fatalf("err = %v, want ErrUnsupported", err)
 	}
 }
 
-// TestBoardPeerStatusReportsNodeAndRendezvous prueba que el estado incluye la
-// identidad del nodo y, con secreto, los peers del rendezvous.
-func TestBoardPeerStatusReportsNodeAndRendezvous(t *testing.T) {
+// TestBoardPeerStatusReportsNodeAndPeers prueba que el estado incluye la
+// identidad del nodo y sus peers conectados.
+func TestBoardPeerStatusReportsNodeAndPeers(t *testing.T) {
 	svc := core.NewService(nil, core.NewRegistry())
-	svc.SetBoardPeer(&fakeBoardPeer{connected: []string{"peer-a"}, foundPeers: []string{"peer-b"}})
+	svc.SetBoardPeer(&fakeBoardPeer{connected: []string{"peer-a"}})
 
-	status, err := svc.BoardPeerStatus(context.Background(), "secreto")
+	status, err := svc.BoardPeerStatus(context.Background())
 	if err != nil {
 		t.Fatalf("BoardPeerStatus: %v", err)
 	}
@@ -56,24 +52,6 @@ func TestBoardPeerStatusReportsNodeAndRendezvous(t *testing.T) {
 	}
 	if len(status.Peers) != 1 || status.Peers[0] != "peer-a" {
 		t.Fatalf("peers = %v", status.Peers)
-	}
-	if len(status.RendezvousPeers) != 1 || status.RendezvousPeers[0] != "peer-b" {
-		t.Fatalf("rendezvous peers = %v", status.RendezvousPeers)
-	}
-}
-
-// TestBoardPeerStatusWithoutSecretSkipsRendezvous prueba que sin --secreto no
-// se consulta la DHT (el campo queda vacío).
-func TestBoardPeerStatusWithoutSecretSkipsRendezvous(t *testing.T) {
-	svc := core.NewService(nil, core.NewRegistry())
-	svc.SetBoardPeer(&fakeBoardPeer{foundPeers: []string{"peer-b"}})
-
-	status, err := svc.BoardPeerStatus(context.Background(), "")
-	if err != nil {
-		t.Fatalf("BoardPeerStatus: %v", err)
-	}
-	if len(status.RendezvousPeers) != 0 {
-		t.Fatalf("rendezvous peers = %v, want none", status.RendezvousPeers)
 	}
 }
 

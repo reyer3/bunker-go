@@ -523,11 +523,10 @@ func (c *Client) Search(ctx context.Context, channel core.Channel, account strin
 	return res.Items, nil
 }
 
-// BoardPeerStatus returns the daemon's P2P node status. secret is optional:
-// when set it also queries the DHT rendezvous.
-func (c *Client) BoardPeerStatus(ctx context.Context, secret string) (core.BoardPeerStatus, error) {
+// BoardPeerStatus returns the daemon's P2P node status.
+func (c *Client) BoardPeerStatus(ctx context.Context) (core.BoardPeerStatus, error) {
 	var res p2pStatusResult
-	if err := c.call(ctx, MethodP2PStatus, p2pStatusParams{Secret: secret}, &res); err != nil {
+	if err := c.call(ctx, MethodP2PStatus, p2pStatusParams{}, &res); err != nil {
 		return core.BoardPeerStatus{}, err
 	}
 	return res.Status, nil
