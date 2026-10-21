@@ -486,22 +486,27 @@ func planHerdrToggle(panes []herdrPane, envTab, envPane string) (herdrToggle, er
 	if err := validHerdrPaneID(anchor.PaneID); err != nil {
 		return herdrToggle{}, fmt.Errorf("herdr: focused pane: %w", err)
 	}
-	return herdrToggle{Action: "open", Tab: tab, Anchor: anchor.PaneID, Commands: herdrOpenCommands(anchor.PaneID, herdrNewPane)}, nil
+	return herdrToggle{Action: "open", Tab: tab, Anchor: anchor.PaneID, Commands: herdrOpenCommands(anchor.PaneID, herdrNewPane, true)}, nil
 }
 
 // herdrOpenCommands opens the plugin pane as a split right of anchor
-// without focus, narrows it, labels it so the next toggle finds it, then
-// focuses it.
+// without focus, narrows it and labels it so the next toggle finds it;
+// focus appends the final focus command, which everywhere skips for the
+// tabs the user is not looking at (focusing there would yank herdr out
+// of the current tab).
 // Every command after the first acts on newPane.
-func herdrOpenCommands(anchor, newPane string) [][]string {
+func herdrOpenCommands(anchor, newPane string, focus bool) [][]string {
 	amount := strconv.FormatFloat(0.5-herdrSidebarRatio, 'f', -1, 64)
-	return [][]string{
+	commands := [][]string{
 		{"plugin", "pane", "open", "--plugin", herdrPluginID, "--entrypoint", herdrSidebarEntrypoint,
 			"--placement", "split", "--target-pane", anchor, "--direction", "right", "--no-focus"},
 		{"pane", "resize", "--direction", "right", "--amount", amount, "--pane", newPane},
 		{"pane", "rename", newPane, herdrPaneLabel},
-		{"plugin", "pane", "focus", newPane},
 	}
+	if focus {
+		commands = append(commands, []string{"plugin", "pane", "focus", newPane})
+	}
+	return commands
 }
 
 // runHerdrToggle lists the panes, decides, and unless dryRun runs the
@@ -540,7 +545,7 @@ func runHerdrToggle(ctx context.Context, deps herdrDeps, dryRun bool) (herdrTogg
 		return plan, err
 	}
 	plan.Pane = newPane
-	plan.Commands = herdrOpenCommands(plan.Anchor, newPane)
+	plan.Commands = herdrOpenCommands(plan.Anchor, newPane, true)
 	for _, argv := range plan.Commands[1:] {
 		if _, err := deps.run(ctx, argv...); err != nil {
 			// An unlabelled pane would not be found by the next toggle,
@@ -554,11 +559,193 @@ func runHerdrToggle(ctx context.Context, deps herdrDeps, dryRun bool) (herdrTogg
 	return plan, nil
 }
 
-const herdrUsage = "usage: bunker herdr toggle [--dry-run] [--json]\n       bunker herdr mailto [--dry-run] [<mailto-url>]"
+// herdrEverywhere is what everywhere decided and ran. One plan per tab
+// changed; a tab that already had the panel when fill-everywhere ran is
+// named in Kept.
+//
+// Tighten: fill the missing tabs, never touch one the panel is already
+// in; when no tab is missing, close everywhere. One invocation therefore
+// always reaches "the panel in every tab", and the next one clears it.
+// The daily toggle stays per-tab (issue #80); everywhere is the
+// omnipresent bulk action for a session-wide layout.
+type herdrEverywhere struct {
+	Action string        `json:"action"` // fill or close
+	DryRun bool          `json:"dryRun"`
+	Plans  []herdrToggle `json:"plans"`
+	Kept   []string      `json:"kept,omitempty"`
+}
+
+// herdrTabs lists the session's tab ids in pane-list order (each tab
+// appears at least once: every pane belongs to a tab).
+func herdrTabs(panes []herdrPane) []string {
+	var tabs []string
+	seen := map[string]bool{}
+	for _, p := range panes {
+		if !seen[p.TabID] {
+			seen[p.TabID] = true
+			tabs = append(tabs, p.TabID)
+		}
+	}
+	return tabs
+}
+
+// planHerdrTab places bunker in one tab: close, open, or nil-when the
+// caller decides (open fills the missing tabs, close runs on the tabs
+// that have the panel). The anchor falls back from the tab's focused
+// pane to envPane when it belongs to this tab, then to the first pane.
+func planHerdrTab(tab string, inTab []herdrPane, envPane string) (*herdrToggle, error) {
+	for _, p := range inTab {
+		if p.Label != herdrPaneLabel {
+			continue
+		}
+		if err := validHerdrPaneID(p.PaneID); err != nil {
+			return nil, fmt.Errorf("herdr: bunker pane: %w", err)
+		}
+		return &herdrToggle{Action: "close", Tab: tab, Pane: p.PaneID,
+			Commands: [][]string{{"pane", "close", p.PaneID}}}, nil
+	}
+	anchor := herdrPane{PaneID: ""}
+	for _, p := range inTab {
+		if p.Focused || (anchor.PaneID == "" && p.PaneID == envPane) {
+			if anchor.PaneID != "" {
+				break
+			}
+			anchor = p
+		}
+	}
+	if anchor.PaneID == "" && len(inTab) > 0 {
+		anchor = inTab[0]
+	}
+	if anchor.PaneID == "" {
+		return nil, fmt.Errorf("herdr: tab %q has no pane to dock beside", tab)
+	}
+	if err := validHerdrPaneID(anchor.PaneID); err != nil {
+		return nil, fmt.Errorf("herdr: focused pane: %w", err)
+	}
+	return &herdrToggle{Action: "open", Tab: tab, Anchor: anchor.PaneID}, nil
+}
+
+// planHerdrEverywhere decides what everywhere does from a pane list.
+// currentTab drives the one detail that can yank focus: only the
+// current tab's new panel takes focus.
+func planHerdrEverywhere(panes []herdrPane, envTab, envPane, currentTab string) (herdrEverywhere, error) {
+	tabs := herdrTabs(panes)
+	if len(tabs) == 0 {
+		return herdrEverywhere{}, errors.New("herdr: pane list has no tabs")
+	}
+	has := map[string]bool{} // tab -> panel is there
+	byTab := map[string][]herdrPane{}
+	for _, p := range panes {
+		byTab[p.TabID] = append(byTab[p.TabID], p)
+		if p.Label == herdrPaneLabel && validHerdrPaneID(p.PaneID) == nil {
+			has[p.TabID] = true
+		}
+	}
+	missing := 0
+	for _, tab := range tabs {
+		if !has[tab] {
+			missing++
+		}
+	}
+
+	if missing > 0 {
+		everywhere := herdrEverywhere{Action: "fill"}
+		for _, tab := range tabs {
+			if has[tab] {
+				everywhere.Kept = append(everywhere.Kept, tab)
+				continue
+			}
+			plan, err := planHerdrTab(tab, byTab[tab], envPane)
+			if err != nil {
+				return herdrEverywhere{}, err
+			}
+			if plan.Action != "open" {
+				return herdrEverywhere{}, fmt.Errorf("herdr: tab %q unexpectedly %s while filling", tab, plan.Action)
+			}
+			plan.Commands = herdrOpenCommands(plan.Anchor, herdrNewPane, tab == currentTab)
+			everywhere.Plans = append(everywhere.Plans, *plan)
+		}
+		return everywhere, nil
+	}
+	everywhere := herdrEverywhere{Action: "close"}
+	for _, tab := range tabs {
+		plan, err := planHerdrTab(tab, byTab[tab], envPane)
+		if err != nil {
+			return herdrEverywhere{}, err
+		}
+		everywhere.Plans = append(everywhere.Plans, *plan)
+	}
+	return everywhere, nil
+}
+
+// runHerdrEverywhere lists the panes, decides, and unless dryRun runs
+// every plan (each open resolves its real pane id and relabels it, as
+// runHerdrToggle does). Only "pane list" runs in a dry run.
+func runHerdrEverywhere(ctx context.Context, deps herdrDeps, dryRun bool) (herdrEverywhere, error) {
+	out, err := deps.run(ctx, "pane", "list")
+	if err != nil {
+		if !errors.Is(err, errHerdrNotFound) && deps.getenv("HERDR_ENV") != "1" {
+			return herdrEverywhere{}, fmt.Errorf("herdr: not inside herdr and no herdr server answered: %w", err)
+		}
+		return herdrEverywhere{}, err
+	}
+	panes, err := parseHerdrPanes(out)
+	if err != nil {
+		return herdrEverywhere{}, err
+	}
+	currentTab, err := herdrTabOf(panes, deps.getenv("HERDR_TAB_ID"))
+	if err != nil {
+		// Focus placement only needs a guess then; every new panel opens
+		// unfocused.
+		currentTab = ""
+	}
+	plans, err := planHerdrEverywhere(panes, deps.getenv("HERDR_TAB_ID"), deps.getenv("HERDR_PANE_ID"), currentTab)
+	if err != nil {
+		return herdrEverywhere{}, err
+	}
+	plans.DryRun = dryRun
+	if dryRun {
+		return plans, nil
+	}
+	for i := range plans.Plans {
+		plan := &plans.Plans[i]
+		if plan.Action == "close" {
+			if _, err := deps.run(ctx, plan.Commands[0]...); err != nil {
+				return plans, err
+			}
+			continue
+		}
+		out, err := deps.run(ctx, plan.Commands[0]...)
+		if err != nil {
+			return plans, err
+		}
+		newPane, err := parseHerdrOpenedPane(out)
+		if err != nil {
+			return plans, err
+		}
+		plan.Pane = newPane
+		focus := plan.Tab == currentTab
+		plan.Commands = herdrOpenCommands(plan.Anchor, newPane, focus)
+		for _, argv := range plan.Commands[1:] {
+			if _, err := deps.run(ctx, argv...); err != nil {
+				if _, cerr := deps.run(ctx, "pane", "close", newPane); cerr != nil {
+					return plans, fmt.Errorf("%w (and closing the new pane %s failed: %v)", err, newPane, cerr)
+				}
+				return plans, err
+			}
+		}
+	}
+	return plans, nil
+}
+
+const herdrUsage = "usage: bunker herdr toggle [--dry-run] [--json]\n       bunker herdr everywhere [--dry-run] [--json]\n       bunker herdr mailto [--dry-run] [<mailto-url>]"
 
 func cmdHerdr(ctx context.Context, args []string, stdout, stderr io.Writer, deps herdrDeps) int {
 	if len(args) > 0 && args[0] == "mailto" {
 		return cmdHerdrMailto(ctx, args[1:], stdout, stderr, deps)
+	}
+	if len(args) > 0 && args[0] == "everywhere" {
+		return cmdHerdrEverywhere(ctx, args[1:], stdout, stderr, deps)
 	}
 	if len(args) == 0 || args[0] != "toggle" {
 		fmt.Fprintln(stderr, herdrUsage)
@@ -591,6 +778,43 @@ func cmdHerdr(ctx context.Context, args []string, stdout, stderr io.Writer, deps
 		}
 	default:
 		fmt.Fprintf(stdout, "%s %s\n", plan.Action, plan.Pane)
+	}
+	return 0
+}
+
+// cmdHerdrEverywhere is "bunker herdr everywhere": the panel in every
+// tab of the session in one invocation, and closed everywhere by the
+// next one once no tab is missing it.
+func cmdHerdrEverywhere(ctx context.Context, args []string, stdout, stderr io.Writer, deps herdrDeps) int {
+	flags := flag.NewFlagSet("herdr everywhere", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	dryRun := flags.Bool("dry-run", false, "print the herdr commands instead of running them")
+	jsonOut := flags.Bool("json", false, "JSON output")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() > 0 {
+		fmt.Fprintln(stderr, herdrUsage)
+		return 2
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, herdrTimeout)
+	defer cancel()
+	plans, err := runHerdrEverywhere(ctx, deps, *dryRun)
+	if err != nil {
+		return fail(*jsonOut, stdout, stderr, err)
+	}
+	switch {
+	case *jsonOut:
+		writeJSON(stdout, plans)
+	case *dryRun:
+		for _, plan := range plans.Plans {
+			for _, argv := range plan.Commands {
+				fmt.Fprintln(stdout, "herdr "+strings.Join(argv, " "))
+			}
+		}
+	default:
+		fmt.Fprintf(stdout, "%s (%d tabs)\n", plans.Action, len(plans.Plans))
 	}
 	return 0
 }

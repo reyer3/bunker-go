@@ -13,7 +13,7 @@ compact plain text for a human at a terminal.
 | `list`, `find`, `read`, `thread`, `search`, `counts`, `health`, `contacts`, `chats`, `meetings`, `todo list`, `awaiting`, `calls`, `avatar`, `download` | yes: data |
 | `reply`, `send`, `edit`, `delete`, `react`, `organize`, `status post`, `call`, `call answer\|reject\|hangup`, `backfill` | yes: `{"dryRun", "plan", ...}` with the [`core.Plan`/`core.Receipt` shape](#coreplan-and-corereceipt-json-shape) |
 | `unread`, `read-thread`, `meetings join`, `todo add`, `todo done\|reopen` | yes: the result of the change |
-| `version`, `update`, `render`, `herdr toggle` | yes |
+| `version`, `update`, `render`, `herdr toggle`, `herdr everywhere` | yes |
 | `import-keys matrix` | yes: `{"new", "already_known", "failed", "total"}` |
 | `daemon`, `mcp`, `bunker` (no arguments), `sidebar`, `open`, `app`, `link`, `help` | exempt: interactive, long-running or setup commands with no data result |
 
@@ -2571,6 +2571,18 @@ Starts the TUI directly on the new mail editor, prefilled from a
   refused rather than dropped) exits 2; no mail account (or an unknown
   `--account`) exits 2; no TTY prints `error: bunker compose needs a
   terminal` and exits 2; an unreachable daemon exits 1 as bare `bunker`.
+
+## `bunker herdr everywhere [--dry-run] [--json]`
+
+One invocation places the panel in every tab of the session that does
+not have it, and, once no tab is missing it, closes it in every tab.
+It lists the panes once and plans per tab, then runs each plan the way
+the toggle does — the `--json` output names a tab the panel was already
+in under `kept`. Only the current tab's new panel takes focus, so
+opening everywhere never yanks herdr out of the tab being used. Tabs
+created after it ran are not covered — run it again for them. The
+`bunker.everywhere` plugin action exposes it; see the plugin README for
+a key binding.
 
 ## `bunker herdr toggle [--dry-run] [--json]`
 

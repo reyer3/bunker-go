@@ -266,3 +266,107 @@ func TestHerdrUsage(t *testing.T) {
 		}
 	}
 }
+
+// TestHerdrEverywhereFillAndClose pins "the panel in every tab": one
+// invocation opens it in every tab missing it (and never touches a tab
+// that has it), the next closes it everywhere. Only the current tab's
+// new panel gets the final focus command.
+func TestHerdrEverywhereFillAndClose(t *testing.T) {
+	env := map[string]string{"HERDR_ENV": "1", "HERDR_TAB_ID": "w1:t1"}
+	twoTabs := paneList(
+		herdrPane{PaneID: "w1:p1", TabID: "w1:t1", Focused: true},
+		herdrPane{PaneID: "w2:p1", TabID: "w2:t1", Focused: true},
+	)
+
+	f := &fakeHerdr{replies: map[string]string{"pane list": twoTabs}}
+	var stdout, stderr bytes.Buffer
+	if code := cmdHerdr(context.Background(), []string{"everywhere", "--dry-run"}, &stdout, &stderr, herdrDeps{run: f.run, getenv: herdrEnv(env)}); code != 0 {
+		t.Fatalf("fill dry-run: code %d: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, `--target-pane w1:p1`) || !strings.Contains(out, `--target-pane w2:p1`) {
+		t.Fatalf("fill plan misses a tab:\n%s", out)
+	}
+	// The current tab's open ends with focus; the other's does not.
+	if !strings.Contains(out, "focus "+herdrNewPane) {
+		t.Fatalf("fill plan has no focus for the current tab:\n%s", out)
+	}
+	if ol := strings.Split(out, "\n")[4]; strings.HasPrefix(ol, "herdr plugin pane focus") {
+		t.Fatalf("fill plan focuses another tab:\n%s", out)
+	}
+
+	// Both tabs already have the panel → close everywhere.
+	panels := paneList(
+		herdrPane{PaneID: "w1:p1", TabID: "w1:t1", Focused: true},
+		herdrPane{PaneID: "w1:p2", TabID: "w1:t1", Label: herdrPaneLabel},
+		herdrPane{PaneID: "w2:p1", TabID: "w2:t1", Focused: true},
+		herdrPane{PaneID: "w2:p2", TabID: "w2:t1", Label: herdrPaneLabel},
+	)
+	f = &fakeHerdr{replies: map[string]string{"pane list": panels}}
+	stdout.Reset()
+	if code := cmdHerdr(context.Background(), []string{"everywhere", "--dry-run", "--json"}, &stdout, &stderr, herdrDeps{run: f.run, getenv: herdrEnv(env)}); code != 0 {
+		t.Fatalf("close dry-run: code %d: %s", code, stderr.String())
+	}
+	var got herdrEverywhere
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Action != "close" || len(got.Plans) != 2 {
+		t.Fatalf("close everywhere = %+v", got)
+	}
+	for _, plan := range got.Plans {
+		if plan.Action != "close" || plan.Pane == "" {
+			t.Fatalf("close plan = %+v", plan)
+		}
+	}
+
+	// One of two tabs has it: fill only the other one and keep this one.
+	mixed := paneList(
+		herdrPane{PaneID: "w1:p1", TabID: "w1:t1", Focused: true},
+		herdrPane{PaneID: "w1:p2", TabID: "w1:t1", Label: herdrPaneLabel},
+		herdrPane{PaneID: "w2:p1", TabID: "w2:t1", Focused: true},
+	)
+	f = &fakeHerdr{replies: map[string]string{"pane list": mixed}}
+	stdout.Reset()
+	if code := cmdHerdr(context.Background(), []string{"everywhere", "--dry-run", "--json"}, &stdout, &stderr, herdrDeps{run: f.run, getenv: herdrEnv(env)}); code != 0 {
+		t.Fatalf("mixed dry-run: code %d: %s", code, stderr.String())
+	}
+	got = herdrEverywhere{}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Action != "fill" || len(got.Plans) != 1 || got.Plans[0].Tab != "w2:t1" {
+		t.Fatalf("fill everywhere = %+v", got)
+	}
+	if len(got.Kept) != 1 || got.Kept[0] != "w1:t1" {
+		t.Fatalf("kept = %v, want [w1:t1]", got.Kept)
+	}
+}
+
+// TestHerdrEverywhereRun drives the real (non-dry) path over the fake
+// herdr: each open resolves its new pane id, resizes and relabels it.
+func TestHerdrEverywhereRun(t *testing.T) {
+	env := map[string]string{"HERDR_ENV": "1", "HERDR_TAB_ID": "w1:t1"}
+	f := &fakeHerdr{replies: map[string]string{
+		"pane list":        paneList(herdrPane{PaneID: "w1:p1", TabID: "w1:t1", Focused: true}, herdrPane{PaneID: "w2:p1", TabID: "w2:t1"}),
+		"plugin pane open": openedReply,
+	}}
+	var stdout, stderr bytes.Buffer
+	if code := cmdHerdr(context.Background(), []string{"everywhere"}, &stdout, &stderr, herdrDeps{run: f.run, getenv: herdrEnv(env)}); code != 0 {
+		t.Fatalf("code %d: %s", code, stderr.String())
+	}
+	var opens, resizes, renames int
+	for _, c := range f.calls {
+		switch {
+		case strings.HasPrefix(c, "plugin pane open"):
+			opens++
+		case strings.HasPrefix(c, "pane resize"):
+			resizes++
+		case strings.HasPrefix(c, "pane rename"):
+			renames++
+		}
+	}
+	if opens != 2 || resizes != 2 || renames != 2 {
+		t.Fatalf("opens=%d resizes=%d renames=%d (calls: %v)", opens, resizes, renames, f.calls)
+	}
+}
