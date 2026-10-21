@@ -13,7 +13,7 @@ compact plain text for a human at a terminal.
 | `list`, `find`, `read`, `thread`, `search`, `counts`, `health`, `contacts`, `chats`, `meetings`, `todo list`, `awaiting`, `calls`, `avatar`, `download` | yes: data |
 | `reply`, `send`, `edit`, `delete`, `react`, `organize`, `status post`, `call`, `call answer\|reject\|hangup`, `backfill` | yes: `{"dryRun", "plan", ...}` with the [`core.Plan`/`core.Receipt` shape](#coreplan-and-corereceipt-json-shape) |
 | `unread`, `read-thread`, `meetings join`, `todo add`, `todo done\|reopen` | yes: the result of the change |
-| `version`, `update`, `render`, `herdr toggle` | yes |
+| `version`, `update`, `render`, `herdr toggle`, `herdr everywhere`, `p2p status\|connect\|sync` | yes |
 | `import-keys matrix` | yes: `{"new", "already_known", "failed", "total"}` |
 | `daemon`, `mcp`, `bunker` (no arguments), `sidebar`, `open`, `app`, `link`, `help` | exempt: interactive, long-running or setup commands with no data result |
 
@@ -74,7 +74,7 @@ treated as local, as every client did before.
   inside its staging dir when it is a finished upload, so no client can
   make it send a staged download or a half-written file.
 
-## `bunker daemon [--fake]`
+## `bunker daemon [--fake] [--relay-addr host:port] [--p2p-listen multiaddr]`
 
 Runs the daemon: opens the SQLite store, wires one adapter per configured
 `[[account]]` (or three in-memory demo adapters under `--fake`, one per
@@ -87,6 +87,14 @@ config file is not an error — the daemon starts with no accounts, so
 No flags produce `--json` output; this command prints plain status lines
 to stdout as it starts.
 
+`--relay-addr` (default `127.0.0.1:0`, a system-assigned port) is where the
+light shared-board relay listens. `--p2p-listen` (empty by default, which
+disables it) starts a libp2p node for decentralized board sync, for example
+`--p2p-listen /ip4/0.0.0.0/tcp/4001`; the daemon then prints its peer id and
+listen address. The node is optional: if it fails to start the daemon logs
+why to stderr and keeps running with the relay only, and a P2P publish error
+never fails a board write.
+
 If an adapter's `Run` returns while the daemon is still live (a dropped
 IMAP/WhatsApp/Matrix connection, a sync error), the supervisor restarts
 it with a capped exponential backoff (1s, doubling, up to 5 minutes,
@@ -97,6 +105,29 @@ error that used to be silently lost, is logged via `log/slog` to
 **stderr** (not stdout) with `channel`/`account` attributes, so `journald`
 carries them under a normal systemd unit. See `bunker health` below for
 querying the resulting per-adapter state instead of grepping logs.
+
+## `bunker p2p status|connect|sync`
+
+Drives the daemon's libp2p node for board sync without a central server.
+All three need the daemon running with `--p2p-listen`; without it they fail
+with `el nodo P2P no está iniciado`.
+
+- `bunker p2p status [--json]` prints the node's peer id, its listen
+  multiaddr and the connected peers. There is no automatic discovery: reaching
+  the other city's node is `bunker p2p connect`.
+- `bunker p2p connect <multiaddr> [--json]` dials a peer directly from a full
+  multiaddr such as `/ip4/203.0.113.5/tcp/4001/p2p/12D3KooW...`. A multiaddr
+  without a `/p2p/<id>` suffix is rejected.
+- `bunker p2p sync <task-id> [--json]` forces one task delta out through the
+  open streams to every connected peer of that task's board.
+
+JSON shapes: status is `{"id", "addr", "peers": [...]}`; connect is
+`{"connected": true, "multiaddr", "peers": [...]}`; sync is
+`{"task", "board", "synced": true, "peers": [...]}`.
+
+Boards themselves (`bunker board ...`) and the light relay (`bunker board
+relay start`) are documented separately; the P2P node is an additional
+transport for the same `BoardEvent` stream, not a replacement for the relay.
 
 ## `bunker version [--json]`
 
@@ -751,7 +782,7 @@ own explicit actions (opening a conversation, `read-thread`).
 {"item": { <core.Item> }}
 ```
 
-## `bunker reply <id> <text|-> [--cc addr]... [--attach path]... [--idempotency-key k] [--dry-run] [--json]`
+## `bunker reply <id> <text|-> [--cc addr]... [--bcc addr]... [--attach path]... [--idempotency-key k] [--dry-run] [--json]`
 
 `bunker reply <id> --voice <file.ogg>` replies with a voice note instead
 (no text; see [Voice notes](#voice-notes-notas-de-voz)).
@@ -775,6 +806,16 @@ repeated too — every address from every occurrence is collected, each
 trimmed of surrounding whitespace, with empty entries dropped. See `send`
 below for what each channel does with Cc.
 
+`--bcc addr` (repeatable) adds a hidden Bcc recipient, the same way as
+`--cc`. Bcc addresses reach the SMTP envelope (RCPT TO) for mail but never
+appear in the message's `Bcc:`/`Resent-Bcc:` headers or body, so no
+recipient can see them. `plan.bcc` carries them in the initiating caller's
+dry-run plan (and only there — observer output, logs and delivery errors
+never echo them). WhatsApp and Matrix reject any non-empty `--bcc` with an
+unsupported-capability error instead of silently dropping it. Changing
+`--cc`/`--bcc` changes the idempotency fingerprint, so a retry with
+different Bcc is a new operation; identical confirmed retries send once.
+
 `--attach path` (repeatable) attaches local files to the reply, for
 every channel — see `send` below for the full validation and JSON-shape
 story, which `reply` shares. A reply with attachments quotes the
@@ -796,7 +837,7 @@ such as `51999999999@s.whatsapp.net` even when the recipient was typed
 as bare digits, or a Matrix room id); the stored sent item joins that
 conversation.
 
-## `bunker send <channel> <account> <to> <text|-> [--cc addr]... [--subject s] [--attach path]... [--media path]... [--forward] [--idempotency-key k] [--dry-run] [--json]`
+## `bunker send <channel> <account> <to> <text|-> [--cc addr]... [--bcc addr]... [--subject s] [--attach path]... [--media path]... [--forward] [--idempotency-key k] [--dry-run] [--json]`
 
 `bunker send <channel> <account> <to> --voice <file.ogg>` sends an Ogg
 Opus file as a voice note (no text; see
@@ -824,16 +865,23 @@ those needs a new key.
 each entry is trimmed, empty entries are dropped, and the command fails
 before touching the backend if that leaves nothing. `--cc addr`
 (repeatable, each value may also be comma-separated — see `reply` above)
-adds Cc recipients. Per-channel support:
+adds Cc recipients. `--bcc addr` (repeatable, same comma-separated and
+repeatable rules) adds hidden Bcc recipients: they reach the SMTP
+envelope (RCPT TO) for mail but never appear in the `Bcc:`/
+`Resent-Bcc:` headers or body, and `plan.bcc` carries them in the
+initiating caller's plan only. WhatsApp and Matrix reject any non-empty
+`--bcc` with an unsupported-capability error instead of silently dropping
+it. Per-channel support:
 
-- **Mail**: every `<to>` and `--cc` address gets both a header (`To`/
-  `Cc`) and an SMTP `RCPT TO`, never just the first.
+- **Mail**: every `<to>`, `--cc` and `--bcc` address gets an SMTP `RCPT
+  TO`, never just the first; `<to>` and `--cc` also get `To`/`Cc`
+  headers, `--bcc` never gets a header.
 - **WhatsApp** and **Matrix**: exactly one recipient. More than one `<to>`
-  or any `--cc` fails with an unsupported-capability error instead of
-  silently sending to the first and dropping the rest.
+  or any `--cc` or `--bcc` fails with an unsupported-capability error
+  instead of silently sending to the first and dropping the rest.
 
 `plan.cc` (alongside `plan.target`, which lists `<to>`) carries the Cc
-list; it is omitted when there is no `--cc`.
+list; `plan.bcc` carries the Bcc list; both are omitted when empty.
 
 `plan.Recipients` lists every `<to>` address a send/reply reaches, one
 entry each, whether the channel addressed everyone in one native call
@@ -2572,6 +2620,18 @@ Starts the TUI directly on the new mail editor, prefilled from a
   `--account`) exits 2; no TTY prints `error: bunker compose needs a
   terminal` and exits 2; an unreachable daemon exits 1 as bare `bunker`.
 
+## `bunker herdr everywhere [--dry-run] [--json]`
+
+One invocation places the panel in every tab of the session that does
+not have it, and, once no tab is missing it, closes it in every tab.
+It lists the panes once and plans per tab, then runs each plan the way
+the toggle above does — the `--json` output names a tab the panel was
+already in under `kept`. Only the current tab's new panel takes focus,
+so opening everywhere never yanks herdr out of the tab being used.
+Tabs created after it ran are not covered — run it again for them. The
+`bunker.everywhere` plugin action exposes it; see the plugin README for
+a key binding.
+
 ## `bunker herdr toggle [--dry-run] [--json]`
 
 Docks bunker as a narrow panel on the right of the current herdr tab. It
@@ -2836,6 +2896,7 @@ before this release they were the Go field names (`Action`, `Recipients`,
   "plan": {
     "action": "send", "channel": "mail", "account": "cl",
     "target": "alice@x.cl", "cc": ["carol@example.org"],
+    "bcc": ["dave@example.org"],
     "subject": "hi", "preview": "hi there",
     "media": ["/path/a.pdf"],
     "attachments": [{"name": "a.pdf", "mime": "application/pdf", "size": 2048}],
@@ -2852,7 +2913,7 @@ before this release they were the Go field names (`Action`, `Recipients`,
 
 `plan.action`, `channel`, `account`, `target` and `preview`, and
 `receipt.id`, `channel` and `at`, are always present. The rest is omitted
-when empty: `cc`, `subject`, `media`, `attachments`, `recipients`, the
+when empty: `cc`, `bcc`, `subject`, `media`, `attachments`, `recipients`, the
 two `fanout_pause_*` fields (integer nanoseconds), `voice` (true for a
 voice note, whose attachment also carries `"voice": true` and
 `"duration_ms"`), `forward` (true for a forward), `receipt.recipients` (fan-out only), `receipt.replayed` (true for an idempotent replay) and a
