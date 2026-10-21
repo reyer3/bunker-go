@@ -2,7 +2,7 @@ module github.com/reyer3/bunker-go
 
 go 1.26.0
 
-toolchain go1.26.8
+toolchain go1.27.3
 
 // Dependency pins. Dependabot (.github/dependabot.yml) groups minor and
 // patch updates weekly. The modules below are held on purpose: they are
