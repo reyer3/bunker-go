@@ -165,3 +165,36 @@ func TestSendAnswersInsideThread(t *testing.T) {
 		t.Fatalf("in_reply_to = %v, want $reply", reply["event_id"])
 	}
 }
+
+// TestReplyRelationThreadChoice pins the shared helper behind Send,
+// SendMedia and SendVoice: a replay target inside a thread produces an
+// m.thread relation toward the root (quoted event as fallback), so an
+// attachment or voice-note reply cannot fall to the bare room stream.
+func TestReplyRelationThreadChoice(t *testing.T) {
+	a := relationMetaAdapter(t)
+	rootID := itemID("work", relRoom, "$root")
+	childID := itemID("work", relRoom, "$child")
+	a.remember(core.Item{ID: childID, Meta: map[string]string{"thread_root": rootID}})
+
+	rel := a.replyRelation(childID, "$child")
+	if rel.Type != event.RelThread || rel.EventID != "$root" {
+		t.Fatalf("threaded target relation = %+v, want m.thread -> $root", rel)
+	}
+	if rel.InReplyTo == nil || rel.InReplyTo.EventID != "$child" || !rel.IsFallingBack {
+		t.Fatalf("fallback quote = %+v, want $child falling back", rel.InReplyTo)
+	}
+
+	// Replying to a message that other cached items thread under stays
+	// in the thread even though the target itself carries no relation.
+	if rel := a.replyRelation(rootID, "$root"); rel.Type != event.RelThread || rel.EventID != "$root" {
+		t.Fatalf("root-with-children relation = %+v, want m.thread -> $root", rel)
+	}
+
+	// A target with no thread context at all keeps the plain quote.
+	plainID := itemID("work", relRoom, "$reply")
+	a.remember(core.Item{ID: plainID})
+	rel = a.replyRelation(plainID, "$reply")
+	if rel.Type != "" || rel.InReplyTo == nil || rel.InReplyTo.EventID != "$reply" {
+		t.Fatalf("plain relation = %+v, want in_reply_to $reply", rel)
+	}
+}

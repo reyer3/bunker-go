@@ -619,20 +619,7 @@ func (a *Adapter) Send(ctx context.Context, out core.Outgoing) (core.Receipt, er
 		if err != nil {
 			return core.Receipt{}, fmt.Errorf("matrix: reply target: %w", err)
 		}
-		if root := a.threadRootOf(out.ReplyTo); root != "" {
-			// Replying inside an Element thread: send the real
-			// m.thread relation (with the in_reply_to as fallback, so
-			// non-thread UIs still quote it) instead of unrolling the
-			// answer into the bare room stream. thread_root stores a
-			// full item id; the relation carries the raw event id.
-			_, _, rootEventID, err := parseItemID(root)
-			if err != nil {
-				return core.Receipt{}, fmt.Errorf("matrix: thread root: %w", err)
-			}
-			content.RelatesTo = (&event.RelatesTo{}).SetThread(rootEventID, replyEventID)
-		} else {
-			content.RelatesTo = &event.RelatesTo{InReplyTo: &event.InReplyTo{EventID: replyEventID}}
-		}
+		content.RelatesTo = a.replyRelation(out.ReplyTo, replyEventID)
 	}
 
 	// Typing notification before delivering (T13d): proportional to the
@@ -662,6 +649,20 @@ func (a *Adapter) Send(ctx context.Context, out core.Outgoing) (core.Receipt, er
 // conversation even when the recipient was given in another form.
 func (a *Adapter) sentReceipt(roomID id.RoomID, eventID id.EventID) core.Receipt {
 	return core.Receipt{ID: itemID(a.account, roomID, eventID), Channel: core.ChannelMatrix, At: time.Now(), Thread: roomID.String()}
+}
+
+// replyRelation builds the m.relates_to of a reply to replyItemID: an
+// m.thread relation toward the thread's root (the quoted event as
+// fallback) when the target lives in an Element thread, so replies stay
+// inside it; else the plain in_reply_to. Every reply path — text Send,
+// SendMedia, SendVoice — goes through here.
+func (a *Adapter) replyRelation(replyItemID string, replyEventID id.EventID) *event.RelatesTo {
+	if root := a.threadRootOf(replyItemID); root != "" {
+		if _, _, rootEventID, err := parseItemID(root); err == nil {
+			return (&event.RelatesTo{}).SetThread(rootEventID, replyEventID)
+		}
+	}
+	return &event.RelatesTo{InReplyTo: &event.InReplyTo{EventID: replyEventID}}
 }
 
 // threadRootOf reports the thread root id when the reply target lives in
