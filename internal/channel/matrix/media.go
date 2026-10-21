@@ -157,7 +157,7 @@ func (a *Adapter) SendMedia(ctx context.Context, out core.Outgoing) (core.Receip
 		if err != nil {
 			return core.Receipt{}, fmt.Errorf("matrix: reply target: %w", err)
 		}
-		relatesTo = &event.RelatesTo{InReplyTo: &event.InReplyTo{EventID: replyEventID}}
+		relatesTo = a.replyRelation(out.ReplyTo, replyEventID)
 	}
 
 	var receipt core.Receipt
@@ -231,7 +231,7 @@ func (a *Adapter) SendVoice(ctx context.Context, out core.Outgoing) (core.Receip
 		if err != nil {
 			return core.Receipt{}, fmt.Errorf("matrix: reply target: %w", err)
 		}
-		content.RelatesTo = &event.RelatesTo{InReplyTo: &event.InReplyTo{EventID: replyEventID}}
+		content.RelatesTo = a.replyRelation(out.ReplyTo, replyEventID)
 	}
 	resp, err := a.client.SendMessageEvent(ctx, roomID, event.EventMessage, content)
 	if err != nil {

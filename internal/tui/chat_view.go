@@ -53,6 +53,30 @@ func senderColorHex(name, dim string) string {
 	return senderPalette[h.Sum32()%uint32(len(senderPalette))]
 }
 
+// relationContext renders a bubble's relation context line: which thread
+// a Matrix message belongs to, or which sender it answers (m.relates_to
+// metadata the adapter records at sync), with "…" standing in when the
+// target's name was no longer in the syncer's cache. Empty when the item
+// carries neither relation, or its channel does not use meta keys.
+func relationContext(item core.Item) string {
+	if root, name := item.Meta["thread_root"], item.Meta["thread_root_name"]; root != "" {
+		return "↳ hilo de " + fallbackRelationName(name)
+	}
+	if reply, name := item.Meta["reply_to"], item.Meta["reply_to_name"]; reply != "" {
+		return "↳ responde a " + fallbackRelationName(name)
+	}
+	return ""
+}
+
+// fallbackRelationName replaces an unresolved target name with "…": an
+// empty name renders as a bare "↳ hilo de " with nothing after it.
+func fallbackRelationName(name string) string {
+	if strings.TrimSpace(name) == "" {
+		return "…"
+	}
+	return strings.TrimSpace(name)
+}
+
 // ownBubbleBg picks the own-message bubble background for channel: the
 // Matrix accent from pal for Matrix, the WhatsApp bubble green otherwise.
 func ownBubbleBg(channel core.Channel, pal style.Palette) string {
@@ -577,6 +601,16 @@ func chatBubbleLinesFocus(r *lipgloss.Renderer, pal style.Palette, item core.Ite
 			padded := padTo(text, bubbleWidth)
 			lines = append(lines, alignBubbleLine(nameStyle.Render(padded), bubbleWidth, width, item.FromMe))
 		}
+	}
+	if context := relationContext(item); context != "" {
+		// Matrix group rooms and threads (m.relates_to): a dim context
+		// line above the body names the thread or the sender being
+		// answered, so the reader knows whom the answer is for without
+		// relying on Element's history.
+		lineStyle := r.NewStyle().Background(lipgloss.Color(bgHex)).Foreground(lipgloss.Color(pal.DimColor())).Italic(true)
+		text := runewidth.Truncate(context, bubbleWidth, "…")
+		padded := padTo(text, bubbleWidth)
+		lines = append(lines, alignBubbleLine(lineStyle.Render(padded), bubbleWidth, width, item.FromMe))
 	}
 	if item.Deleted {
 		// S2: a revoked message keeps its row (and place in the

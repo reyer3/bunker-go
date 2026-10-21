@@ -2909,6 +2909,19 @@ reactions and redactions never appear as items of their own. Both fields
 are absent of any effect for a plain, never-edited/revoked/reacted-to
 item (`Edited`/`Deleted` `false`, `Reactions` empty).
 
+Element threads and quoted replies are stored in the item's `Meta`
+Matrix. A message inside an Element thread carries `thread_root` (the
+root message's item id) and, when its room's history carried the root,
+`thread_root_name` (its sender's display name); a quoted reply
+(`m.in_reply_to`) carries `reply_to` and `reply_to_name` the same way.
+The chat view draws both as a dim first line of the bubble — `↳ hilo de
+<name>` or `↳ responde a <name>`, with "…" for a name the session's
+sync had not seen — so a group room's stream tells whom or which thread
+each message answers. Replies sent from bunker enter the thread too:
+replying to a message that lives in one sends `rel_type: m.thread` (with
+the quoted message as fallback), not a plain in_reply_to into the bare
+room stream.
+
 A voice note's attachment also has `voice` (true), `duration` (seconds)
 and `waveform` (base64, one 0-100 byte per bar), each omitted when empty.
 

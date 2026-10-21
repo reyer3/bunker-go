@@ -86,6 +86,30 @@ func TestChatBubbleWidthCapsAtAbout75PercentOfWidth(t *testing.T) {
 // an Ascii color profile so the rendered bytes are exactly the padded
 // plain text (no ANSI to strip), making the exact column position
 // directly assertable.
+// TestChatBubbleRelationContextLine pins the thread/reply context line:
+// a message carrying the adapter's m.relates_to metadata renders a dim
+// "↳ hilo de …" or "↳ responde a …" line first (in the bubble, above the
+// body), and an unrelated item renders none.
+func TestChatBubbleRelationContextLine(t *testing.T) {
+	now := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
+	r := lipgloss.NewRenderer(io.Discard)
+	r.SetColorProfile(termenv.Ascii)
+	width := 40
+
+	thread := chatBubbleLines(r, core.Item{Body: "va", Timestamp: now, Meta: map[string]string{"thread_root": "matrix:m:x/$r", "thread_root_name": "Beto"}}, width, false, now, false, "", nil)
+	if got := strings.TrimRight(thread[0], " "); !strings.HasPrefix(got, "↳ hilo de Beto") {
+		t.Fatalf("thread bubble first line = %q, want the ↳ hilo line first", got)
+	}
+	reply := chatBubbleLines(r, core.Item{Body: "va", Timestamp: now, Meta: map[string]string{"reply_to": "matrix:m:x/$r", "reply_to_name": ""}}, width, false, now, false, "", nil)
+	if got := strings.TrimRight(reply[0], " "); !strings.HasPrefix(got, "↳ responde a …") {
+		t.Fatalf("reply bubble first line = %q, want the unresolved-name fallback", got)
+	}
+	plain := chatBubbleLines(r, core.Item{Body: "va", Timestamp: now}, width, false, now, false, "", nil)
+	if len(plain) == 0 || strings.Contains(plain[0], "↳") {
+		t.Fatalf("plain bubble = %v, want no ↳ line", plain)
+	}
+}
+
 func TestChatBubbleAlignmentOwnRightIncomingLeft(t *testing.T) {
 	now := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
 	r := lipgloss.NewRenderer(io.Discard)
