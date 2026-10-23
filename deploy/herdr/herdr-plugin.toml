@@ -32,6 +32,17 @@ description = "Open, focus or close the bunker side panel"
 contexts = ["workspace"]
 command = ["bunker", "herdr", "toggle"]
 
+# Same toggle but in every tab of the workspace at once: tabs without the
+# panel get one (the already-open ones keep addressing them), and when no
+# tab is missing it closes every panel instead. One, or per-tab, daily
+# toggle stays "bunker.toggle".
+[[actions]]
+id = "everywhere"
+title = "Toggle bunker in every tab"
+description = "Fill or close the bunker side panel in every tab"
+contexts = ["workspace"]
+command = ["bunker", "herdr", "everywhere"]
+
 # A new mail prefilled from a mailto: URL, as a popup over the layout:
 # "bunker compose" quits when the message is sent or Esc closes the
 # editor, and herdr closes the popup with it. The URL arrives as

@@ -35,6 +35,19 @@ type = "plugin_action"
 command = "bunker.toggle"
 ```
 
+The plugin also adds `bunker.everywhere`, which runs
+`bunker herdr everywhere` and applies the same toggle to every tab of
+the workspace at once — tabs without a bunker panel get one (the ones
+that already had it keep theirs), and when no tab is missing, it closes
+every panel. Bind it beside the per-tab toggle:
+
+```toml
+[[keys.command]]
+key = "prefix+shift+e"
+type = "plugin_action"
+command = "bunker.everywhere"
+```
+
 The panel runs `bunker sidebar`, a compact list for a narrow column:
 the channels with their unread counts, then the conversations of the
 selected one: each shows its name and unread badge, and under it the
