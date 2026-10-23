@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.24.0](https://github.com/reyer3/bunker-go/compare/v0.23.0...v0.24.0) (2026-10-23)
+
+
+### Features
+
+* **herdr:** bunker omnipresente con 'bunker herdr everywhere' ([#168](https://github.com/reyer3/bunker-go/issues/168)) ([5420f94](https://github.com/reyer3/bunker-go/commit/5420f94f87056494ef0630232a056a21368f4fc7))
+* **mail:** adjuntos inline (CID) del cuerpo del correo ([#172](https://github.com/reyer3/bunker-go/issues/172)) ([0f455dd](https://github.com/reyer3/bunker-go/commit/0f455dda594631842950f72037b0e18d6415384c))
+* **matrix:** hilos de Element y contexto de respuesta en el chat ([#166](https://github.com/reyer3/bunker-go/issues/166)) ([dafff97](https://github.com/reyer3/bunker-go/commit/dafff9772ab6aeb16383b092342e9e550d6d89ca))
+
 ## [0.23.0](https://github.com/reyer3/bunker-go/compare/v0.22.0...v0.23.0) (2026-10-07)
 
 
