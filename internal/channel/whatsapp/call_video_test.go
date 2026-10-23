@@ -57,7 +57,11 @@ func TestVideoCheckRejectsMissingCaptureHelper(t *testing.T) {
 func TestRemoteVideoStartsOnVideoCall(t *testing.T) {
 	a, engine, _, _ := newCallAdapter(t)
 	t.Cleanup(a.hangupAll)
-	v := commandVideo{playback: []string{"mpv", "-"}, capture: []string{"ffmpeg", "-"}}
+	// Fake helpers instead of mpv/ffmpeg: the gate runs on every
+	// environment, including CI runners without video players. The playback
+	// one must keep reading stdin (the sink receives Annex-B bytes) and the
+	// capture one must just exit cleanly so the command pipe reports EOF.
+	v := commandVideo{playback: []string{"sh", "-c", "cat > /dev/null"}, capture: []string{"sh", "-c", "exit 0"}}
 	a.callVideo = v
 
 	live := &fakeLiveCall{id: "VID1", peer: callPeer, video: true}
