@@ -172,6 +172,20 @@ func runDaemon(ctx context.Context, stateDir, avatarCacheDir, socketPath string,
 	svc.SetBoardNotifier(notifyBoard)
 	boardSvc.SetBoardNotifier(notifyBoard)
 
+	// Consumir los deltas que llegan del otro lado (relay y P2P) y
+	// aplicarlos en el store local: la mitad receptora de la
+	// sincronizacion. Se conecta tal cual el consumer de boardSync, y
+	// member.join no aplica nada (el relay solo registra al cliente).
+	syncBoard := boardSyncConsumer(st, svc, stderr)
+	boardRelay.OnMessage(func(msg relay.RelayMessage) {
+		syncBoard(msg.BoardID, msg.MemberID, msg.Type, msg.Payload, msg.Timestamp, msg.Version)
+	})
+	if peer != nil {
+		peer.OnInbound(func(msg p2p.RelayMessage) {
+			syncBoard(msg.BoardID, msg.MemberID, msg.Type, msg.Payload, msg.Timestamp, msg.Version)
+		})
+	}
+
 	srv := rpc.NewServer(svc)
 
 	wg := startAdapters(ctx, reg, st, stdout, stderr, health)

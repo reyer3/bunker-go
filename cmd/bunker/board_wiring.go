@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
 
 	"github.com/reyer3/bunker-go/internal/board"
@@ -37,6 +38,69 @@ func encryptBoardDelta(st core.BoardStore, ev core.BoardEvent) ([]byte, error) {
 	}
 	crypto.SetPeerKey(b.EncryptionKey)
 	return crypto.Encrypt(ev.Payload)
+}
+
+// syncableDeltaType dice si un tipo de mensaje del transporte transporta un
+// delta aplicable. member.join no es un delta (es el registro del cliente
+// en el relay) y los tipos desconocidos se descartan en silencio.
+func syncableDeltaType(typ string) bool {
+	switch typ {
+	case "task.create", "task.move", "task.done", "task.comment":
+		return true
+	}
+	return false
+}
+
+// boardSyncConsumer devuelve la función que el daemon conecta a
+// Relay.OnMessage y Node.OnInbound: descifra el delta entrante con la clave
+// simétrica del board (la misive que el dispositivo emisor usó) y lo aplica
+// en el store local vía Service.ApplyBoardEvent. member.join y los otros
+// tipos no aplicables no tocan el store; errores de clave o store van al
+// stderr sin bloquear la sincronización del resto.
+func boardSyncConsumer(st core.BoardStore, svc *core.Service, stderr io.Writer) func(boardID, memberID, typ string, payload []byte, timestamp int64, version int) {
+	return func(boardID, memberID, typ string, payload []byte, timestamp int64, version int) {
+		if !syncableDeltaType(typ) {
+			return
+		}
+		plain, derr := decryptBoardDelta(st, boardID, payload)
+		if derr != nil && !errors.Is(derr, errNoBoardKey) {
+			fmt.Fprintf(stderr, "bunker: board %s: recibir %s: %v\n", boardID, typ, derr)
+			return
+		}
+		ev := core.BoardEvent{
+			BoardID:   boardID,
+			MemberID:  memberID,
+			Type:      typ,
+			Payload:   plain,
+			Timestamp: timestamp,
+			Version:   version,
+		}
+		if aerr := svc.ApplyBoardEvent(ev); aerr != nil {
+			fmt.Fprintf(stderr, "bunker: board %s: aplicar %s: %v\n", boardID, typ, aerr)
+		}
+	}
+}
+
+// decryptBoardDelta descifra un payload de transporte con la clave del
+// board. Un board sin clave nunca prometió E2EE: el payload vuelve tal cual
+// (espejo exacto de encryptBoardDelta).
+func decryptBoardDelta(st core.BoardStore, boardID string, payload []byte) ([]byte, error) {
+	if len(payload) == 0 {
+		return payload, errNoBoardKey
+	}
+	b, err := st.GetBoard(boardID)
+	if err != nil {
+		return nil, fmt.Errorf("board %s: %w", boardID, err)
+	}
+	if len(b.EncryptionKey) == 0 {
+		return payload, errNoBoardKey
+	}
+	crypto, err := board.NewBoardCrypto()
+	if err != nil {
+		return nil, fmt.Errorf("board %s: cifrador: %w", boardID, err)
+	}
+	crypto.SetPeerKey(b.EncryptionKey)
+	return crypto.Decrypt(payload)
 }
 
 // boardSvc is the shared-boards (kanban) service. runDaemon assigns it

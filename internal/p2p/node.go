@@ -52,7 +52,20 @@ type Node struct {
 	host   host.Host
 	mu     sync.Mutex
 	subs   map[string]chan<- []byte // boardID -> canal de payloads entrantes
-	logger *slog.Logger
+	// inbound es el receptor de los mensajes que LLEGAN por stream de un
+	// peer, con board/miembro/tipo incluidos: el daemon lo conecta al motor
+	// de aplicar (decrypt + Store). Los mensajes que este nodo publica con
+	// Publish no pasan por aquí (anti-eco).
+	inbound func(RelayMessage)
+	logger  *slog.Logger
+}
+
+// OnInbound registra la función que recibe cada mensaje completo que llega
+// desde un peer por /bunker/board/1.0.0. Solo una función; nil desactiva.
+func (n *Node) OnInbound(fn func(RelayMessage)) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.inbound = fn
 }
 
 // NewNode crea un nodo libp2p que escucha en listenAddr (ej. "/ip4/0.0.0.0/tcp/0").
@@ -226,7 +239,14 @@ func (n *Node) handleStream(s network.Stream) {
 
 	n.mu.Lock()
 	ch, ok := n.subs[msg.BoardID]
+	hook := n.inbound
 	n.mu.Unlock()
+
+	// Dar el mensaje completo al consumidor (apply del daemon) SIEMPRE, y
+	// además al suscriptor del board si lo hay.
+	if hook != nil {
+		hook(msg)
+	}
 	if !ok {
 		return // nadie suscrito a este board en este nodo
 	}
