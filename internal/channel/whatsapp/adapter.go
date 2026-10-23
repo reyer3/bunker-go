@@ -78,6 +78,9 @@ type Adapter struct {
 	callMu      sync.Mutex
 	calls       callEngine
 	callAudio   callAudio
+	callSession mediaSession
+	headless    headlessMode
+	callVideo   commandVideo
 	liveCalls   map[string]*callRecord
 	placingCall bool
 	// callAfter replaces time.AfterFunc for the no-media watchdog, so

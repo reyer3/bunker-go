@@ -106,9 +106,10 @@ type Caller interface {
 	ActiveCalls() []Call
 }
 
-// PlaceCall starts a voice call to to on channel/account. dryRun returns
-// the Plan alone and never touches the network.
-func (s *Service) PlaceCall(ctx context.Context, channel Channel, account, to string, dryRun bool) (Plan, Call, error) {
+// PlaceCall starts a voice or video call to to on channel/account. dryRun
+// returns the Plan alone and never touches the network. video places a
+// video call (WhatsApp only; the peer must offer video).
+func (s *Service) PlaceCall(ctx context.Context, channel Channel, account, to string, video, dryRun bool) (Plan, Call, error) {
 	to = strings.TrimSpace(to)
 	if to == "" {
 		return Plan{}, Call{}, fmt.Errorf("core: call: no recipient given")
@@ -123,6 +124,9 @@ func (s *Service) PlaceCall(ctx context.Context, channel Channel, account, to st
 		Account:    account,
 		Target:     to,
 		Recipients: []string{to},
+	}
+	if video {
+		plan.Action = "call video"
 	}
 	if dryRun {
 		return plan, Call{}, nil

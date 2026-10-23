@@ -32,6 +32,12 @@ type fakeLiveCall struct {
 	// tell the camera was turned off only after the call was answered.
 	events   []string
 	videoErr error // SetVideoEnabled's answer
+	// videoSink is the sink attached by ReceiveVideo, if any.
+	videoSink meowcaller.VideoSink
+	// videoSent records access units pushed via SendVideo, for tests.
+	videoSent [][]byte
+	// onVideoKeyframeRequest is the callback registered by OnVideoKeyframeRequest.
+	onVideoKeyframeRequest func()
 }
 
 func (c *fakeLiveCall) ID() string      { return c.id }
@@ -88,6 +94,16 @@ func (c *fakeLiveCall) OnPeerAccept(fn func()) {
 func (c *fakeLiveCall) OnEnd(fn func(string)) { c.onEnd = fn }
 func (c *fakeLiveCall) AttachAudio(src meowcaller.AudioSource, sink meowcaller.AudioSink) {
 	c.src, c.sink = src, sink
+}
+func (c *fakeLiveCall) ReceiveVideo(sink meowcaller.VideoSink) {
+	c.videoSink = sink
+}
+func (c *fakeLiveCall) SendVideo(accessUnit []byte) error {
+	c.videoSent = append(c.videoSent, accessUnit)
+	return nil
+}
+func (c *fakeLiveCall) OnVideoKeyframeRequest(fn func()) {
+	c.onVideoKeyframeRequest = fn
 }
 func (c *fakeLiveCall) maybeEnd(reason string) {
 	if c.endOnHangup && c.onEnd != nil {
@@ -149,7 +165,7 @@ func newCallAdapter(t *testing.T) (*Adapter, *fakeCallEngine, *fakeCallAudio, *s
 	a.sink = sink
 	engine := &fakeCallEngine{}
 	audio := &fakeCallAudio{}
-	a.EnableCalls(engine, audio)
+	a.EnableCalls(engine, audio, nilHeadless{}, nilMediaSession{})
 	return a, engine, audio, sink
 }
 

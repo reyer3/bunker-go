@@ -35,19 +35,6 @@ type = "plugin_action"
 command = "bunker.toggle"
 ```
 
-The plugin also adds the `bunker.everywhere` action, which runs
-`bunker herdr everywhere`: it opens the panel in every tab that does not
-have it (only the current tab's new panel takes focus), and once no tab
-is missing it, closes it everywhere. Tabs created afterwards are not
-covered — run the action again. Bind it once, e.g.
-
-```toml
-[[keys.command]]
-key = "prefix+shift+e"
-type = "plugin_action"
-command = "bunker.everywhere"
-```
-
 The panel runs `bunker sidebar`, a compact list for a narrow column:
 the channels with their unread counts, then the conversations of the
 selected one: each shows its name and unread badge, and under it the

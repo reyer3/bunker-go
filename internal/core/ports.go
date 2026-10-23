@@ -154,7 +154,12 @@ type Outgoing struct {
 	// cannot address more than one recipient (WhatsApp, Matrix) must
 	// reject any non-empty Cc with ErrUnsupported instead of silently
 	// dropping it.
-	Cc          []string
+	Cc []string
+	// Bcc lists hidden recipients that receive a copy but must never
+	// appear in the message's headers or body. A channel that cannot
+	// address more than one recipient (WhatsApp, Matrix) must reject any
+	// non-empty Bcc with ErrUnsupported instead of silently dropping it.
+	Bcc         []string
 	Thread      string
 	ReplyTo     string // item id being replied to, empty for a fresh send
 	Subject     string
@@ -518,6 +523,12 @@ type Plan struct {
 	// Target (which lists To) so a JSON consumer that only reads Target
 	// keeps working unchanged. Empty for actions that carry no Cc.
 	Cc []string `json:"cc,omitempty"`
+	// Bcc lists the Bcc recipients of a send/reply, kept separate from
+	// Target and Cc so a JSON consumer that only reads those fields keeps
+	// working unchanged. Empty for actions that carry no Bcc. Bcc is
+	// inspectable in the initiating caller's confirmation plan but must
+	// never appear in observer output, routine logs or delivery errors.
+	Bcc []string `json:"bcc,omitempty"`
 	// Subject is the message subject shown for operator/approval
 	// visibility: for send, out.Subject as given (empty when none); for
 	// reply, the original item's subject with a "Re: " prefix computed by
@@ -556,6 +567,20 @@ type Plan struct {
 	// Both serialize as integer nanoseconds (time.Duration's JSON form).
 	FanoutPauseMin time.Duration `json:"fanout_pause_min,omitempty"`
 	FanoutPauseMax time.Duration `json:"fanout_pause_max,omitempty"`
+	// RiskLevel estimates how risky this send/reply is: "bajo" (texto a un
+	// destinatario conocido), "medio" (varios destinatarios o adjuntos),
+	// "alto" (broadcast o respuesta a hilo largo). Empty when the channel
+	// does not carry enough information to compute it.
+	RiskLevel string `json:"risk_level,omitempty"`
+	// SuggestedConfirmation is human-readable text the agent or CLI can
+	// show before asking for confirm. Empty when no special confirmation
+	// wording is needed.
+	SuggestedConfirmation string `json:"suggested_confirmation,omitempty"`
+	// EstimatedSideEffects describes what this send/reply would change in
+	// the store or on the channel (e.g. "creates sent item", "marks thread
+	// read", "sends read receipt"). Empty when there are no side effects
+	// beyond delivering the message.
+	EstimatedSideEffects string `json:"estimated_side_effects,omitempty"`
 }
 
 // Store is the read/write persistence port the Service depends on. It

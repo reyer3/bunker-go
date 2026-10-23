@@ -22,7 +22,7 @@ func TestClientCallMethods(t *testing.T) {
 	}
 	// The fake mail adapter is no core.Caller: the sentinel must survive
 	// the wire so the CLI can tell "unsupported" apart from a failure.
-	if _, _, err := client.PlaceCall(ctx, core.ChannelMail, "cl", "x@y.cl", true); !errors.Is(err, core.ErrUnsupported) {
+	if _, _, err := client.PlaceCall(ctx, core.ChannelMail, "cl", "x@y.cl", false, true); !errors.Is(err, core.ErrUnsupported) {
 		t.Fatalf("PlaceCall = %v, want ErrUnsupported", err)
 	}
 	if _, _, err := client.ControlCall(ctx, "nope", core.CallHangup, false); !errors.Is(err, core.ErrNotFound) {

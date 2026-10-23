@@ -390,7 +390,7 @@ func TestServiceReplyDryRunNeverCallsAdapter(t *testing.T) {
 	reg.Register(spy)
 	svc := core.NewService(store, reg)
 
-	plan, receipt, err := svc.Reply(context.Background(), item.ID, "reply body", nil, nil, true)
+	plan, receipt, err := svc.Reply(context.Background(), item.ID, "reply body", nil, nil, nil, true)
 	if err != nil {
 		t.Fatalf("Reply dry-run returned error: %v", err)
 	}
@@ -420,7 +420,7 @@ func TestServiceReplyExecutesAndReturnsReceipt(t *testing.T) {
 	reg.Register(spy)
 	svc := core.NewService(store, reg)
 
-	plan, receipt, err := svc.Reply(context.Background(), item.ID, "reply body", nil, nil, false)
+	plan, receipt, err := svc.Reply(context.Background(), item.ID, "reply body", nil, nil, nil, false)
 	if err != nil {
 		t.Fatalf("Reply returned error: %v", err)
 	}
@@ -456,7 +456,7 @@ func TestServiceReplyStoresSentItemAsFromMe(t *testing.T) {
 	reg.Register(spy)
 	svc := core.NewService(store, reg)
 
-	_, receipt, err := svc.Reply(context.Background(), item.ID, "reply body", nil, nil, false)
+	_, receipt, err := svc.Reply(context.Background(), item.ID, "reply body", nil, nil, nil, false)
 	if err != nil {
 		t.Fatalf("Reply returned error: %v", err)
 	}
@@ -492,7 +492,7 @@ func TestServiceReplyMailNeverStoresSentItem(t *testing.T) {
 	reg.Register(spy)
 	svc := core.NewService(store, reg)
 
-	if _, _, err := svc.Reply(context.Background(), item.ID, "reply body", nil, nil, false); err != nil {
+	if _, _, err := svc.Reply(context.Background(), item.ID, "reply body", nil, nil, nil, false); err != nil {
 		t.Fatalf("Reply returned error: %v", err)
 	}
 	if len(store.items) != 1 {
@@ -517,7 +517,7 @@ func TestServiceReplyWithCcSetsOutgoingCcAndPlan(t *testing.T) {
 	svc := core.NewService(store, reg)
 
 	cc := []string{"cc1@x.cl", "cc2@x.cl"}
-	plan, _, err := svc.Reply(context.Background(), item.ID, "body", cc, nil, false)
+	plan, _, err := svc.Reply(context.Background(), item.ID, "body", cc, nil, nil, false)
 	if err != nil {
 		t.Fatalf("Reply returned error: %v", err)
 	}
@@ -529,12 +529,41 @@ func TestServiceReplyWithCcSetsOutgoingCcAndPlan(t *testing.T) {
 	}
 }
 
+// TestServiceReplyWithBccSetsOutgoingBccAndPlan covers T2: a reply may carry
+// Bcc recipients, which must reach the adapter's Outgoing.Bcc and be visible
+// in the Plan (for the initiating caller), but never in message headers.
+func TestServiceReplyWithBccSetsOutgoingBccAndPlan(t *testing.T) {
+	item := core.Item{
+		ID:      "mail:cl:1",
+		Channel: core.ChannelMail,
+		Account: "cl",
+		From:    core.Address{ID: "them@x.cl"},
+	}
+	store := newMemStore(item)
+	reg := core.NewRegistry()
+	spy := &spyAdapter{channel: core.ChannelMail, account: "cl"}
+	reg.Register(spy)
+	svc := core.NewService(store, reg)
+
+	bcc := []string{"bcc1@x.cl", "bcc2@x.cl"}
+	plan, _, err := svc.Reply(context.Background(), item.ID, "body", nil, bcc, nil, false)
+	if err != nil {
+		t.Fatalf("Reply returned error: %v", err)
+	}
+	if len(spy.lastOutgoing.Bcc) != 2 || spy.lastOutgoing.Bcc[0] != "bcc1@x.cl" || spy.lastOutgoing.Bcc[1] != "bcc2@x.cl" {
+		t.Fatalf("adapter Outgoing.Bcc = %+v, want %+v", spy.lastOutgoing.Bcc, bcc)
+	}
+	if len(plan.Bcc) != 2 || plan.Bcc[0] != "bcc1@x.cl" || plan.Bcc[1] != "bcc2@x.cl" {
+		t.Fatalf("plan.Bcc = %+v, want %+v", plan.Bcc, bcc)
+	}
+}
+
 func TestServiceReplyUnknownIDReturnsErrNotFound(t *testing.T) {
 	store := newMemStore()
 	reg := core.NewRegistry()
 	svc := core.NewService(store, reg)
 
-	_, _, err := svc.Reply(context.Background(), "mail:cl:missing", "x", nil, nil, true)
+	_, _, err := svc.Reply(context.Background(), "mail:cl:missing", "x", nil, nil, nil, true)
 	if !errors.Is(err, core.ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
@@ -547,7 +576,7 @@ func TestServiceReplyUnsupportedCapability(t *testing.T) {
 	reg.Register(bareAdapter{channel: core.ChannelMail, account: "cl"})
 	svc := core.NewService(store, reg)
 
-	_, _, err := svc.Reply(context.Background(), item.ID, "x", nil, nil, true)
+	_, _, err := svc.Reply(context.Background(), item.ID, "x", nil, nil, nil, true)
 	if !errors.Is(err, core.ErrUnsupported) {
 		t.Fatalf("err = %v, want ErrUnsupported", err)
 	}
@@ -565,7 +594,7 @@ func TestServiceReplyMediaRequiresMediaSenderCapability(t *testing.T) {
 	svc := core.NewService(store, reg)
 
 	path := writeTestFile(t, "pic.png", pngSignatureBytes)
-	_, _, err := svc.Reply(context.Background(), item.ID, "x", nil, []string{path}, false)
+	_, _, err := svc.Reply(context.Background(), item.ID, "x", nil, nil, []string{path}, false)
 	if !errors.Is(err, core.ErrUnsupported) {
 		t.Fatalf("err = %v, want ErrUnsupported", err)
 	}
@@ -586,7 +615,7 @@ func TestServiceReplyMediaDryRunNeverCallsAdapter(t *testing.T) {
 	svc := core.NewService(store, reg)
 
 	path := writeTestFile(t, "pic.png", pngSignatureBytes)
-	plan, receipt, err := svc.Reply(context.Background(), item.ID, "mira", nil, []string{path}, true)
+	plan, receipt, err := svc.Reply(context.Background(), item.ID, "mira", nil, nil, []string{path}, true)
 	if err != nil {
 		t.Fatalf("Reply dry-run returned error: %v", err)
 	}
@@ -613,7 +642,7 @@ func TestServiceReplyMediaExecutesUsesMediaSender(t *testing.T) {
 	svc := core.NewService(store, reg)
 
 	path := writeTestFile(t, "pic.png", pngSignatureBytes)
-	_, receipt, err := svc.Reply(context.Background(), item.ID, "mira", nil, []string{path}, false)
+	_, receipt, err := svc.Reply(context.Background(), item.ID, "mira", nil, nil, []string{path}, false)
 	if err != nil {
 		t.Fatalf("Reply returned error: %v", err)
 	}
@@ -807,6 +836,233 @@ func TestServiceSendIncludesCcInOutgoingAndPlan(t *testing.T) {
 	}
 	if len(plan.Cc) != 1 || plan.Cc[0] != "e@f.cl" {
 		t.Fatalf("plan.Cc = %+v, want [e@f.cl]", plan.Cc)
+	}
+}
+
+// TestServiceSendIncludesBccInOutgoingAndPlan covers T2: a send may carry
+// Bcc recipients, which must reach the adapter's Outgoing.Bcc and be visible
+// in the Plan (for the initiating caller), but never in message headers.
+func TestServiceSendIncludesBccInOutgoingAndPlan(t *testing.T) {
+	store := newMemStore()
+	reg := core.NewRegistry()
+	spy := &spyAdapter{channel: core.ChannelMail, account: "cl"}
+	reg.Register(spy)
+	svc := core.NewService(store, reg)
+
+	out := core.Outgoing{
+		Channel: core.ChannelMail,
+		Account: "cl",
+		To:      []string{"a@b.cl"},
+		Bcc:     []string{"bcc1@x.cl", "bcc2@x.cl"},
+		Body:    "hi",
+	}
+	plan, _, err := svc.Send(context.Background(), out, false)
+	if err != nil {
+		t.Fatalf("Send returned error: %v", err)
+	}
+	if len(spy.lastOutgoing.Bcc) != 2 || spy.lastOutgoing.Bcc[0] != "bcc1@x.cl" || spy.lastOutgoing.Bcc[1] != "bcc2@x.cl" {
+		t.Fatalf("adapter Outgoing.Bcc = %+v, want [bcc1@x.cl bcc2@x.cl]", spy.lastOutgoing.Bcc)
+	}
+	if len(plan.Bcc) != 2 || plan.Bcc[0] != "bcc1@x.cl" || plan.Bcc[1] != "bcc2@x.cl" {
+		t.Fatalf("plan.Bcc = %+v, want [bcc1@x.cl bcc2@x.cl]", plan.Bcc)
+	}
+}
+
+// TestServiceSendFanoutRejectsBccBeforeSendingAnything covers T2: a chat
+// broadcast with Bcc must be rejected up front, not silently dropped.
+func TestServiceSendFanoutRejectsBccBeforeSendingAnything(t *testing.T) {
+	store := newMemStore()
+	reg := core.NewRegistry()
+	spy := &spyAdapter{channel: core.ChannelWhatsApp, account: "wa"}
+	reg.Register(spy)
+	svc := core.NewService(store, reg)
+
+	out := core.Outgoing{
+		Channel: core.ChannelWhatsApp,
+		Account: "wa",
+		To:      []string{"+51111", "+51222"},
+		Bcc:     []string{"+51333"},
+		Body:    "hi",
+	}
+	_, _, err := svc.Send(context.Background(), out, false)
+	if !errors.Is(err, core.ErrUnsupported) {
+		t.Fatalf("err = %v, want ErrUnsupported for Bcc on a broadcast", err)
+	}
+	if spy.sendCalls != 0 {
+		t.Fatalf("adapter.Send called %d times, want 0 (Bcc broadcast rejected before anything sends)", spy.sendCalls)
+	}
+}
+
+// TestServiceSendRiskLevelSimple is part of the dry-run enrichment (agent
+// decision support): a simple text send to one recipient is "bajo" risk.
+func TestServiceSendRiskLevelSimple(t *testing.T) {
+	store := newMemStore()
+	reg := core.NewRegistry()
+	spy := &spyAdapter{channel: core.ChannelMail, account: "cl"}
+	reg.Register(spy)
+	svc := core.NewService(store, reg)
+
+	out := core.Outgoing{
+		Channel: core.ChannelMail,
+		Account: "cl",
+		To:      []string{"a@b.cl"},
+		Body:    "hi",
+	}
+	plan, _, err := svc.Send(context.Background(), out, false)
+	if err != nil {
+		t.Fatalf("Send returned error: %v", err)
+	}
+	if plan.RiskLevel != "bajo" {
+		t.Fatalf("plan.RiskLevel = %q, want %q", plan.RiskLevel, "bajo")
+	}
+	if plan.SuggestedConfirmation != "" {
+		t.Fatalf("plan.SuggestedConfirmation = %q, want empty for bajo risk", plan.SuggestedConfirmation)
+	}
+	if plan.EstimatedSideEffects == "" {
+		t.Fatalf("plan.EstimatedSideEffects is empty, want a non-empty description")
+	}
+}
+
+// TestServiceSendRiskLevelMediumWithAttachments is part of the dry-run
+// enrichment: a send with attachments is "medio" risk.
+func TestServiceSendRiskLevelMediumWithAttachments(t *testing.T) {
+	store := newMemStore()
+	reg := core.NewRegistry()
+	policy := core.AttachmentPolicy{MaxBytes: map[string]int64{core.AnyMIME: 1 << 20}}
+	spy := &spyMediaAdapter{spyAdapter: spyAdapter{channel: core.ChannelMail, account: "cl"}, policy: policy}
+	reg.Register(spy)
+	svc := core.NewService(store, reg)
+
+	path := writeTestFile(t, "report.pdf", []byte("%PDF-1.4 fake pdf"))
+	out := core.Outgoing{
+		Channel:     core.ChannelMail,
+		Account:     "cl",
+		To:          []string{"a@b.cl"},
+		Body:        "hi",
+		Attachments: []string{path},
+	}
+	plan, _, err := svc.Send(context.Background(), out, false)
+	if err != nil {
+		t.Fatalf("Send returned error: %v", err)
+	}
+	if plan.RiskLevel != "medio" {
+		t.Fatalf("plan.RiskLevel = %q, want %q", plan.RiskLevel, "medio")
+	}
+	if plan.SuggestedConfirmation == "" {
+		t.Fatal("plan.SuggestedConfirmation is empty, want confirmation text for medio risk")
+	}
+	if !strings.Contains(plan.EstimatedSideEffects, "adjunta") {
+		t.Fatalf("plan.EstimatedSideEffects = %q, want to mention attachment", plan.EstimatedSideEffects)
+	}
+}
+
+// TestServiceSendRiskLevelHighBroadcast is part of the dry-run enrichment:
+// a send to multiple recipients is "alto" risk.
+func TestServiceSendRiskLevelHighBroadcast(t *testing.T) {
+	store := newMemStore()
+	reg := core.NewRegistry()
+	spy := &spyAdapter{channel: core.ChannelMail, account: "cl"}
+	reg.Register(spy)
+	svc := core.NewService(store, reg)
+
+	out := core.Outgoing{
+		Channel: core.ChannelMail,
+		Account: "cl",
+		To:      []string{"a@b.cl", "c@d.cl", "e@f.cl"},
+		Body:    "hi",
+	}
+	plan, _, err := svc.Send(context.Background(), out, false)
+	if err != nil {
+		t.Fatalf("Send returned error: %v", err)
+	}
+	if plan.RiskLevel != "alto" {
+		t.Fatalf("plan.RiskLevel = %q, want %q", plan.RiskLevel, "alto")
+	}
+	if plan.SuggestedConfirmation == "" {
+		t.Fatal("plan.SuggestedConfirmation is empty, want confirmation text for alto risk")
+	}
+	if !strings.Contains(plan.EstimatedSideEffects, "3 destinatarios") {
+		t.Fatalf("plan.EstimatedSideEffects = %q, want to mention 3 recipients", plan.EstimatedSideEffects)
+	}
+}
+
+// TestServiceSendRiskLevelMediumWithCc is part of the dry-run enrichment:
+// a send with Cc is "medio" risk.
+func TestServiceSendRiskLevelMediumWithCc(t *testing.T) {
+	store := newMemStore()
+	reg := core.NewRegistry()
+	spy := &spyAdapter{channel: core.ChannelMail, account: "cl"}
+	reg.Register(spy)
+	svc := core.NewService(store, reg)
+
+	out := core.Outgoing{
+		Channel: core.ChannelMail,
+		Account: "cl",
+		To:      []string{"a@b.cl"},
+		Cc:      []string{"c@d.cl"},
+		Body:    "hi",
+	}
+	plan, _, err := svc.Send(context.Background(), out, false)
+	if err != nil {
+		t.Fatalf("Send returned error: %v", err)
+	}
+	if plan.RiskLevel != "medio" {
+		t.Fatalf("plan.RiskLevel = %q, want %q", plan.RiskLevel, "medio")
+	}
+}
+
+// TestServiceReplyRiskLevelSimple is part of the dry-run enrichment: a
+// simple reply is "bajo" risk.
+func TestServiceReplyRiskLevelSimple(t *testing.T) {
+	item := core.Item{
+		ID:      "mail:cl:1",
+		Channel: core.ChannelMail,
+		Account: "cl",
+		From:    core.Address{ID: "them@x.cl"},
+	}
+	store := newMemStore(item)
+	reg := core.NewRegistry()
+	spy := &spyAdapter{channel: core.ChannelMail, account: "cl"}
+	reg.Register(spy)
+	svc := core.NewService(store, reg)
+
+	plan, _, err := svc.Reply(context.Background(), item.ID, "body", nil, nil, nil, false)
+	if err != nil {
+		t.Fatalf("Reply returned error: %v", err)
+	}
+	if plan.RiskLevel != "bajo" {
+		t.Fatalf("plan.RiskLevel = %q, want %q", plan.RiskLevel, "bajo")
+	}
+	if plan.EstimatedSideEffects == "" {
+		t.Fatalf("plan.EstimatedSideEffects is empty, want a non-empty description")
+	}
+}
+
+// TestServiceReplyRiskLevelMediumWithAttachments is part of the dry-run
+// enrichment: a reply with attachments is "medio" risk.
+func TestServiceReplyRiskLevelMediumWithAttachments(t *testing.T) {
+	item := core.Item{
+		ID:      "mail:cl:1",
+		Channel: core.ChannelMail,
+		Account: "cl",
+		From:    core.Address{ID: "them@x.cl"},
+	}
+	store := newMemStore(item)
+	reg := core.NewRegistry()
+	spy := &spyMediaAdapter{spyAdapter: spyAdapter{channel: core.ChannelMail, account: "cl"}, policy: imagePolicy(1 << 20)}
+	reg.Register(spy)
+	svc := core.NewService(store, reg)
+
+	path := writeTestFile(t, "pic.png", pngSignatureBytes)
+	plan, _, err := svc.Reply(context.Background(), item.ID, "body", nil, nil, []string{path}, false)
+	if err != nil {
+		t.Fatalf("Reply returned error: %v", err)
+	}
+	if plan.RiskLevel != "medio" {
+		t.Fatalf("plan.RiskLevel = %q, want %q", plan.RiskLevel, "medio")
+	}
+	if !strings.Contains(plan.EstimatedSideEffects, "adjunta") {
+		t.Fatalf("plan.EstimatedSideEffects = %q, want to mention attachment", plan.EstimatedSideEffects)
 	}
 }
 

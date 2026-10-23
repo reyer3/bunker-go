@@ -327,6 +327,69 @@ func TestMCPSendWhenAllowed(t *testing.T) {
 	}
 }
 
+// TestMCPSendWithCcAndBcc covers T4: MCP send carries Cc and Bcc to the
+// backend's Outgoing, and the dry-run plan lists them.
+func TestMCPSendWithCcAndBcc(t *testing.T) {
+	backend := mcpBackend()
+	s := mcpSession(t, backend, false)
+
+	res, _ := callTool(t, s, "send", map[string]any{
+		"channel": "mail", "account": "cl", "to": "jose@example.cl",
+		"text": "hola",
+		"cc":   []any{"ana@example.cl"},
+		"bcc":  []any{"beto@example.cl", "carla@example.cl"},
+	})
+	if res.IsError {
+		t.Fatalf("send with cc/bcc should plan: %s", toolText(res))
+	}
+	if len(backend.sendCalls) != 1 {
+		t.Fatalf("sendCalls = %d, want 1", len(backend.sendCalls))
+	}
+	sent := backend.sendCalls[0]
+	if len(sent.Cc) != 1 || sent.Cc[0] != "ana@example.cl" {
+		t.Fatalf("Outgoing.Cc = %+v, want [ana@example.cl]", sent.Cc)
+	}
+	if len(sent.Bcc) != 2 || sent.Bcc[0] != "beto@example.cl" || sent.Bcc[1] != "carla@example.cl" {
+		t.Fatalf("Outgoing.Bcc = %+v, want [beto@example.cl carla@example.cl]", sent.Bcc)
+	}
+	for _, dry := range backend.sendDryRuns {
+		if !dry {
+			t.Fatal("a plans-only server sent for real")
+		}
+	}
+}
+
+// TestMCPReplyWithCcAndBcc covers T4: MCP reply carries Cc and Bcc to the
+// backend.
+func TestMCPReplyWithCcAndBcc(t *testing.T) {
+	backend := mcpBackend()
+	// Add a mail item to reply to.
+	backend.items["mail:cl:1"] = core.Item{
+		ID: "mail:cl:1", Channel: core.ChannelMail, Account: "cl",
+		From: core.Address{ID: "them@example.cl"},
+	}
+	s := mcpSession(t, backend, false)
+
+	res, _ := callTool(t, s, "reply", map[string]any{
+		"id": "mail:cl:1", "text": "listo",
+		"cc":  []any{"ana@example.cl"},
+		"bcc": []any{"beto@example.cl"},
+	})
+	if res.IsError {
+		t.Fatalf("reply with cc/bcc should plan: %s", toolText(res))
+	}
+	if len(backend.replyCalls) != 1 {
+		t.Fatalf("replyCalls = %d, want 1", len(backend.replyCalls))
+	}
+	rc := backend.replyCalls[0]
+	if len(rc.Cc) != 1 || rc.Cc[0] != "ana@example.cl" {
+		t.Fatalf("reply Cc = %+v, want [ana@example.cl]", rc.Cc)
+	}
+	if len(rc.Bcc) != 1 || rc.Bcc[0] != "beto@example.cl" {
+		t.Fatalf("reply Bcc = %+v, want [beto@example.cl]", rc.Bcc)
+	}
+}
+
 func TestMCPDaemonDown(t *testing.T) {
 	dial := func(context.Context) (Backend, io.Closer, error) {
 		return nil, nil, errors.New("cannot reach bunker daemon")
@@ -437,4 +500,194 @@ func mustJSON(t *testing.T, v any) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+// TestMCPResourceUnread reads the bunker://unread resource and verifies it
+// returns counts per channel and account.
+func TestMCPResourceUnread(t *testing.T) {
+	backend := mcpBackend()
+	s := mcpSession(t, backend, false)
+
+	result, err := s.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: "bunker://unread"})
+	if err != nil {
+		t.Fatalf("ReadResource unread: %v", err)
+	}
+	if len(result.Contents) != 1 {
+		t.Fatalf("expected 1 content, got %d", len(result.Contents))
+	}
+	if !strings.Contains(result.Contents[0].Text, "personal") {
+		t.Fatalf("expected personal in unread counts, got %s", result.Contents[0].Text)
+	}
+}
+
+// TestMCPResourceUnknownURI returns an error for unknown resource URIs.
+func TestMCPResourceUnknownURI(t *testing.T) {
+	backend := mcpBackend()
+	s := mcpSession(t, backend, false)
+
+	_, err := s.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: "bunker://unknown"})
+	if err == nil {
+		t.Fatal("expected error for unknown resource URI")
+	}
+}
+
+// TestMCPPromptsList lists available prompts and verifies the expected ones exist.
+func TestMCPPromptsList(t *testing.T) {
+	backend := mcpBackend()
+	s := mcpSession(t, backend, false)
+
+	result, err := s.ListPrompts(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListPrompts: %v", err)
+	}
+	names := map[string]bool{}
+	for _, p := range result.Prompts {
+		names[p.Name] = true
+	}
+	for _, want := range []string{"responder-a-incidente", "resumir-conversacion", "redactar-respuesta"} {
+		if !names[want] {
+			t.Fatalf("expected prompt %q, got %v", want, names)
+		}
+	}
+}
+
+// TestMCPPromptResponderIncidente gets the responder-a-incidente prompt and
+// verifies it contains the item_id and tono.
+func TestMCPPromptResponderIncidente(t *testing.T) {
+	backend := mcpBackend()
+	s := mcpSession(t, backend, false)
+
+	result, err := s.GetPrompt(context.Background(), &mcp.GetPromptParams{
+		Name:      "responder-a-incidente",
+		Arguments: map[string]string{"item_id": "123", "tono": "amable"},
+	})
+	if err != nil {
+		t.Fatalf("GetPrompt responder-a-incidente: %v", err)
+	}
+	if len(result.Messages) == 0 {
+		t.Fatal("expected at least one message in prompt result")
+	}
+	text, ok := result.Messages[0].Content.(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", result.Messages[0].Content)
+	}
+	if !strings.Contains(text.Text, "123") {
+		t.Fatalf("expected item_id 123 in prompt text, got %s", text.Text)
+	}
+	if !strings.Contains(text.Text, "amable") {
+		t.Fatalf("expected tono amable in prompt text, got %s", text.Text)
+	}
+}
+
+// TestMCPPromptResumirConversacion gets the resumir-conversacion prompt.
+func TestMCPPromptResumirConversacion(t *testing.T) {
+	backend := mcpBackend()
+	s := mcpSession(t, backend, false)
+
+	result, err := s.GetPrompt(context.Background(), &mcp.GetPromptParams{
+		Name:      "resumir-conversacion",
+		Arguments: map[string]string{"channel": "whatsapp", "account": "personal", "thread": "51911@s.whatsapp.net", "limit": "5"},
+	})
+	if err != nil {
+		t.Fatalf("GetPrompt resumir-conversacion: %v", err)
+	}
+	text, ok := result.Messages[0].Content.(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", result.Messages[0].Content)
+	}
+	if !strings.Contains(text.Text, "51911@s.whatsapp.net") {
+		t.Fatalf("expected thread in prompt text, got %s", text.Text)
+	}
+}
+
+// TestMCPPromptRedactarRespuesta gets the redactar-respuesta prompt.
+func TestMCPPromptRedactarRespuesta(t *testing.T) {
+	backend := mcpBackend()
+	s := mcpSession(t, backend, false)
+
+	result, err := s.GetPrompt(context.Background(), &mcp.GetPromptParams{
+		Name:      "redactar-respuesta",
+		Arguments: map[string]string{"item_id": "456", "intencion": "confirmar reunión"},
+	})
+	if err != nil {
+		t.Fatalf("GetPrompt redactar-respuesta: %v", err)
+	}
+	text, ok := result.Messages[0].Content.(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", result.Messages[0].Content)
+	}
+	if !strings.Contains(text.Text, "456") {
+		t.Fatalf("expected item_id 456 in prompt text, got %s", text.Text)
+	}
+	if !strings.Contains(text.Text, "confirmar reunión") {
+		t.Fatalf("expected intención in prompt text, got %s", text.Text)
+	}
+}
+
+// TestMCPEventsNextEmpty returns no events when nothing has happened.
+func TestMCPEventsNextEmpty(t *testing.T) {
+	backend := mcpBackend()
+	s := mcpSession(t, backend, false)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	result, err := s.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "events.next",
+		Arguments: map[string]any{"timeout_ms": 100},
+	})
+	if err != nil {
+		t.Fatalf("events.next: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("events.next should not error on empty, got: %s", result.Content)
+	}
+}
+
+// TestMCPEventsNextDeliversEvent emits a send event and verifies events.next
+// delivers it. Requires allowSend so the real send path runs.
+func TestMCPEventsNextDeliversEvent(t *testing.T) {
+	backend := mcpBackend()
+	backend.receipt = core.Receipt{ID: "R1", Channel: core.ChannelWhatsApp}
+	s := mcpSession(t, backend, true)
+
+	// Start a goroutine that calls events.next with a longer timeout.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// First, do a confirmed send to emit an event.
+	_, out := callTool(t, s, "send", map[string]any{
+		"channel": "whatsapp", "account": "personal", "to": "jose", "text": "hola",
+		"confirm": true,
+	})
+	if out["sent"] != true {
+		t.Fatalf("expected send to succeed, got %v", out)
+	}
+
+	// Now call events.next and verify the event is delivered.
+	result, err := s.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "events.next",
+		Arguments: map[string]any{"timeout_ms": 2000},
+	})
+	if err != nil {
+		t.Fatalf("events.next: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("events.next should not error, got: %s", result.Content)
+	}
+
+	// Parse the structured content to verify the event.
+	var outMap map[string]any
+	b, _ := json.Marshal(result.StructuredContent)
+	if err := json.Unmarshal(b, &outMap); err != nil {
+		t.Fatalf("failed to parse events.next result: %v", err)
+	}
+	events, ok := outMap["events"].([]any)
+	if !ok || len(events) == 0 {
+		t.Fatalf("expected at least one event, got %v", outMap["events"])
+	}
+	event := events[0].(map[string]any)
+	if event["type"] != "item.new" {
+		t.Fatalf("expected event type item.new, got %v", event["type"])
+	}
 }

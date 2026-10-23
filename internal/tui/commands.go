@@ -84,7 +84,7 @@ func previewReply(client Client, id, body string, attachments []string, token ui
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), previewTimeout)
 		defer cancel()
-		plan, _, err := client.Reply(ctx, id, body, nil, attachments, true)
+		plan, _, err := client.Reply(ctx, id, body, nil, nil, attachments, true)
 		return replyPreviewMsg{token: token, plan: plan, err: err}
 	}
 }
@@ -96,7 +96,7 @@ func sendReply(client Client, id, body string, attachments []string, token uint6
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), sendTimeout)
 		defer cancel()
-		plan, receipt, err := client.Reply(ctx, id, body, nil, attachments, false)
+		plan, receipt, err := client.Reply(ctx, id, body, nil, nil, attachments, false)
 		return replySentMsg{token: token, plan: plan, receipt: receipt, err: err}
 	}
 }

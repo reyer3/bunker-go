@@ -9,7 +9,7 @@ import (
 	"github.com/reyer3/bunker-go/internal/core"
 )
 
-const callUsage = `usage: bunker call <channel> <account> <to> [--dry-run] [--json]
+const callUsage = `usage: bunker call <channel> <account> <to> [--video] [--dry-run] [--json]
        bunker call answer|reject|hangup <call-id|latest> [--dry-run] [--json]
        bunker call audio-test [--account A] [--seconds N] [--json]`
 
@@ -21,6 +21,7 @@ func cmdCall(ctx context.Context, backend Backend, args []string, stdout, stderr
 	fs := newFlagSet("call", stderr)
 	dryRun := fs.Bool("dry-run", false, "plan the call action without touching the network")
 	jsonOut := fs.Bool("json", false, "emit JSON")
+	video := fs.Bool("video", false, "place a video call (WhatsApp only; needs the peer to offer video)")
 	positionals, err := parseInterspersed(fs, args)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -49,7 +50,7 @@ func cmdCall(ctx context.Context, backend Backend, args []string, stdout, stderr
 		if err != nil {
 			return fail(*jsonOut, stdout, stderr, err)
 		}
-		plan, call, err = backend.PlaceCall(ctx, channel, account, to, *dryRun)
+		plan, call, err = backend.PlaceCall(ctx, channel, account, to, *video, *dryRun)
 	default:
 		fmt.Fprintln(stderr, callUsage)
 		return 2

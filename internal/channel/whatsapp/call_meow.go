@@ -39,3 +39,15 @@ func (c meowCall) AttachAudio(src meowcaller.AudioSource, sink meowcaller.AudioS
 		c.Play(src)
 	}
 }
+
+func (c meowCall) ReceiveVideo(sink meowcaller.VideoSink) {
+	c.Call.ReceiveVideo(sink)
+}
+
+func (c meowCall) SendVideo(accessUnit []byte) error {
+	return c.Call.SendVideo(accessUnit)
+}
+
+func (c meowCall) OnVideoKeyframeRequest(fn func()) {
+	c.Call.OnVideoKeyframeRequest(fn)
+}

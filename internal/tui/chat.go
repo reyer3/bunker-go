@@ -266,7 +266,7 @@ func previewChatReply(client Client, id, body string, attachments []string, toke
 		if voice {
 			ctx = core.WithVoice(ctx)
 		}
-		plan, _, err := client.Reply(ctx, id, body, nil, attachments, true)
+		plan, _, err := client.Reply(ctx, id, body, nil, nil, attachments, true)
 		return chatReplyPreviewMsg{token: token, plan: plan, err: err}
 	}
 }
@@ -278,7 +278,7 @@ func sendChatReply(client Client, id, body string, attachments []string, token u
 		if voice {
 			ctx = core.WithVoice(ctx)
 		}
-		_, receipt, err := client.Reply(ctx, id, body, nil, attachments, false)
+		_, receipt, err := client.Reply(ctx, id, body, nil, nil, attachments, false)
 		return chatReplySentMsg{token: token, receipt: receipt, err: err}
 	}
 }

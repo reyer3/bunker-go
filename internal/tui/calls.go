@@ -33,7 +33,7 @@ import (
 // unavailable.
 type CallClient interface {
 	Calls(ctx context.Context) ([]core.Call, error)
-	PlaceCall(ctx context.Context, channel core.Channel, account, to string, dryRun bool) (core.Plan, core.Call, error)
+	PlaceCall(ctx context.Context, channel core.Channel, account, to string, video, dryRun bool) (core.Plan, core.Call, error)
 	ControlCall(ctx context.Context, id string, action core.CallAction, dryRun bool) (core.Plan, core.Call, error)
 }
 

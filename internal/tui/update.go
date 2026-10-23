@@ -403,6 +403,20 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var callsCmd tea.Cmd
 		m, callsCmd = m.startCalls()
 		return m, tea.Batch(nextPoll(m.pollToken), notifyCmd, updateCmd, m.reportUnread(), callsCmd)
+	case boardsLoadedMsg:
+		return m.handleBoardsLoaded(msg)
+	case boardLoadedMsg:
+		return m.handleBoardLoaded(msg)
+	case boardCreatedMsg:
+		return m.handleBoardCreated(msg)
+	case taskCreatedMsg:
+		return m.handleTaskCreated(msg)
+	case taskMovedMsg:
+		return m.handleTaskMoved(msg)
+	case taskDoneMsg:
+		return m.handleTaskDone(msg)
+	case memberJoinedMsg:
+		return m.handleMemberJoined(msg)
 	case pollTickMsg:
 		if msg.token != m.pollToken || m.polling || m.client == nil {
 			return m, nil
@@ -475,6 +489,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.threadMode {
 			return m.updateThread(msg)
+		}
+		if m.boardMode {
+			return m.updateBoard(msg)
 		}
 		switch msg.String() {
 		case copyKey:
