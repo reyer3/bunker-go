@@ -5,6 +5,8 @@ package core
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -473,7 +475,14 @@ func newID() string {
 	return "id-" + newShortID()
 }
 
-// newShortID generates a short unique ID.
+// newShortID generates a short unique ID suitable for primary keys and
+// invite codes: 12 random bytes, hex-encoded. crypto/rand never fails in
+// practice, so a silent zero read would surface as a duplicate-key error
+// on insert rather than a placeholder id.
 func newShortID() string {
-	return "abc123" // placeholder: se reemplazará con un generador real
+	b := make([]byte, 12)
+	if _, err := rand.Read(b); err != nil {
+		return "" // keys must collide loudly at insert time, not silently share one id
+	}
+	return hex.EncodeToString(b)
 }

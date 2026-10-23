@@ -126,6 +126,21 @@ func runDaemon(ctx context.Context, stateDir, avatarCacheDir, socketPath string,
 	// atiende el RPC (svc.boardSvc) como al boardSvc package-level usado
 	// por la CLI en proceso.
 	notifyBoard := func(ev core.BoardEvent) error {
+		// Cifrar en el limite de transporte: lo que viaja por el relay y por
+		// los peers P2P es el contenido de la tarea (titulo, descripcion,
+		// tags), y la promesa del feature es que el relay y los peers nunca
+		// lo leen. Un fallo de cifrado (clave corrupta) no publica el delta:
+		// el store ya tiene el cambio, y algo de confidencialidad vale mas
+		// que un sync cuyo contenido se fuga.
+		sent, encErr := encryptBoardDelta(st, ev)
+		if errors.Is(encErr, errNoBoardKey) {
+			// Tablero sin clave: nunca prometio E2EE, sale como estaba.
+			sent = ev.Payload
+		} else if encErr != nil {
+			fmt.Fprintf(stderr, "bunker: board %s: no publicar %s: %v\n", ev.BoardID, ev.Type, encErr)
+			return nil
+		}
+		ev.Payload = sent
 		msg := relay.RelayMessage{
 			BoardID:   ev.BoardID,
 			MemberID:  ev.MemberID,
