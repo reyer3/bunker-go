@@ -793,7 +793,7 @@ own explicit actions (opening a conversation, `read-thread`).
 {"item": { <core.Item> }}
 ```
 
-## `bunker reply <id> <text|-> [--cc addr]... [--bcc addr]... [--attach path]... [--idempotency-key k] [--dry-run] [--json]`
+## `bunker reply <id> <text|-> [--cc addr]... [--attach path]... [--idempotency-key k] [--dry-run] [--json]`
 
 `bunker reply <id> --voice <file.ogg>` replies with a voice note instead
 (no text; see [Voice notes](#voice-notes-notas-de-voz)).
@@ -817,15 +817,16 @@ repeated too — every address from every occurrence is collected, each
 trimmed of surrounding whitespace, with empty entries dropped. See `send`
 below for what each channel does with Cc.
 
-`--bcc addr` (repeatable) adds a hidden Bcc recipient, the same way as
-`--cc`. Bcc addresses reach the SMTP envelope (RCPT TO) for mail but never
-appear in the message's `Bcc:`/`Resent-Bcc:` headers or body, so no
-recipient can see them. `plan.bcc` carries them in the initiating caller's
-dry-run plan (and only there — observer output, logs and delivery errors
-never echo them). WhatsApp and Matrix reject any non-empty `--bcc` with an
-unsupported-capability error instead of silently dropping it. Changing
-`--cc`/`--bcc` changes the idempotency fingerprint, so a retry with
-different Bcc is a new operation; identical confirmed retries send once.
+`bcc` is not a CLI flag — hidden-copy recipients come in through MCP
+(`send`/`reply` take a `bcc` array of addresses). Mail puts those
+addresses in the SMTP envelope (RCPT TO) but never in the message's
+`Bcc:`/`Resent-Bcc:` headers or body, so no recipient can see them.
+`plan.bcc` carries them in the initiating caller's plan (and only there —
+observer output, logs and delivery errors never echo them). WhatsApp and
+Matrix reject any non-empty `bcc` with an unsupported-capability error
+instead of silently dropping it. Changing `--cc`/`bcc` changes the
+idempotency fingerprint, so a retry with a different Bcc is a new
+operation; identical confirmed retries send once.
 
 `--attach path` (repeatable) attaches local files to the reply, for
 every channel — see `send` below for the full validation and JSON-shape
@@ -848,7 +849,7 @@ such as `51999999999@s.whatsapp.net` even when the recipient was typed
 as bare digits, or a Matrix room id); the stored sent item joins that
 conversation.
 
-## `bunker send <channel> <account> <to> <text|-> [--cc addr]... [--bcc addr]... [--subject s] [--attach path]... [--media path]... [--forward] [--idempotency-key k] [--dry-run] [--json]`
+## `bunker send <channel> <account> <to> <text|-> [--cc addr]... [--subject s] [--attach path]... [--media path]... [--forward] [--idempotency-key k] [--dry-run] [--json]`
 
 `bunker send <channel> <account> <to> --voice <file.ogg>` sends an Ogg
 Opus file as a voice note (no text; see
@@ -876,20 +877,16 @@ those needs a new key.
 each entry is trimmed, empty entries are dropped, and the command fails
 before touching the backend if that leaves nothing. `--cc addr`
 (repeatable, each value may also be comma-separated — see `reply` above)
-adds Cc recipients. `--bcc addr` (repeatable, same comma-separated and
-repeatable rules) adds hidden Bcc recipients: they reach the SMTP
-envelope (RCPT TO) for mail but never appear in the `Bcc:`/
-`Resent-Bcc:` headers or body, and `plan.bcc` carries them in the
-initiating caller's plan only. WhatsApp and Matrix reject any non-empty
-`--bcc` with an unsupported-capability error instead of silently dropping
-it. Per-channel support:
+adds Cc recipients. Hidden Bcc recipients are not a CLI flag either (see
+`reply` above): they come through MCP `send`'s `bcc` array and the same
+envelope/header rules apply. Per-channel support:
 
-- **Mail**: every `<to>`, `--cc` and `--bcc` address gets an SMTP `RCPT
+- **Mail**: every `<to>`, `--cc` and `bcc` address gets an SMTP `RCPT
   TO`, never just the first; `<to>` and `--cc` also get `To`/`Cc`
-  headers, `--bcc` never gets a header.
-- **WhatsApp** and **Matrix**: exactly one recipient. More than one `<to>`
-  or any `--cc` or `--bcc` fails with an unsupported-capability error
-  instead of silently sending to the first and dropping the rest.
+  headers, `bcc` never gets a header.
+- **WhatsApp** and **Matrix**: exactly one recipient. More than one `<to>`,
+  any extra `--cc`, or any `bcc` fails with an unsupported-capability
+  error instead of silently sending to the first and dropping the rest.
 
 `plan.cc` (alongside `plan.target`, which lists `<to>`) carries the Cc
 list; `plan.bcc` carries the Bcc list; both are omitted when empty.
@@ -6162,7 +6159,7 @@ own explicit actions (opening a conversation, `read-thread`).
 {"item": { <core.Item> }}
 ```
 
-## `bunker reply <id> <text|-> [--cc addr]... [--bcc addr]... [--attach path]... [--idempotency-key k] [--dry-run] [--json]`
+## `bunker reply <id> <text|-> [--cc addr]... [--attach path]... [--idempotency-key k] [--dry-run] [--json]`
 
 `bunker reply <id> --voice <file.ogg>` replies with a voice note instead
 (no text; see [Voice notes](#voice-notes-notas-de-voz)).
@@ -6186,15 +6183,16 @@ repeated too — every address from every occurrence is collected, each
 trimmed of surrounding whitespace, with empty entries dropped. See `send`
 below for what each channel does with Cc.
 
-`--bcc addr` (repeatable) adds a hidden Bcc recipient, the same way as
-`--cc`. Bcc addresses reach the SMTP envelope (RCPT TO) for mail but never
-appear in the message's `Bcc:`/`Resent-Bcc:` headers or body, so no
-recipient can see them. `plan.bcc` carries them in the initiating caller's
-dry-run plan (and only there — observer output, logs and delivery errors
-never echo them). WhatsApp and Matrix reject any non-empty `--bcc` with an
-unsupported-capability error instead of silently dropping it. Changing
-`--cc`/`--bcc` changes the idempotency fingerprint, so a retry with
-different Bcc is a new operation; identical confirmed retries send once.
+`bcc` is not a CLI flag — hidden-copy recipients come in through MCP
+(`send`/`reply` take a `bcc` array of addresses). Mail puts those
+addresses in the SMTP envelope (RCPT TO) but never in the message's
+`Bcc:`/`Resent-Bcc:` headers or body, so no recipient can see them.
+`plan.bcc` carries them in the initiating caller's plan (and only there —
+observer output, logs and delivery errors never echo them). WhatsApp and
+Matrix reject any non-empty `bcc` with an unsupported-capability error
+instead of silently dropping it. Changing `--cc`/`bcc` changes the
+idempotency fingerprint, so a retry with a different Bcc is a new
+operation; identical confirmed retries send once.
 
 `--attach path` (repeatable) attaches local files to the reply, for
 every channel — see `send` below for the full validation and JSON-shape
@@ -6217,7 +6215,7 @@ such as `51999999999@s.whatsapp.net` even when the recipient was typed
 as bare digits, or a Matrix room id); the stored sent item joins that
 conversation.
 
-## `bunker send <channel> <account> <to> <text|-> [--cc addr]... [--bcc addr]... [--subject s] [--attach path]... [--media path]... [--forward] [--idempotency-key k] [--dry-run] [--json]`
+## `bunker send <channel> <account> <to> <text|-> [--cc addr]... [--subject s] [--attach path]... [--media path]... [--forward] [--idempotency-key k] [--dry-run] [--json]`
 
 `bunker send <channel> <account> <to> --voice <file.ogg>` sends an Ogg
 Opus file as a voice note (no text; see
@@ -6245,20 +6243,16 @@ those needs a new key.
 each entry is trimmed, empty entries are dropped, and the command fails
 before touching the backend if that leaves nothing. `--cc addr`
 (repeatable, each value may also be comma-separated — see `reply` above)
-adds Cc recipients. `--bcc addr` (repeatable, same comma-separated and
-repeatable rules) adds hidden Bcc recipients: they reach the SMTP
-envelope (RCPT TO) for mail but never appear in the `Bcc:`/
-`Resent-Bcc:` headers or body, and `plan.bcc` carries them in the
-initiating caller's plan only. WhatsApp and Matrix reject any non-empty
-`--bcc` with an unsupported-capability error instead of silently dropping
-it. Per-channel support:
+adds Cc recipients. Hidden Bcc recipients are not a CLI flag either (see
+`reply` above): they come through MCP `send`'s `bcc` array and the same
+envelope/header rules apply. Per-channel support:
 
-- **Mail**: every `<to>`, `--cc` and `--bcc` address gets an SMTP `RCPT
+- **Mail**: every `<to>`, `--cc` and `bcc` address gets an SMTP `RCPT
   TO`, never just the first; `<to>` and `--cc` also get `To`/`Cc`
-  headers, `--bcc` never gets a header.
-- **WhatsApp** and **Matrix**: exactly one recipient. More than one `<to>`
-  or any `--cc` or `--bcc` fails with an unsupported-capability error
-  instead of silently sending to the first and dropping the rest.
+  headers, `bcc` never gets a header.
+- **WhatsApp** and **Matrix**: exactly one recipient. More than one `<to>`,
+  any extra `--cc`, or any `bcc` fails with an unsupported-capability
+  error instead of silently sending to the first and dropping the rest.
 
 `plan.cc` (alongside `plan.target`, which lists `<to>`) carries the Cc
 list; `plan.bcc` carries the Bcc list; both are omitted when empty.
