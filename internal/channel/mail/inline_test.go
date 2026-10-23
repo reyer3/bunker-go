@@ -104,23 +104,40 @@ func TestInlineImageKeepsFilename(t *testing.T) {
 // image (first attachment row) and index 1 the PDF.
 func TestAttachmentPartAtIndexesInlineImages(t *testing.T) {
 	raw := []byte(relatedMessage([]byte(fakePNG), false))
+	kinds := []bool{true, false} // the rows walkMessage stores: the CID image, then the pdf
 
-	data, err := attachmentPartAt(raw, 0)
+	data, err := attachmentPartAt(raw, kinds, 0)
 	if err != nil {
 		t.Fatalf("attachmentPartAt(0) error = %v", err)
 	}
 	if string(data) != fakePNG {
 		t.Errorf("attachmentPartAt(0) = %q, want the inline image bytes", data)
 	}
-	data, err = attachmentPartAt(raw, 1)
+	data, err = attachmentPartAt(raw, kinds, 1)
 	if err != nil {
 		t.Fatalf("attachmentPartAt(1) error = %v", err)
 	}
 	if string(data) != "fake pdf bytes" {
 		t.Errorf("attachmentPartAt(1) = %q, want the pdf bytes", data)
 	}
-	if _, err = attachmentPartAt(raw, 2); err == nil {
+	if _, err = attachmentPartAt(raw, kinds, 2); err == nil {
 		t.Error("attachmentPartAt(2) error = nil, want out of range")
+	}
+}
+
+// An item stored before inline images existed: its rows only counted the
+// pdf (Inline=false), so its stored index 0 must still fetch the pdf even
+// though the same message now enumerates the CID image first. The
+// kind list the store rows carry is what preserves that addressing.
+func TestAttachmentPartAtKeepsLegacyItemIndexes(t *testing.T) {
+	raw := []byte(relatedMessage([]byte(fakePNG), false))
+	// The uploader's rows counted only the pdf: kinds = [false].
+	data, err := attachmentPartAt(raw, []bool{false}, 0)
+	if err != nil {
+		t.Fatalf("attachmentPartAt(0) error = %v", err)
+	}
+	if string(data) != "fake pdf bytes" {
+		t.Errorf("attachmentPartAt(0) = %q, want the pdf bytes the legacy row named", data)
 	}
 }
 
