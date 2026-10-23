@@ -149,3 +149,46 @@ func TestApplyBoardEventRejectsUnknownBoard(t *testing.T) {
 		t.Fatalf("ApplyBoardEvent error = %v, want ErrBoardNotFound", err)
 	}
 }
+
+// El board del evento es la autoridad: un comentario indicado para board A
+// no puede aterrizar sobre una tarea de board B (confusión de dominios), y
+// un task.create/move cuyo payload declara otro board se rechaza en lugar
+// de corromper el store local con datos mezclados.
+func TestApplyBoardEventRejectsCrossBoardPayloads(t *testing.T) {
+	svc, store, b, _ := ingestBoard(t)
+	if _, err := svc.CreateTask(context.Background(), b.ID, "col-1", "local", "", "member-ana", nil, nil, "member-ana"); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	tasks, _ := svc.ListTasks(context.Background(), b.ID)
+	t.Logf("tarea local: %+v", tasks[0])
+
+	otherBoard := "board-otro"
+	// task.create cuyo payload dice board-otro, entregado por el evento del board real.
+	createPayload, _ := json.Marshal(core.Task{ID: "task-x", BoardID: otherBoard, ColumnID: "col-1", Title: "x", Version: 0})
+	if err := svc.ApplyBoardEvent(core.BoardEvent{BoardID: b.ID, MemberID: "member-bob", Type: "task.create", Payload: createPayload, Version: 0}); err == nil {
+		t.Fatal("task.create con payload de otro board no fue rechazado")
+	}
+	// move/done igual.
+	movePayload, _ := json.Marshal(core.Task{ID: "task-x", BoardID: otherBoard, ColumnID: "col-1", Title: "x", Version: 1})
+	if err := svc.ApplyBoardEvent(core.BoardEvent{BoardID: b.ID, MemberID: "member-bob", Type: "task.move", Payload: movePayload, Version: 1}); err == nil {
+		t.Fatal("task.move con payload de otro board no fue rechazado")
+	}
+	// comment dirigido a la tarea local pero entregado por el evento de OTRO board.
+	comment, _ := json.Marshal(core.Comment{ID: "c-x", TaskID: tasks[0].ID, MemberID: "member-bob", Text: "hola", CreatedBy: "member-bob", CreatedAt: time.Now()})
+	if err := svc.ApplyBoardEvent(core.BoardEvent{BoardID: otherBoard, MemberID: "member-bob", Type: "task.comment", Payload: comment}); err == nil {
+		t.Fatal("task.comment con evento de otro board no fue rechazado")
+	}
+	// hacia board inexistente sería antes bloqueado por board check; fuerte:
+	// un comentario válido en el board correcto aún aplica.
+	comment, _ = json.Marshal(core.Comment{ID: "c-ok", TaskID: tasks[0].ID, MemberID: "member-bob", Text: "ok", CreatedBy: "member-bob", CreatedAt: time.Now()})
+	if err := svc.ApplyBoardEvent(core.BoardEvent{BoardID: b.ID, MemberID: "member-bob", Type: "task.comment", Payload: comment}); err != nil {
+		t.Fatalf("ApplyBoardEvent válido: %v", err)
+	}
+	cinterface, err := store.ListComments(tasks[0].ID)
+	if err != nil {
+		t.Fatalf("ListComments: %v", err)
+	}
+	if len(cinterface) != 1 || cinterface[0].ID != "c-ok" {
+		t.Fatalf("comments = %+v", cinterface)
+	}
+}
