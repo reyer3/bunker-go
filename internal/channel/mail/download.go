@@ -80,10 +80,12 @@ func (a *Adapter) DownloadAttachment(ctx context.Context, item core.Item, index 
 }
 
 // attachmentPartAt walks raw's MIME parts in exactly the order walkMessage
-// (fetch.go) builds Item.Attachments from — only counting
-// *gomail.AttachmentHeader parts — and returns the index-th one's raw
-// bytes, so an index taken from a stored Item.Attachments slice always
-// lands on the matching part here.
+// (fetch.go) builds Item.Attachments from — counting attachment parts and
+// inline image parts (CID-embedded) alike — and returns the index-th one's
+// raw bytes, so an index taken from a stored Item.Attachments slice always
+// lands on the matching part here. Items stored before inline images
+// existed only carried attachment parts, and their indices still address
+// the same part they always did.
 func attachmentPartAt(raw []byte, index int) ([]byte, error) {
 	reader, err := gomail.CreateReader(bytes.NewReader(raw))
 	if err != nil && !gomessage.IsUnknownCharset(err) {
@@ -100,7 +102,15 @@ func attachmentPartAt(raw []byte, index int) ([]byte, error) {
 		if err != nil && !gomessage.IsUnknownCharset(err) {
 			return nil, fmt.Errorf("read part: %w", err)
 		}
-		if _, ok := part.Header.(*gomail.AttachmentHeader); !ok {
+		keep := false
+		switch h := part.Header.(type) {
+		case *gomail.AttachmentHeader:
+			keep = true
+		case *gomail.InlineHeader:
+			contentType, _, _ := h.ContentType()
+			keep = isInlineImage(contentType)
+		}
+		if !keep {
 			continue
 		}
 		if n == index {

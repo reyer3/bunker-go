@@ -35,6 +35,13 @@ type Attachment struct {
 	MIME string
 	Size int64
 	Ref  string
+	// Inline marks a media part carried inside the message body rather
+	// than behind a paperclip: mail's CID-embedded images (multipart/related
+	// with Content-Disposition: inline). They download with the same
+	// index-based path as regular attachments. WhatsApp uses Thumbnail for
+	// its embedded preview instead and Matrix parts are real attachments,
+	// so only mail ever sets it.
+	Inline bool `json:"inline,omitempty"`
 	// Thumbnail is a small preview image the message itself carries
 	// (WhatsApp's embedded JPEGThumbnail), at most MaxThumbnailBytes. It
 	// lets a client preview the attachment without downloading the media.
@@ -58,7 +65,7 @@ type Attachment struct {
 // makes Attachment non-comparable with ==, so callers compare with this.
 func (a Attachment) Equal(b Attachment) bool {
 	return a.Name == b.Name && a.MIME == b.MIME && a.Size == b.Size && a.Ref == b.Ref &&
-		a.Voice == b.Voice && a.Duration == b.Duration &&
+		a.Inline == b.Inline && a.Voice == b.Voice && a.Duration == b.Duration &&
 		bytes.Equal(a.Thumbnail, b.Thumbnail) && bytes.Equal(a.Waveform, b.Waveform)
 }
 

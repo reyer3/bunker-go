@@ -1764,7 +1764,18 @@ exactly or the download is rejected and no partial file is left behind.
 
 Mail re-fetches the MIME part by UID over IMAP (`BODY.PEEK`, so this
 never marks anything `\Seen` either) — it works for any mail item
-already stored, with no extra state kept around for it. WhatsApp looks up
+already stored, with no extra state kept around for it. That also
+covers the images a message embeds in its body: an inline part
+(`multipart/related` with `cid:` and `Content-Disposition: inline`) is
+listed as an attachment row marked `inline: true` in `--json` output,
+named after the sender's filename or `cid-N.ext`, and downloads with
+the same index scheme.
+
+WhatsApp looks up the download descriptor (`DirectPath`/`MediaKey`/
+`FileSHA256`/`FileEncSHA256`) it privately persisted when the message
+first arrived, or when bunker uploaded it (attachments and voice notes
+you send), and calls whatsmeow's `Download`; an item stored before
+this feature existed WhatsApp looks up
 the download descriptor (`DirectPath`/`MediaKey`/`FileSHA256`/
 `FileEncSHA256`) it privately persisted when the message first arrived,
 or when bunker uploaded it (attachments and voice notes you send), and
