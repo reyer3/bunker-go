@@ -1233,6 +1233,18 @@ func (s *Service) BoardList(ctx context.Context) ([]*Board, error) {
 	return bs.ListBoards(ctx)
 }
 
+// ApplyBoardEvent aplica en el store local un delta que llegó de otro
+// dispositivo por relay o P2P (ya descifrado por el daemon, que es quien
+// conoce la clave del board). Es el lado receptor de la sincronización: lo
+// que otro miembro cambió se ve aquí sin acciones manuales.
+func (s *Service) ApplyBoardEvent(ev BoardEvent) error {
+	bs, err := s.boardSvcOrErr()
+	if err != nil {
+		return err
+	}
+	return bs.ApplyBoardEvent(ev)
+}
+
 // BoardTasks returns the tasks of a board.
 func (s *Service) BoardTasks(ctx context.Context, boardID string) ([]*Task, error) {
 	bs, err := s.boardSvcOrErr()

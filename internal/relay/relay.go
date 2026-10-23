@@ -45,11 +45,25 @@ type Relay struct {
 	listenAddr string
 	listener   net.Listener
 	// boards mapea boardID -> *sync.Map (memberID -> *client).
-	boards  sync.Map
-	done    chan struct{}
-	once    sync.Once
-	wg      sync.WaitGroup
-	version int
+	boards sync.Map
+	done   chan struct{}
+	once   sync.Once
+	wg     sync.WaitGroup
+	// consumer es el receptor de los mensajes escritos POR CLIENTES (los
+	// deltas que otro dispositivo publicó en el relay). El daemon lo usa
+	// para aplicarlos en el store local; los mensajes inyectados con
+	// Publish (los deltas ya persistidos localmente) no pasan por aquí,
+	// porque aplicarlos de nuevo sería eco del propio daemon.
+	consumer func(RelayMessage)
+	version  int
+}
+
+// OnMessage registra la función a la que el relay entrega cada mensaje que
+// llega de un cliente (member.join, task.create, task.move, task.done,
+// task.comment). Solo una función. Los mensajes inyectados con Publish —
+// los del propio daemon, ya en el store — no la invocan.
+func (r *Relay) OnMessage(fn func(RelayMessage)) {
+	r.consumer = fn
 }
 
 // NewRelay crea un Relay que escuchará en listenAddr (ej. "127.0.0.1:0" para
@@ -196,6 +210,12 @@ func (r *Relay) handleConn(conn net.Conn) {
 			continue // mensaje mal formado: ignorar
 		}
 		r.handleMessage(c, &msg)
+		// Entregar al consumidor (apply del daemon) una copia del mensaje;
+		// handleMessage ya se ocupó del enrutado hacia los otros clientes.
+		if r.consumer != nil {
+			inbound := msg
+			r.consumer(inbound)
+		}
 	}
 	// Desconexión del cliente (limpia).
 	r.removeClient(c)
