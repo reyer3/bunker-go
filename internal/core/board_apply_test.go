@@ -116,11 +116,10 @@ func TestApplyBoardEventCommentIsIdempotent(t *testing.T) {
 	if _, err := svc.CreateTask(context.Background(), b.ID, "col-1", "local", "", "member-ana", nil, nil, "member-ana"); err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
-	commentPayload, _ := json.Marshal(core.Comment{ID: "comment-1", TaskID: "task-1", MemberID: "member-bob", Text: "hola", CreatedBy: "member-bob", CreatedAt: time.Now()})
-	// The local db owns "task-1", created above with a server-generated id;
+	// The local db owns the task created above with a server-generated id;
 	// find it (ListTasks) so the comment really lands on a local task.
 	tasks, _ := svc.ListTasks(context.Background(), b.ID)
-	commentPayload, _ = json.Marshal(core.Comment{ID: "comment-1", TaskID: tasks[0].ID, MemberID: "member-bob", Text: "hola", CreatedBy: "member-bob", CreatedAt: time.Now()})
+	commentPayload, _ := json.Marshal(core.Comment{ID: "comment-1", TaskID: tasks[0].ID, MemberID: "member-bob", Text: "hola", CreatedBy: "member-bob", CreatedAt: time.Now()})
 	*out = nil // los eventos de la preparación local no cuentan
 
 	if err := svc.ApplyBoardEvent(core.BoardEvent{BoardID: b.ID, MemberID: "member-bob", Type: "task.comment", Payload: commentPayload}); err != nil {
