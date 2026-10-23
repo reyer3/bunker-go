@@ -1106,7 +1106,9 @@ func assessSendRisk(out Outgoing) (riskLevel, suggestedConfirmation, estimatedSi
 		effects = append(effects, "entrega a un destinatario")
 	}
 	if len(out.Cc) > 0 {
-		effects = append(effects, fmt.Sprintf("copia oculta a %d destinatario(s)", len(out.Cc)))
+		// Cc goes in the visible Mime header (docs: "CC is visible"), unlike
+		// Bcc, which only ever reaches the SMTP envelope.
+		effects = append(effects, fmt.Sprintf("copia visible a %d destinatario(s)", len(out.Cc)))
 	}
 	if len(out.Bcc) > 0 {
 		effects = append(effects, fmt.Sprintf("copia oculta a %d destinatario(s)", len(out.Bcc)))
