@@ -49,9 +49,9 @@ type RelayMessage struct {
 // Node es un nodo libp2p que puede suscribirse a un board y publicar cambios a
 // los demás miembros del mismo board.
 type Node struct {
-	host   host.Host
-	mu     sync.Mutex
-	subs   map[string]chan<- []byte // boardID -> canal de payloads entrantes
+	host host.Host
+	mu   sync.Mutex
+	subs map[string]chan<- []byte // boardID -> canal de payloads entrantes
 	// inbound es el receptor de los mensajes que LLEGAN por stream de un
 	// peer, con board/miembro/tipo incluidos: el daemon lo conecta al motor
 	// de aplicar (decrypt + Store). Los mensajes que este nodo publica con
