@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -130,4 +132,56 @@ func BoardRelayAddr() net.Addr {
 		return boardRelay.Addr()
 	}
 	return nil
+}
+
+// boardRelayAdmission es la admisión que el daemon conecta al relay
+// (Relay.SetAdmission): un member.claim se valida contra las invitaciones
+// del store y se responde con el welcome; un member.join solo registra a
+// un miembro que prueba conocer la clave del board. Cualquier otra cosa se
+// rechaza: el relay deja de registrar clientes sin prueba.
+func boardRelayAdmission(svc *core.Service) relay.AdmitFunc {
+	return func(msg relay.RelayMessage) (*relay.RelayMessage, error) {
+		reply, err := svc.BoardAnswer(fromRelayMessage(msg))
+		if err != nil {
+			return nil, err
+		}
+		if msg.Type != core.ClaimMessageType {
+			return nil, nil // un join aceptado no responde nada
+		}
+		out := toRelayMessage(reply)
+		return &out, nil
+	}
+}
+
+func fromRelayMessage(m relay.RelayMessage) core.BoardPeerMessage {
+	return core.BoardPeerMessage{BoardID: m.BoardID, MemberID: m.MemberID, Type: m.Type, Payload: []byte(m.Payload), Timestamp: m.Timestamp, Version: m.Version}
+}
+
+func toRelayMessage(m core.BoardPeerMessage) relay.RelayMessage {
+	var payload json.RawMessage
+	if len(m.Payload) > 0 {
+		payload = json.RawMessage(m.Payload)
+	}
+	return relay.RelayMessage{BoardID: m.BoardID, MemberID: m.MemberID, Type: m.Type, Payload: payload, Timestamp: m.Timestamp, Version: m.Version}
+}
+
+// claimReplyAcceptor adopta la respuesta a un claim en el store del
+// dispositivo que se une: el Backend del CLI (RPC al daemon local) o un
+// core.Service en proceso.
+type claimReplyAcceptor interface {
+	BoardAcceptClaimReply(ctx context.Context, code, boardID string, reply core.BoardPeerMessage) (*core.Member, error)
+}
+
+// claimViaRelay hace el claim contra el relay del creador en addr y adopta
+// el welcome con acc. El código nunca viaja: el claim lleva solo la prueba.
+func claimViaRelay(ctx context.Context, acc claimReplyAcceptor, addr, code, boardID, memberID, name, publicKey string) (*core.Member, error) {
+	msg, err := core.NewClaimMessage(code, boardID, memberID, name, publicKey)
+	if err != nil {
+		return nil, err
+	}
+	reply, err := relay.Claim(ctx, addr, toRelayMessage(msg))
+	if err != nil {
+		return nil, err
+	}
+	return acc.BoardAcceptClaimReply(ctx, code, boardID, fromRelayMessage(reply))
 }

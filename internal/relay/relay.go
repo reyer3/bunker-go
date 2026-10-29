@@ -46,16 +46,46 @@ type Relay struct {
 	listener   net.Listener
 	// boards mapea boardID -> *sync.Map (memberID -> *client).
 	boards sync.Map
-	done   chan struct{}
-	once   sync.Once
-	wg     sync.WaitGroup
+	// conns guarda todas las conexiones abiertas, admitidas o no: Stop debe
+	// cerrar también las de clientes rechazados o que nunca se registraron,
+	// o esperaría para siempre a sus lectores.
+	conns sync.Map // *client -> struct{}
+	done  chan struct{}
+	once  sync.Once
+	wg    sync.WaitGroup
 	// consumer es el receptor de los mensajes escritos POR CLIENTES (los
 	// deltas que otro dispositivo publicó en el relay). El daemon lo usa
 	// para aplicarlos en el store local; los mensajes inyectados con
 	// Publish (los deltas ya persistidos localmente) no pasan por aquí,
 	// porque aplicarlos de nuevo sería eco del propio daemon.
 	consumer func(RelayMessage)
-	version  int
+	// admit decide si un member.claim o member.join registra al cliente en
+	// un board. Sin admit nadie se registra: un relay que acepta cualquier
+	// member.join deja que cualquiera lea los deltas de un board y los
+	// inyecte en el store del daemon.
+	admit   AdmitFunc
+	mu      sync.Mutex
+	version int
+}
+
+// AdmitFunc decide la admisión de un member.claim o member.join. Un error
+// rechaza al cliente (se le responde member.reject con el motivo y no se
+// registra); sin error se lo registra en msg.BoardID como msg.MemberID y,
+// si reply no es nil, se le envía (el welcome de un claim).
+type AdmitFunc func(msg RelayMessage) (reply *RelayMessage, err error)
+
+// SetAdmission registra la función de admisión. El daemon la conecta a la
+// validación de invitaciones y membership del BoardService.
+func (r *Relay) SetAdmission(fn AdmitFunc) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.admit = fn
+}
+
+func (r *Relay) admission() AdmitFunc {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.admit
 }
 
 // OnMessage registra la función a la que el relay entrega cada mensaje que
@@ -144,11 +174,8 @@ func (r *Relay) Stop() error {
 		_ = r.listener.Close()
 	}
 	// Cerrar todas las conexiones de cliente para que los lectores salgan.
-	r.boards.Range(func(_, bm any) bool {
-		bm.(*sync.Map).Range(func(_, c any) bool {
-			_ = c.(*client).conn.Close()
-			return true
-		})
+	r.conns.Range(func(c, _ any) bool {
+		_ = c.(*client).conn.Close()
 		return true
 	})
 	r.wg.Wait()
@@ -174,6 +201,8 @@ func (r *Relay) handleConn(conn net.Conn) {
 		send: make(chan *RelayMessage, sendBuffer),
 		done: make(chan struct{}),
 	}
+	r.conns.Store(c, struct{}{})
+	defer r.conns.Delete(c)
 
 	// Goroutine de escritura: reenvía mensajes del relay al cliente.
 	r.wg.Add(1)
@@ -209,10 +238,10 @@ func (r *Relay) handleConn(conn net.Conn) {
 		if err := json.Unmarshal(line, &msg); err != nil {
 			continue // mensaje mal formado: ignorar
 		}
-		r.handleMessage(c, &msg)
-		// Entregar al consumidor (apply del daemon) una copia del mensaje;
-		// handleMessage ya se ocupó del enrutado hacia los otros clientes.
-		if r.consumer != nil {
+		// Entregar al consumidor (apply del daemon) solo los deltas de un
+		// cliente admitido; handleMessage ya se ocupó del enrutado hacia los
+		// otros clientes.
+		if r.handleMessage(c, &msg) && r.consumer != nil {
 			inbound := msg
 			r.consumer(inbound)
 		}
@@ -221,31 +250,71 @@ func (r *Relay) handleConn(conn net.Conn) {
 	r.removeClient(c)
 }
 
-func (r *Relay) handleMessage(c *client, msg *RelayMessage) {
+// handleMessage enruta un mensaje de cliente y dice si es un delta de un
+// cliente admitido (lo único que se entrega al consumidor).
+func (r *Relay) handleMessage(c *client, msg *RelayMessage) bool {
 	if msg.Timestamp == 0 {
 		msg.Timestamp = time.Now().Unix()
 	}
 	msg.Version = r.version
 
 	switch msg.Type {
-	case "member.join":
-		// Unirse a un board: registrar el dispositivo. No se reenvía.
-		if msg.BoardID == "" || msg.MemberID == "" {
-			return
-		}
-		prevBoard, prevMember := c.board, c.member
-		c.board = msg.BoardID
-		c.member = msg.MemberID
-		r.addClient(c, prevBoard, prevMember)
+	case "member.claim", "member.join":
+		// Registrarse en un board, solo con admisión. No se reenvía.
+		r.admitClient(c, msg)
+		return false
 	default:
 		// Cualquier otro tipo (task.create, task.move, task.done,
 		// task.comment) se reenvía a los demás miembros del mismo board.
 		if c.board == "" || c.member == "" {
-			return // dispositivo no unido a ningún board
+			return false // dispositivo no admitido en ningún board
 		}
 		msg.BoardID = c.board
 		msg.MemberID = c.member
 		r.broadcast(c.board, c.member, msg)
+		return true
+	}
+}
+
+// admitClient pasa el claim o join por la admisión y registra al cliente
+// solo si se confirma. El rechazo se responde para que el cliente falle
+// ruidoso en vez de esperar deltas que nunca llegarán.
+func (r *Relay) admitClient(c *client, msg *RelayMessage) {
+	var reply *RelayMessage
+	var err error
+	switch admit := r.admission(); {
+	case msg.BoardID == "" || msg.MemberID == "":
+		err = fmt.Errorf("falta board_id o member_id")
+	case admit == nil:
+		err = fmt.Errorf("este relay no admite miembros")
+	default:
+		reply, err = admit(*msg)
+	}
+	if err != nil {
+		reason, _ := json.Marshal(err.Error())
+		c.reply(&RelayMessage{BoardID: msg.BoardID, MemberID: msg.MemberID, Type: "member.reject", Payload: reason, Timestamp: time.Now().Unix(), Version: r.version})
+		return
+	}
+	prevBoard, prevMember := c.board, c.member
+	c.board = msg.BoardID
+	c.member = msg.MemberID
+	r.addClient(c, prevBoard, prevMember)
+	if reply != nil {
+		if reply.Timestamp == 0 {
+			reply.Timestamp = time.Now().Unix()
+		}
+		reply.Version = r.version
+		c.reply(reply)
+	}
+}
+
+// reply encola una respuesta para este cliente. Si su canal está lleno se
+// descarta como cualquier otro mensaje: un cliente que no lee no frena al
+// relay.
+func (c *client) reply(msg *RelayMessage) {
+	select {
+	case c.send <- msg:
+	default:
 	}
 }
 
@@ -292,4 +361,47 @@ func (r *Relay) broadcast(boardID, fromMember string, msg *RelayMessage) {
 		}
 		return true
 	})
+}
+
+// claimTimeout acota la espera del welcome: el creador responde en el acto
+// o no responde.
+const claimTimeout = 15 * time.Second
+
+// Claim es el cliente de un claim de invitación: se conecta al relay en
+// addr, manda msg (un member.claim) y devuelve la primera respuesta (el
+// welcome o el member.reject). Cierra la conexión al terminar: el claim es
+// una consulta, el registro para recibir deltas lo hace el daemon.
+func Claim(ctx context.Context, addr string, msg RelayMessage) (RelayMessage, error) {
+	ctx, cancel := context.WithTimeout(ctx, claimTimeout)
+	defer cancel()
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return RelayMessage{}, fmt.Errorf("relay: claim: conectar %s: %w", addr, err)
+	}
+	defer conn.Close()
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	}
+	if msg.Timestamp == 0 {
+		msg.Timestamp = time.Now().Unix()
+	}
+	if err := json.NewEncoder(conn).Encode(msg); err != nil {
+		return RelayMessage{}, fmt.Errorf("relay: claim: enviar: %w", err)
+	}
+	scanner := bufio.NewScanner(conn)
+	scanner.Buffer(make([]byte, 256), maxLineBytes)
+	for scanner.Scan() {
+		var reply RelayMessage
+		if err := json.Unmarshal(scanner.Bytes(), &reply); err != nil {
+			continue
+		}
+		if reply.Type == "member.welcome" || reply.Type == "member.reject" {
+			return reply, nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return RelayMessage{}, fmt.Errorf("relay: claim: esperar respuesta: %w", err)
+	}
+	return RelayMessage{}, fmt.Errorf("relay: claim: el relay cerró sin responder")
 }

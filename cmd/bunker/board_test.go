@@ -53,6 +53,7 @@ func (c *bboardTestClient) join(t *testing.T, boardID, memberID string) {
 func startTestRelay(t *testing.T) (string, func()) {
 	t.Helper()
 	r := relay.NewRelay("127.0.0.1:0")
+	r.SetAdmission(admitAllForTest) // prueba el enrutado, no la admisión
 	ctx, cancel := context.WithTimeout(context.Background(), boardTestTimeout)
 	if err := r.Start(ctx); err != nil {
 		cancel()
