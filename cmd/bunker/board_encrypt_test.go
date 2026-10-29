@@ -56,8 +56,12 @@ func TestEncryptBoardDelta(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var sealed []byte
+	if err := json.Unmarshal(got, &sealed); err != nil {
+		t.Fatalf("encrypted delta is not a base64 JSON string: %v", err)
+	}
 	crypto.SetPeerKey(row.EncryptionKey)
-	back, err := crypto.Decrypt(got)
+	back, err := crypto.Decrypt(sealed)
 	if err != nil {
 		t.Fatalf("a member holding the board key could not decrypt the delta: %v", err)
 	}

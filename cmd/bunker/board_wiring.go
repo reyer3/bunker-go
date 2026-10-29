@@ -39,7 +39,14 @@ func encryptBoardDelta(st core.BoardStore, ev core.BoardEvent) ([]byte, error) {
 		return nil, fmt.Errorf("board %s: cifrador: %w", ev.BoardID, err)
 	}
 	crypto.SetPeerKey(b.EncryptionKey)
-	return crypto.Encrypt(ev.Payload)
+	sealed, err := crypto.Encrypt(ev.Payload)
+	if err != nil {
+		return nil, fmt.Errorf("board %s: cifrar: %w", ev.BoardID, err)
+	}
+	// The transports carry the payload as a json.RawMessage, so raw
+	// ciphertext would break the JSON line. A []byte marshals to a base64
+	// JSON string.
+	return json.Marshal(sealed)
 }
 
 // syncableDeltaType dice si un tipo de mensaje del transporte transporta un
@@ -85,7 +92,8 @@ func boardSyncConsumer(st core.BoardStore, svc *core.Service, stderr io.Writer) 
 
 // decryptBoardDelta descifra un payload de transporte con la clave del
 // board. Un board sin clave nunca prometió E2EE: el payload vuelve tal cual
-// (espejo exacto de encryptBoardDelta).
+// (espejo exacto de encryptBoardDelta). El payload cifrado llega como el
+// string JSON base64 que produjo encryptBoardDelta.
 func decryptBoardDelta(st core.BoardStore, boardID string, payload []byte) ([]byte, error) {
 	if len(payload) == 0 {
 		return payload, errNoBoardKey
@@ -101,8 +109,12 @@ func decryptBoardDelta(st core.BoardStore, boardID string, payload []byte) ([]by
 	if err != nil {
 		return nil, fmt.Errorf("board %s: cifrador: %w", boardID, err)
 	}
+	var sealed []byte
+	if err := json.Unmarshal(payload, &sealed); err != nil {
+		return nil, fmt.Errorf("board %s: payload cifrado mal formado: %w", boardID, err)
+	}
 	crypto.SetPeerKey(b.EncryptionKey)
-	return crypto.Decrypt(payload)
+	return crypto.Decrypt(sealed)
 }
 
 // boardSvc is the shared-boards (kanban) service. runDaemon assigns it
