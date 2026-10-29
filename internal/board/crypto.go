@@ -8,8 +8,11 @@ package board
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -122,4 +125,39 @@ func GenerateInviteCodeKey() string {
 		panic(fmt.Errorf("board: generar clave de invite code: %w", err))
 	}
 	return base64.RawURLEncoding.EncodeToString(key)
+}
+
+// InviteCodeClaimKey deriva la clave del claim desde el código de invitación
+// mismo: SHA-256 del código (32 bytes para AES-256). El código es el secreto
+// compartido entre el creador y quien se une — el relay y los demás peers
+// jamás lo conocen, así el payload del member.welcome (board, member,
+// columns y la clave del board) viaja ininteligible para ellos.
+func InviteCodeClaimKey(code string) []byte {
+	out := sha256.Sum256([]byte(code))
+	return out[:]
+}
+
+// Proof firma con HMAC-SHA256 un dominio ("member.claim", "member.join") y
+// los campos que la prueba liga, con la clave dada (la del claim o la del
+// board), en hex. Demuestra que quien la envía conoce la clave sin ponerla
+// en el cable. Los campos se separan con NUL para que ("ab","c") y
+// ("a","bc") no firmen lo mismo, y el dominio impide reusar una prueba de
+// claim como prueba de join.
+func Proof(key []byte, domain string, fields ...string) string {
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(domain))
+	for _, f := range fields {
+		mac.Write([]byte{0})
+		mac.Write([]byte(f))
+	}
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// ProofEqual compara dos pruebas en tiempo constante: una comparación
+// normal le diría a un atacante cuántos caracteres acertó.
+func ProofEqual(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	return hmac.Equal([]byte(a), []byte(b))
 }

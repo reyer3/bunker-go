@@ -208,6 +208,7 @@ type BoardStore interface {
 
 	CreateInviteCode(invite *InviteCode) error
 	GetInviteCode(code string) (*InviteCode, error)
+	ListInviteCodes(boardID string) ([]*InviteCode, error)
 	UpdateInviteCode(invite *InviteCode) error
 }
 
