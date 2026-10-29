@@ -87,7 +87,7 @@ func TestSendVoiceRoutesToVoiceSenderAndStoresVoiceItem(t *testing.T) {
 func TestReplyVoiceViaContext(t *testing.T) {
 	svc, spy, _ := newVoiceService(t)
 	path := voiceFixture(t, 3*time.Second)
-	plan, _, err := svc.Reply(core.WithVoice(context.Background()), "whatsapp:personal:1", "", nil, []string{path}, false)
+	plan, _, err := svc.Reply(core.WithVoice(context.Background()), "whatsapp:personal:1", "", nil, nil, []string{path}, false)
 	if err != nil {
 		t.Fatalf("Reply: %v", err)
 	}

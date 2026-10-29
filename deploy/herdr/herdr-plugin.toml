@@ -32,16 +32,6 @@ description = "Open, focus or close the bunker side panel"
 contexts = ["workspace"]
 command = ["bunker", "herdr", "toggle"]
 
-# Omnipresent: opens the panel in every tab that does not have it (closing
-# it everywhere once no tab is missing it). New tabs created afterwards are
-# not covered — run the action again for them.
-[[actions]]
-id = "everywhere"
-title = "Bunker in every tab"
-description = "Open the bunker side panel in every tab, or close it everywhere"
-contexts = ["workspace"]
-command = ["bunker", "herdr", "everywhere"]
-
 # A new mail prefilled from a mailto: URL, as a popup over the layout:
 # "bunker compose" quits when the message is sent or Esc closes the
 # editor, and herdr closes the popup with it. The URL arrives as

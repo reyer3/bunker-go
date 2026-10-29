@@ -20,8 +20,8 @@ type queueClient struct {
 	real   int
 }
 
-func (c *queueClient) Reply(ctx context.Context, id, body string, cc, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
-	plan, rcpt, err := c.replyClient.Reply(ctx, id, body, cc, attachments, dryRun)
+func (c *queueClient) Reply(ctx context.Context, id, body string, cc, bcc, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
+	plan, rcpt, err := c.replyClient.Reply(ctx, id, body, cc, bcc, attachments, dryRun)
 	if dryRun {
 		return plan, rcpt, err
 	}

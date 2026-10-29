@@ -96,7 +96,7 @@ func TestReplyReturnsItemID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, receipt, err := svc.Reply(ctx, original.ID, "qué tal", nil, nil, false)
+	_, receipt, err := svc.Reply(ctx, original.ID, "qué tal", nil, nil, nil, false)
 	if err != nil {
 		t.Fatalf("Reply: %v", err)
 	}

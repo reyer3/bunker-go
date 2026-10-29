@@ -85,6 +85,24 @@ const (
 	MethodUploadChunk       = "upload_chunk"
 	MethodUploadCommit      = "upload_commit"
 	MethodUploadRelease     = "upload_release"
+	MethodBoardCreate       = "board_create"
+	MethodBoardInvite       = "board_invite"
+	MethodBoardJoin         = "board_join"
+	MethodBoardList         = "board_list"
+	MethodBoardTaskCreate   = "board_task_create"
+	MethodBoardTaskMove     = "board_task_move"
+	MethodBoardTaskDone     = "board_task_done"
+	MethodBoardTaskComment  = "board_task_comment"
+	MethodBoardMembers      = "board_members"
+	MethodBoardTasks        = "board_tasks"
+	// MethodBoardClaimPeer claims an invite over the daemon's P2P node.
+	MethodBoardClaimPeer = "board_claim_peer"
+	// MethodBoardAcceptClaimReply adopts the reply to a claim the CLI made
+	// against the creator's relay.
+	MethodBoardAcceptClaimReply = "board_accept_claim_reply"
+	MethodP2PStatus             = "p2p_status"
+	MethodP2PConnect            = "p2p_connect"
+	MethodP2PSync               = "p2p_sync"
 )
 
 type listParams struct {
@@ -150,6 +168,7 @@ type replyParams struct {
 	ID             string   `json:"id"`
 	Body           string   `json:"body"`
 	Cc             []string `json:"cc"`
+	Bcc            []string `json:"bcc"`
 	Attachments    []string `json:"attachments"`
 	DryRun         bool     `json:"dryRun"`
 	IdempotencyKey string   `json:"idempotency_key,omitempty"`
@@ -203,6 +222,7 @@ type callParams struct {
 	Channel core.Channel `json:"channel"`
 	Account string       `json:"account"`
 	To      string       `json:"to"`
+	Video   bool         `json:"video,omitempty"`
 	DryRun  bool         `json:"dryRun"`
 }
 
@@ -486,6 +506,151 @@ type healthResult struct {
 	Adapters        []core.AdapterHealth `json:"adapters"`
 	UpdateAvailable bool                 `json:"update_available"`
 	LatestVersion   string               `json:"latest_version,omitempty"`
+}
+
+// p2pStatusParams is MethodP2PStatus's params. It is empty: the P2P status
+// takes no secret, since automatic discovery is manual connect.
+type p2pStatusParams struct{}
+type p2pStatusResult struct {
+	Status core.BoardPeerStatus `json:"status"`
+}
+
+// p2pConnectParams is MethodP2PConnect's params.
+type p2pConnectParams struct {
+	Multiaddr string `json:"multiaddr"`
+}
+type p2pConnectResult struct {
+	Connected bool     `json:"connected"`
+	Peers     []string `json:"peers"`
+}
+
+// p2pSyncParams is MethodP2PSync's params: one forced board delta.
+type p2pSyncParams struct {
+	BoardID  string `json:"board_id"`
+	MemberID string `json:"member_id,omitempty"`
+	Type     string `json:"type,omitempty"`
+	Payload  []byte `json:"payload,omitempty"`
+	Version  int    `json:"version,omitempty"`
+}
+type p2pSyncResult struct {
+	Published bool     `json:"published"`
+	Peers     []string `json:"peers"`
+}
+
+// boardCreateParams is MethodBoardCreate's params.
+type boardCreateParams struct {
+	Name    string `json:"name"`
+	OwnerID string `json:"owner_id"`
+}
+type boardCreateResult struct {
+	Board *core.Board `json:"board"`
+}
+
+// boardInviteParams is MethodBoardInvite's params: TTLSeconds is the invite
+// code's time-to-live in seconds (0 means the default 48h).
+type boardInviteParams struct {
+	BoardID    string `json:"board_id"`
+	CreatedBy  string `json:"created_by"`
+	TTLSeconds int    `json:"ttl_seconds,omitempty"`
+	MaxUses    int    `json:"max_uses,omitempty"`
+}
+type boardInviteResult struct {
+	Invite *core.InviteCode `json:"invite"`
+}
+
+// boardJoinParams is MethodBoardJoin's params.
+type boardJoinParams struct {
+	Code      string `json:"code"`
+	MemberID  string `json:"member_id"`
+	Name      string `json:"name"`
+	PublicKey string `json:"public_key"`
+}
+type boardJoinResult struct {
+	Member *core.Member `json:"member"`
+}
+
+// boardListParams is MethodBoardList's params: none.
+type boardListParams struct{}
+type boardListResult struct {
+	Boards []*core.Board `json:"boards"`
+}
+
+// boardTaskCreateParams is MethodBoardTaskCreate's params.
+type boardTaskCreateParams struct {
+	BoardID     string     `json:"board_id"`
+	ColumnID    string     `json:"column_id"`
+	Title       string     `json:"title"`
+	Description string     `json:"description"`
+	AssigneeID  string     `json:"assignee_id,omitempty"`
+	DueDate     *time.Time `json:"due_date,omitempty"`
+	Tags        []string   `json:"tags,omitempty"`
+	CreatedBy   string     `json:"created_by"`
+}
+type boardTaskCreateResult struct {
+	Task *core.Task `json:"task"`
+}
+
+// boardTaskMoveParams is MethodBoardTaskMove's params.
+type boardTaskMoveParams struct {
+	TaskID   string `json:"task_id"`
+	ColumnID string `json:"column_id"`
+}
+type boardTaskMoveResult struct {
+	Task *core.Task `json:"task"`
+}
+
+// boardTaskDoneParams is MethodBoardTaskDone's params: Version is the
+// expected current task version for optimistic concurrency.
+type boardTaskDoneParams struct {
+	TaskID  string `json:"task_id"`
+	Version int    `json:"version"`
+}
+type boardTaskDoneResult struct {
+	Task *core.Task `json:"task"`
+}
+
+// boardTaskCommentParams is MethodBoardTaskComment's params.
+type boardTaskCommentParams struct {
+	TaskID   string `json:"task_id"`
+	MemberID string `json:"member_id"`
+	Text     string `json:"text"`
+}
+type boardTaskCommentResult struct {
+	Comment *core.Comment `json:"comment"`
+}
+
+// boardClaimPeerParams is MethodBoardClaimPeer's params. Code travels only
+// over the local unix socket: the daemon derives the claim proof from it
+// and never puts it on the network.
+type boardClaimPeerParams struct {
+	Code      string `json:"code"`
+	BoardID   string `json:"board_id"`
+	MemberID  string `json:"member_id"`
+	Name      string `json:"name"`
+	PublicKey string `json:"public_key"`
+}
+
+// boardAcceptClaimReplyParams is MethodBoardAcceptClaimReply's params.
+type boardAcceptClaimReplyParams struct {
+	Code    string                `json:"code"`
+	BoardID string                `json:"board_id"`
+	Reply   core.BoardPeerMessage `json:"reply"`
+}
+
+// boardTasksParams is MethodBoardTasks's params.
+type boardTasksParams struct {
+	BoardID string `json:"board_id"`
+}
+type boardTasksResult struct {
+	Tasks []*core.Task `json:"tasks"`
+}
+
+// boardMembersParams is MethodBoardMembers's params.
+type boardMembersParams struct {
+	BoardID string `json:"board_id"`
+}
+type boardMembersResult struct {
+	Members []*core.Member `json:"members"`
 }
 
 // DefaultSocketPath returns BUNKER_SOCKET if set, else

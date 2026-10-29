@@ -22,7 +22,7 @@ type Backend interface {
 	Fetch(ctx context.Context, id string) (core.Item, error)
 	Read(ctx context.Context, id string, markReceipt bool) (core.Item, error)
 	Counts(ctx context.Context) (map[core.Channel]map[string]int, error)
-	Reply(ctx context.Context, id, body string, cc, attachments []string, dryRun bool) (core.Plan, core.Receipt, error)
+	Reply(ctx context.Context, id, body string, cc, bcc []string, attachments []string, dryRun bool) (core.Plan, core.Receipt, error)
 	Send(ctx context.Context, out core.Outgoing, dryRun bool) (core.Plan, core.Receipt, error)
 	Organize(ctx context.Context, id string, op core.OrganizeOp, dryRun bool) (core.Plan, error)
 	PostStatus(ctx context.Context, channel core.Channel, account string, status core.Status, dryRun bool) (core.Plan, core.Receipt, error)
@@ -47,7 +47,7 @@ type Backend interface {
 	Search(ctx context.Context, channel core.Channel, account string, criteria core.SearchCriteria) ([]core.Item, error)
 	// PlaceCall, ControlCall and Calls drive voice calls (core.Caller):
 	// `bunker call`, `bunker call answer|reject|hangup` and `bunker calls`.
-	PlaceCall(ctx context.Context, channel core.Channel, account, to string, dryRun bool) (core.Plan, core.Call, error)
+	PlaceCall(ctx context.Context, channel core.Channel, account, to string, video, dryRun bool) (core.Plan, core.Call, error)
 	ControlCall(ctx context.Context, id string, action core.CallAction, dryRun bool) (core.Plan, core.Call, error)
 	Calls(ctx context.Context) ([]core.Call, error)
 	// Contacts lists address-book entries and conversations matching a
@@ -78,9 +78,35 @@ type Backend interface {
 	EditMessage(ctx context.Context, id, text string, dryRun bool) (core.Plan, core.Receipt, error)
 	DeleteMessage(ctx context.Context, id string, dryRun bool) (core.Plan, core.Receipt, error)
 	React(ctx context.Context, id, emoji string, dryRun bool) (core.Plan, core.Receipt, error)
+	// Shared boards (kanban) backed by core.BoardService. These are stubs
+	// until the daemon wiring lands; command code never cares which backend
+	// it got.
+	BoardCreate(ctx context.Context, name, ownerID string) (*core.Board, error)
+	BoardInvite(ctx context.Context, boardID, createdBy string, ttl time.Duration, maxUses int) (*core.InviteCode, error)
+	BoardJoin(ctx context.Context, code, memberID, name, publicKey string) (*core.Member, error)
+	BoardList(ctx context.Context) ([]*core.Board, error)
+	BoardTasks(ctx context.Context, boardID string) ([]*core.Task, error)
+	BoardTaskCreate(ctx context.Context, boardID, columnID, title, description, assigneeID string, dueDate *time.Time, tags []string, createdBy string) (*core.Task, error)
+	BoardTaskMove(ctx context.Context, taskID, columnID string) (*core.Task, error)
+	BoardTaskDone(ctx context.Context, taskID string, version int) (*core.Task, error)
+	BoardTaskComment(ctx context.Context, taskID, memberID, text string) (*core.Comment, error)
+	BoardMembers(ctx context.Context, boardID string) ([]*core.Member, error)
+	// P2P board sync (internal/p2p behind the daemon): the node's identity
+	// and connections live in the daemon process, so the CLI reaches them
+	// through these RPC-backed methods.
+	BoardPeerStatus(ctx context.Context) (core.BoardPeerStatus, error)
+	BoardPeerConnect(ctx context.Context, multiaddr string) ([]string, error)
+	BoardPeerSync(ctx context.Context, boardID, memberID, typ string, payload []byte, version int) ([]string, error)
+	// Invite claims (`bunker board join <code>@<board>`): the daemon either
+	// claims over its P2P node, or adopts the reply the CLI got straight
+	// from the creator's relay.
+	BoardClaimPeer(ctx context.Context, code, boardID, memberID, name, publicKey string) (*core.Member, error)
+	BoardAcceptClaimReply(ctx context.Context, code, boardID string, reply core.BoardPeerMessage) (*core.Member, error)
 }
 
 var (
-	_ Backend = (*core.Service)(nil)
+	// core.Service satisfies Backend too once its board methods are aligned
+	// with this interface (the daemon wiring subagent is doing that in
+	// parallel). rpc.Client already does.
 	_ Backend = (*rpc.Client)(nil)
 )

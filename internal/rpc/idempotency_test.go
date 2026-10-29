@@ -31,10 +31,10 @@ func TestClientSendCarriesIdempotencyKey(t *testing.T) {
 	}
 
 	replyCtx := core.WithIdempotencyKey(context.Background(), "r1")
-	if _, _, err := client.Reply(replyCtx, "mail:cl:1", "ok", nil, nil, false); err != nil {
+	if _, _, err := client.Reply(replyCtx, "mail:cl:1", "ok", nil, nil, nil, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, r, err := client.Reply(replyCtx, "mail:cl:1", "ok", nil, nil, false); err != nil || !r.Replayed {
+	if _, r, err := client.Reply(replyCtx, "mail:cl:1", "ok", nil, nil, nil, false); err != nil || !r.Replayed {
 		t.Fatalf("reply repeat: %+v, %v", r, err)
 	}
 	if n := len(adapter.SentMessages()); n != 2 {

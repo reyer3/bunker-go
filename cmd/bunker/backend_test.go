@@ -94,12 +94,63 @@ type fakeBackend struct {
 
 	actionCalls []messageActionCall
 	actionErr   error
+
+	boardErr error
+
+	boardCreateCalls    []boardCreateCall
+	boardInviteCalls    []boardInviteCall
+	boardJoinCalls      []boardJoinCall
+	boardClaimPeerCalls []boardClaimPeerCall
+	boardListCalls      []string
+	boardTaskCalls      []boardTaskCall
+	boardTaskDoneCalls  []boardTaskDoneCall
+	boardMembersCalls   []string
+}
+
+type boardCreateCall struct {
+	Name    string
+	OwnerID string
+}
+
+type boardInviteCall struct {
+	BoardID   string
+	CreatedBy string
+	TTL       time.Duration
+	MaxUses   int
+}
+
+type boardJoinCall struct {
+	Code      string
+	MemberID  string
+	Name      string
+	PublicKey string
+}
+
+type boardClaimPeerCall struct {
+	Code, BoardID, MemberID, Name, PublicKey string
+}
+
+type boardTaskCall struct {
+	BoardID     string
+	ColumnID    string
+	Title       string
+	Description string
+	AssigneeID  string
+	DueDate     *time.Time
+	Tags        []string
+	CreatedBy   string
+}
+
+type boardTaskDoneCall struct {
+	TaskID  string
+	Version int
 }
 
 type placeCallCall struct {
 	Channel core.Channel
 	Account string
 	To      string
+	Video   bool
 	DryRun  bool
 }
 
@@ -109,12 +160,15 @@ type controlCallCall struct {
 	DryRun bool
 }
 
-func (f *fakeBackend) PlaceCall(ctx context.Context, channel core.Channel, account, to string, dryRun bool) (core.Plan, core.Call, error) {
-	f.placeCallCalls = append(f.placeCallCalls, placeCallCall{channel, account, to, dryRun})
+func (f *fakeBackend) PlaceCall(ctx context.Context, channel core.Channel, account, to string, video, dryRun bool) (core.Plan, core.Call, error) {
+	f.placeCallCalls = append(f.placeCallCalls, placeCallCall{channel, account, to, video, dryRun})
 	if f.callErr != nil {
 		return core.Plan{}, core.Call{}, f.callErr
 	}
 	plan := core.Plan{Action: "call", Channel: channel, Account: account, Target: to}
+	if video {
+		plan.Action = "call video"
+	}
 	if dryRun {
 		return plan, core.Call{}, nil
 	}
@@ -319,6 +373,7 @@ type replyCall struct {
 	ID          string
 	Body        string
 	Cc          []string
+	Bcc         []string
 	Attachments []string
 	DryRun      bool
 }
@@ -380,8 +435,8 @@ func (f *fakeBackend) Counts(ctx context.Context) (map[core.Channel]map[string]i
 	return f.counts, nil
 }
 
-func (f *fakeBackend) Reply(ctx context.Context, id, body string, cc, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
-	f.replyCalls = append(f.replyCalls, replyCall{ID: id, Body: body, Cc: cc, Attachments: attachments, DryRun: dryRun})
+func (f *fakeBackend) Reply(ctx context.Context, id, body string, cc, bcc []string, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
+	f.replyCalls = append(f.replyCalls, replyCall{ID: id, Body: body, Cc: cc, Bcc: bcc, Attachments: attachments, DryRun: dryRun})
 	f.replyVoice = append(f.replyVoice, core.IsVoice(ctx))
 	f.sendKeys = append(f.sendKeys, core.IdempotencyKey(ctx))
 	if f.replyErr != nil {
@@ -536,6 +591,122 @@ func (f *fakeBackend) ListPage(ctx context.Context, filter core.Filter, query st
 		page.NextCursor = core.EncodeCursor(last.Timestamp, last.ID)
 	}
 	return page, nil
+}
+
+func (f *fakeBackend) BoardCreate(ctx context.Context, name, ownerID string) (*core.Board, error) {
+	f.boardCreateCalls = append(f.boardCreateCalls, boardCreateCall{Name: name, OwnerID: ownerID})
+	if f.boardErr != nil {
+		return nil, f.boardErr
+	}
+	return &core.Board{ID: "board-stub", Name: name, OwnerID: ownerID}, nil
+}
+
+func (f *fakeBackend) BoardInvite(ctx context.Context, boardID, createdBy string, ttl time.Duration, maxUses int) (*core.InviteCode, error) {
+	f.boardInviteCalls = append(f.boardInviteCalls, boardInviteCall{BoardID: boardID, CreatedBy: createdBy, TTL: ttl, MaxUses: maxUses})
+	if f.boardErr != nil {
+		return nil, f.boardErr
+	}
+	return &core.InviteCode{ID: "invite-stub", BoardID: boardID, Code: "bunker-invite-stub", CreatedBy: createdBy}, nil
+}
+
+func (f *fakeBackend) BoardJoin(ctx context.Context, code, memberID, name, publicKey string) (*core.Member, error) {
+	f.boardJoinCalls = append(f.boardJoinCalls, boardJoinCall{Code: code, MemberID: memberID, Name: name, PublicKey: publicKey})
+	if f.boardErr != nil {
+		return nil, f.boardErr
+	}
+	return &core.Member{ID: memberID, BoardID: "", Name: name, PublicKey: publicKey, Role: "member"}, nil
+}
+
+func (f *fakeBackend) BoardClaimPeer(ctx context.Context, code, boardID, memberID, name, publicKey string) (*core.Member, error) {
+	f.boardClaimPeerCalls = append(f.boardClaimPeerCalls, boardClaimPeerCall{Code: code, BoardID: boardID, MemberID: memberID, Name: name, PublicKey: publicKey})
+	if f.boardErr != nil {
+		return nil, f.boardErr
+	}
+	return &core.Member{ID: memberID, BoardID: boardID, Name: name, PublicKey: publicKey, Role: "member"}, nil
+}
+
+func (f *fakeBackend) BoardAcceptClaimReply(ctx context.Context, code, boardID string, reply core.BoardPeerMessage) (*core.Member, error) {
+	if f.boardErr != nil {
+		return nil, f.boardErr
+	}
+	return &core.Member{ID: reply.MemberID, BoardID: boardID, Role: "member"}, nil
+}
+
+func (f *fakeBackend) BoardList(ctx context.Context) ([]*core.Board, error) {
+	f.boardListCalls = append(f.boardListCalls, "")
+	if f.boardErr != nil {
+		return nil, f.boardErr
+	}
+	return nil, nil
+}
+
+func (f *fakeBackend) BoardPeerStatus(ctx context.Context) (core.BoardPeerStatus, error) {
+	if f.boardErr != nil {
+		return core.BoardPeerStatus{}, f.boardErr
+	}
+	return core.BoardPeerStatus{PeerID: "peer-test", Addr: "/ip4/127.0.0.1/tcp/1", Peers: []string{"peer-other"}}, nil
+}
+
+func (f *fakeBackend) BoardPeerConnect(ctx context.Context, multiaddr string) ([]string, error) {
+	if f.boardErr != nil {
+		return nil, f.boardErr
+	}
+	return []string{"peer-other"}, nil
+}
+
+func (f *fakeBackend) BoardPeerSync(ctx context.Context, boardID, memberID, typ string, payload []byte, version int) ([]string, error) {
+	if f.boardErr != nil {
+		return nil, f.boardErr
+	}
+	return []string{"peer-other"}, nil
+}
+
+func (f *fakeBackend) BoardTasks(ctx context.Context, boardID string) ([]*core.Task, error) {
+	f.boardListCalls = append(f.boardListCalls, boardID)
+	if f.boardErr != nil {
+		return nil, f.boardErr
+	}
+	return nil, nil
+}
+
+func (f *fakeBackend) BoardTaskCreate(ctx context.Context, boardID, columnID, title, description, assigneeID string, dueDate *time.Time, tags []string, createdBy string) (*core.Task, error) {
+	f.boardTaskCalls = append(f.boardTaskCalls, boardTaskCall{BoardID: boardID, ColumnID: columnID, Title: title, Description: description, AssigneeID: assigneeID, DueDate: dueDate, Tags: tags, CreatedBy: createdBy})
+	if f.boardErr != nil {
+		return nil, f.boardErr
+	}
+	return &core.Task{ID: "task-stub", Title: title}, nil
+}
+
+func (f *fakeBackend) BoardTaskMove(ctx context.Context, taskID, columnID string) (*core.Task, error) {
+	f.boardTaskCalls = append(f.boardTaskCalls, boardTaskCall{})
+	if f.boardErr != nil {
+		return nil, f.boardErr
+	}
+	return &core.Task{ID: taskID, ColumnID: columnID}, nil
+}
+
+func (f *fakeBackend) BoardTaskDone(ctx context.Context, taskID string, version int) (*core.Task, error) {
+	f.boardTaskDoneCalls = append(f.boardTaskDoneCalls, boardTaskDoneCall{TaskID: taskID, Version: version})
+	if f.boardErr != nil {
+		return nil, f.boardErr
+	}
+	return &core.Task{ID: taskID, Version: version}, nil
+}
+
+func (f *fakeBackend) BoardTaskComment(ctx context.Context, taskID, memberID, text string) (*core.Comment, error) {
+	f.boardTaskCalls = append(f.boardTaskCalls, boardTaskCall{})
+	if f.boardErr != nil {
+		return nil, f.boardErr
+	}
+	return &core.Comment{ID: "comment-stub", TaskID: taskID, MemberID: memberID, Text: text}, nil
+}
+
+func (f *fakeBackend) BoardMembers(ctx context.Context, boardID string) ([]*core.Member, error) {
+	f.boardMembersCalls = append(f.boardMembersCalls, boardID)
+	if f.boardErr != nil {
+		return nil, f.boardErr
+	}
+	return nil, nil
 }
 
 var _ Backend = (*fakeBackend)(nil)

@@ -9,6 +9,7 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -64,6 +65,61 @@ const (
 	mcpListMax      = 100
 	mcpCallTimeout  = 60 * time.Second
 )
+
+// mcpEvent is one notable change in the store or channel that the push
+// events channel reports to subscribed MCP clients.
+type mcpEvent struct {
+	Type      string `json:"type"` // "item.new", "item.updated", "item.deleted", "call.incoming", "call.updated", "call.ended"
+	Channel   string `json:"channel,omitempty"`
+	Account   string `json:"account,omitempty"`
+	ID        string `json:"id,omitempty"`
+	Thread    string `json:"thread,omitempty"`
+	Summary   string `json:"summary,omitempty"`
+	Timestamp string `json:"timestamp"`
+}
+
+// mcpAppState holds shared state for the MCP server: an event channel that
+// mutating tools (send, reply, organize, ...) write to so that the
+// events.next tool can deliver push notifications to subscribed agents.
+type mcpAppState struct {
+	mu     sync.Mutex
+	events chan mcpEvent
+}
+
+// emit publishes an event to the events channel, non-blocking when full.
+func (a *mcpAppState) emit(evt mcpEvent) {
+	a.mu.Lock()
+	ch := a.events
+	a.mu.Unlock()
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- evt:
+	default:
+	}
+}
+
+// nextEvent waits for the next event, respecting ctx cancellation and
+// timeout. Returns nil when the timeout expires without an event.
+func (a *mcpAppState) nextEvent(ctx context.Context, timeout time.Duration) *mcpEvent {
+	a.mu.Lock()
+	ch := a.events
+	a.mu.Unlock()
+	if ch == nil {
+		return nil
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case evt := <-ch:
+		return &evt
+	case <-ctx.Done():
+		return nil
+	case <-timer.C:
+		return nil
+	}
+}
 
 // mcpDialer opens a Backend for one tool call.
 type mcpDialer func(ctx context.Context) (Backend, io.Closer, error)
@@ -228,6 +284,8 @@ type (
 		Channel     string   `json:"channel" jsonschema:"mail, whatsapp or matrix"`
 		Account     string   `json:"account" jsonschema:"account to send from"`
 		To          string   `json:"to" jsonschema:"an address, or a contact name resolved within that account"`
+		Cc          []string `json:"cc,omitempty" jsonschema:"mail only: additional visible recipients, comma-separated address strings"`
+		Bcc         []string `json:"bcc,omitempty" jsonschema:"mail only: hidden recipients that never appear in the message headers or body, comma-separated address strings"`
 		Text        string   `json:"text,omitempty" jsonschema:"the message; may be empty when attachments are given"`
 		Subject     string   `json:"subject,omitempty" jsonschema:"mail only"`
 		Attachments []string `json:"attachments,omitempty" jsonschema:"local files to attach, as absolute paths (no ~, no relative paths); the plan lists each one's name, MIME type and size"`
@@ -236,6 +294,8 @@ type (
 	}
 	mcpReplyIn struct {
 		ID          string   `json:"id" jsonschema:"the item to reply to"`
+		Cc          []string `json:"cc,omitempty" jsonschema:"mail only: additional visible recipients, comma-separated address strings"`
+		Bcc         []string `json:"bcc,omitempty" jsonschema:"mail only: hidden recipients that never appear in the message headers or body, comma-separated address strings"`
 		Text        string   `json:"text,omitempty" jsonschema:"the reply; may be empty when attachments are given"`
 		Attachments []string `json:"attachments,omitempty" jsonschema:"local files to attach, as absolute paths (no ~, no relative paths); the plan lists each one's name, MIME type and size"`
 		Confirm     bool     `json:"confirm,omitempty" jsonschema:"false (default) returns the plan only; true sends, and only works when the server runs with --allow-send"`
@@ -267,6 +327,12 @@ type (
 		Plan    any  `json:"plan" jsonschema:"what was (or would be) sent: action, channel, account, target, preview"`
 		Receipt any  `json:"receipt,omitempty" jsonschema:"the delivery receipt, present only when sent"`
 	}
+	mcpEventsIn struct {
+		TimeoutMs int64 `json:"timeout_ms,omitempty" jsonschema:"maximum wait time in milliseconds (default: 60000)"`
+	}
+	mcpEventsOut struct {
+		Events []mcpEvent `json:"events"`
+	}
 )
 
 func clampLimit(n int) int {
@@ -285,6 +351,11 @@ func newMCPServer(dial mcpDialer, allowSend bool) *mcp.Server {
 	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true}
 	destructive := true
 	outbound := &mcp.ToolAnnotations{DestructiveHint: &destructive}
+
+	// appState holds shared mutable state for this MCP server instance:
+	// the events channel that mutating tools write to so events.next can
+	// deliver push notifications to subscribed agents.
+	appState := &mcpAppState{events: make(chan mcpEvent, 128)}
 
 	mcp.AddTool(server, &mcp.Tool{Name: "counts", Description: "Unread counts per channel and account.", Annotations: readOnly},
 		func(ctx context.Context, _ *mcp.CallToolRequest, _ mcpNoInput) (*mcp.CallToolResult, mcpCountsOut, error) {
@@ -422,14 +493,28 @@ func newMCPServer(dial mcpDialer, allowSend bool) *mcp.Server {
 			if err := mcpCheckOutgoing("send", in.Text, in.Attachments); err != nil {
 				return nil, mcpPlanOut{}, err
 			}
-			return mcpOutbound(ctx, dial, allowSend, in.Confirm, func(ctx context.Context, b Backend, dryRun bool) (core.Plan, core.Receipt, error) {
+			result, out, err := mcpOutbound(ctx, dial, allowSend, in.Confirm, func(ctx context.Context, b Backend, dryRun bool) (core.Plan, core.Receipt, error) {
 				channel := core.Channel(in.Channel)
 				to, err := resolveRecipient(ctx, b, channel, in.Account, in.To, io.Discard, true)
 				if err != nil {
 					return core.Plan{}, core.Receipt{}, err
 				}
-				return b.Send(ctx, core.Outgoing{Channel: channel, Account: in.Account, To: []string{to}, Subject: in.Subject, Body: in.Text, Attachments: in.Attachments, Forward: in.Forward}, dryRun)
+				return b.Send(ctx, core.Outgoing{Channel: channel, Account: in.Account, To: []string{to}, Cc: in.Cc, Bcc: in.Bcc, Subject: in.Subject, Body: in.Text, Attachments: in.Attachments, Forward: in.Forward}, dryRun)
 			})
+			if err != nil {
+				return nil, mcpPlanOut{}, err
+			}
+			if out.Sent {
+				appState.emit(mcpEvent{
+					Type:      "item.new",
+					Channel:   in.Channel,
+					Account:   in.Account,
+					Thread:    "",
+					Summary:   in.Text,
+					Timestamp: time.Now().Format(time.RFC3339),
+				})
+			}
+			return result, out, nil
 		})
 
 	mcp.AddTool(server, &mcp.Tool{Name: "reply", Description: "Reply to an item, optionally with attachments (absolute local paths). Returns the plan only, listing each attachment, unless confirm is true and the server allows sending.", Annotations: outbound},
@@ -437,9 +522,23 @@ func newMCPServer(dial mcpDialer, allowSend bool) *mcp.Server {
 			if err := mcpCheckOutgoing("reply", in.Text, in.Attachments); err != nil {
 				return nil, mcpPlanOut{}, err
 			}
-			return mcpOutbound(ctx, dial, allowSend, in.Confirm, func(ctx context.Context, b Backend, dryRun bool) (core.Plan, core.Receipt, error) {
-				return b.Reply(ctx, in.ID, in.Text, nil, in.Attachments, dryRun)
+			result, out, err := mcpOutbound(ctx, dial, allowSend, in.Confirm, func(ctx context.Context, b Backend, dryRun bool) (core.Plan, core.Receipt, error) {
+				return b.Reply(ctx, in.ID, in.Text, in.Cc, in.Bcc, in.Attachments, dryRun)
 			})
+			if err != nil {
+				return nil, mcpPlanOut{}, err
+			}
+			if out.Sent {
+				appState.emit(mcpEvent{
+					Type:      "item.updated",
+					Channel:   "",
+					Account:   "",
+					ID:        in.ID,
+					Summary:   "reply: " + in.Text,
+					Timestamp: time.Now().Format(time.RFC3339),
+				})
+			}
+			return result, out, nil
 		})
 
 	addMCPOrganizeTools(server, dial, allowSend)
@@ -448,6 +547,121 @@ func newMCPServer(dial mcpDialer, allowSend bool) *mcp.Server {
 	addMCPDownloadTool(server, dial)
 	addMCPTodoTools(server, dial)
 	addMCPAwaitingTool(server, dial)
+
+	// --- MCP resources (read-only, no confirm needed) ---
+	server.AddResource(&mcp.Resource{
+		Name:        "Unread counts",
+		Description: "Unread item counts per channel and account.",
+		MIMEType:    "application/json",
+		URI:         "bunker://unread",
+		Title:       "Unread counts",
+	}, func(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		counts, err := withBackend(ctx, dial, func(ctx context.Context, b Backend) (map[core.Channel]map[string]int, error) {
+			return b.Counts(ctx)
+		})
+		if err != nil {
+			return nil, err
+		}
+		b, _ := json.Marshal(map[string]any{"unread": counts})
+		return &mcp.ReadResourceResult{
+			Contents: []*mcp.ResourceContents{{
+				URI:      "bunker://unread",
+				MIMEType: "application/json",
+				Text:     string(b),
+			}},
+		}, nil
+	})
+
+	// --- MCP prompts (templated agent guidance) ---
+	server.AddPrompt(&mcp.Prompt{
+		Name:        "responder-a-incidente",
+		Title:       "Responder a incidente",
+		Description: "Lee un hilo de correo o chat y sugiere un borrador de respuesta para un incidente de soporte.",
+		Arguments: []*mcp.PromptArgument{
+			{Name: "item_id", Description: "Id del ítem a responder (devuelto por list/read)", Required: true},
+			{Name: "tono", Description: "Tono de la respuesta: formal, amable, directo (default: formal)", Required: false},
+		},
+	}, func(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		itemID := req.Params.Arguments["item_id"]
+		tono := req.Params.Arguments["tono"]
+		if tono == "" {
+			tono = "formal"
+		}
+		text := fmt.Sprintf("Responde al ítem %s con tono %s. Lee primero el hilo completo con read o thread, luego redacta un borrador breve y profesional. No envíes sin confirmar con el usuario.", itemID, tono)
+		return &mcp.GetPromptResult{
+			Description: "Plantilla para responder a un incidente de soporte",
+			Messages: []*mcp.PromptMessage{{
+				Role:    mcp.Role("user"),
+				Content: &mcp.TextContent{Text: text},
+			}},
+		}, nil
+	})
+
+	server.AddPrompt(&mcp.Prompt{
+		Name:        "resumir-conversacion",
+		Title:       "Resumir conversación",
+		Description: "Resume los últimos mensajes de un hilo de conversación.",
+		Arguments: []*mcp.PromptArgument{
+			{Name: "channel", Description: "Canal: mail, whatsapp o matrix", Required: true},
+			{Name: "account", Description: "Nombre de la cuenta", Required: true},
+			{Name: "thread", Description: "Id del hilo", Required: true},
+			{Name: "limit", Description: "Número máximo de mensajes a resumir (default: 10)", Required: false},
+		},
+	}, func(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		channel := req.Params.Arguments["channel"]
+		account := req.Params.Arguments["account"]
+		thread := req.Params.Arguments["thread"]
+		limit := req.Params.Arguments["limit"]
+		if limit == "" {
+			limit = "10"
+		}
+		text := fmt.Sprintf("Resuma los últimos %s mensajes del hilo %s en la cuenta %s del canal %s. Use el tool thread para leer los mensajes, luego escriba un resumen de máximo 3 viñetas con los puntos clave y las acciones pendientes.", limit, thread, account, channel)
+		return &mcp.GetPromptResult{
+			Description: "Plantilla para resumir una conversación",
+			Messages: []*mcp.PromptMessage{{
+				Role:    mcp.Role("user"),
+				Content: &mcp.TextContent{Text: text},
+			}},
+		}, nil
+	})
+
+	server.AddPrompt(&mcp.Prompt{
+		Name:        "redactar-respuesta",
+		Title:       "Redactar respuesta",
+		Description: "Redacta una respuesta a un ítem dado una intención.",
+		Arguments: []*mcp.PromptArgument{
+			{Name: "item_id", Description: "Id del ítem al que responder", Required: true},
+			{Name: "intencion", Description: "Qué se quiere comunicar en la respuesta", Required: true},
+		},
+	}, func(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		itemID := req.Params.Arguments["item_id"]
+		intencion := req.Params.Arguments["intencion"]
+		text := fmt.Sprintf("Redacte una respuesta al ítem %s con la siguiente intención: %s. Primero lea el ítem con read para entender el contexto, luego redacte un borrador breve y claro. No envíe sin confirmar con el usuario.", itemID, intencion)
+		return &mcp.GetPromptResult{
+			Description: "Plantilla para redactar una respuesta",
+			Messages: []*mcp.PromptMessage{{
+				Role:    mcp.Role("user"),
+				Content: &mcp.TextContent{Text: text},
+			}},
+		}, nil
+	})
+
+	// --- MCP events channel (push notifications to subscribed agents) ---
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "events.next",
+		Description: "Espera (long-polling) por el próximo evento del sistema: nuevos ítems, llamadas entrantes, cambios de estado. Devuelve vacío si no hay evento antes del timeout.",
+		Annotations: readOnly,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpEventsIn) (*mcp.CallToolResult, mcpEventsOut, error) {
+		timeout := mcpCallTimeout
+		if in.TimeoutMs > 0 {
+			timeout = time.Duration(in.TimeoutMs) * time.Millisecond
+		}
+		evt := appState.nextEvent(ctx, timeout)
+		if evt == nil {
+			return nil, mcpEventsOut{}, nil
+		}
+		return nil, mcpEventsOut{Events: []mcpEvent{*evt}}, nil
+	})
 
 	return server
 }

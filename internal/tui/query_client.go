@@ -152,7 +152,7 @@ func (c *queryClient) Read(ctx context.Context, id string, receipt bool) (core.I
 	return client.Read(ctx, id, true)
 }
 
-func (c *queryClient) Reply(ctx context.Context, id, body string, cc, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
+func (c *queryClient) Reply(ctx context.Context, id, body string, cc, bcc, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
 	if err := c.acquire(ctx); err != nil {
 		return core.Plan{}, core.Receipt{}, err
 	}
@@ -161,7 +161,7 @@ func (c *queryClient) Reply(ctx context.Context, id, body string, cc, attachment
 	if err != nil {
 		return core.Plan{}, core.Receipt{}, err
 	}
-	return client.Reply(ctx, id, body, cc, attachments, dryRun)
+	return client.Reply(ctx, id, body, cc, bcc, attachments, dryRun)
 }
 
 func (c *queryClient) Organize(ctx context.Context, id string, op core.OrganizeOp, dryRun bool) (core.Plan, error) {
@@ -440,9 +440,9 @@ func (c *queryClient) Calls(ctx context.Context) ([]core.Call, error) {
 	return calls, err
 }
 
-func (c *queryClient) PlaceCall(ctx context.Context, channel core.Channel, account, to string, dryRun bool) (core.Plan, core.Call, error) {
+func (c *queryClient) PlaceCall(ctx context.Context, channel core.Channel, account, to string, video, dryRun bool) (core.Plan, core.Call, error) {
 	return c.callAction(ctx, func(cc CallClient) (core.Plan, core.Call, error) {
-		return cc.PlaceCall(ctx, channel, account, to, dryRun)
+		return cc.PlaceCall(ctx, channel, account, to, video, dryRun)
 	})
 }
 
@@ -466,6 +466,106 @@ func (c *queryClient) callAction(ctx context.Context, do func(CallClient) (core.
 		return core.Plan{}, core.Call{}, fmt.Errorf("tui: calls: %w", core.ErrUnsupported)
 	}
 	return do(cc)
+}
+
+// Board read-only queries retry-after-redial like List and Counts.
+
+func (c *queryClient) BoardList(ctx context.Context) ([]*core.Board, error) {
+	return query(c, ctx, func(client Client) ([]*core.Board, error) { return client.BoardList(ctx) })
+}
+
+func (c *queryClient) BoardTasks(ctx context.Context, boardID string) ([]*core.Task, error) {
+	return query(c, ctx, func(client Client) ([]*core.Task, error) { return client.BoardTasks(ctx, boardID) })
+}
+
+func (c *queryClient) BoardMembers(ctx context.Context, boardID string) ([]*core.Member, error) {
+	return query(c, ctx, func(client Client) ([]*core.Member, error) { return client.BoardMembers(ctx, boardID) })
+}
+
+// Board writes are forwarded at most once, like Reply/Organize/Send.
+
+func (c *queryClient) BoardCreate(ctx context.Context, name, ownerID string) (*core.Board, error) {
+	if err := c.acquire(ctx); err != nil {
+		return nil, err
+	}
+	defer c.release()
+	client, err := c.activeClient()
+	if err != nil {
+		return nil, err
+	}
+	return client.BoardCreate(ctx, name, ownerID)
+}
+
+func (c *queryClient) BoardInvite(ctx context.Context, boardID, createdBy string, ttl time.Duration, maxUses int) (*core.InviteCode, error) {
+	if err := c.acquire(ctx); err != nil {
+		return nil, err
+	}
+	defer c.release()
+	client, err := c.activeClient()
+	if err != nil {
+		return nil, err
+	}
+	return client.BoardInvite(ctx, boardID, createdBy, ttl, maxUses)
+}
+
+func (c *queryClient) BoardJoin(ctx context.Context, code, memberID, name, publicKey string) (*core.Member, error) {
+	if err := c.acquire(ctx); err != nil {
+		return nil, err
+	}
+	defer c.release()
+	client, err := c.activeClient()
+	if err != nil {
+		return nil, err
+	}
+	return client.BoardJoin(ctx, code, memberID, name, publicKey)
+}
+
+func (c *queryClient) BoardTaskCreate(ctx context.Context, boardID, columnID, title, description, assigneeID string, dueDate *time.Time, tags []string, createdBy string) (*core.Task, error) {
+	if err := c.acquire(ctx); err != nil {
+		return nil, err
+	}
+	defer c.release()
+	client, err := c.activeClient()
+	if err != nil {
+		return nil, err
+	}
+	return client.BoardTaskCreate(ctx, boardID, columnID, title, description, assigneeID, dueDate, tags, createdBy)
+}
+
+func (c *queryClient) BoardTaskMove(ctx context.Context, taskID, columnID string) (*core.Task, error) {
+	if err := c.acquire(ctx); err != nil {
+		return nil, err
+	}
+	defer c.release()
+	client, err := c.activeClient()
+	if err != nil {
+		return nil, err
+	}
+	return client.BoardTaskMove(ctx, taskID, columnID)
+}
+
+func (c *queryClient) BoardTaskDone(ctx context.Context, taskID string, version int) (*core.Task, error) {
+	if err := c.acquire(ctx); err != nil {
+		return nil, err
+	}
+	defer c.release()
+	client, err := c.activeClient()
+	if err != nil {
+		return nil, err
+	}
+	return client.BoardTaskDone(ctx, taskID, version)
+}
+
+func (c *queryClient) BoardTaskComment(ctx context.Context, taskID, memberID, text string) (*core.Comment, error) {
+	if err := c.acquire(ctx); err != nil {
+		return nil, err
+	}
+	defer c.release()
+	client, err := c.activeClient()
+	if err != nil {
+		return nil, err
+	}
+	return client.BoardTaskComment(ctx, taskID, memberID, text)
 }
 
 func (c *queryClient) Close() error {

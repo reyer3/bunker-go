@@ -20,7 +20,7 @@ func TestVoiceNoteCrossesTheSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, _, err := client.Reply(core.WithVoice(context.Background()), "mail:cl:1", "", nil, []string{path}, true)
+	plan, _, err := client.Reply(core.WithVoice(context.Background()), "mail:cl:1", "", nil, nil, []string{path}, true)
 	if err != nil {
 		t.Fatalf("Reply dry-run: %v", err)
 	}
@@ -31,7 +31,7 @@ func TestVoiceNoteCrossesTheSocket(t *testing.T) {
 		t.Fatal("dry-run reached the adapter")
 	}
 
-	if _, _, err := client.Reply(core.WithVoice(context.Background()), "mail:cl:1", "", nil, []string{path}, false); err != nil {
+	if _, _, err := client.Reply(core.WithVoice(context.Background()), "mail:cl:1", "", nil, nil, []string{path}, false); err != nil {
 		t.Fatalf("Reply: %v", err)
 	}
 	_, _, err = client.Send(context.Background(), core.Outgoing{

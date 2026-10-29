@@ -184,14 +184,14 @@ func (c *Client) Counts(ctx context.Context) (map[core.Channel]map[string]int, e
 // attaching local files. An idempotency key in ctx (core.WithIdempotencyKey)
 // goes on the wire so the daemon sends at most once per key. A remote
 // client uploads the attachments (or voice note) first (see uploadFiles).
-func (c *Client) Reply(ctx context.Context, id, body string, cc, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
+func (c *Client) Reply(ctx context.Context, id, body string, cc, bcc []string, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
 	attachments, uploads, err := c.uploadFiles(ctx, attachments...)
 	defer uploads.release(ctx)
 	if err != nil {
 		return core.Plan{}, core.Receipt{}, err
 	}
 	var res planReceiptResult
-	params := replyParams{ID: id, Body: body, Cc: cc, Attachments: attachments, DryRun: dryRun, IdempotencyKey: core.IdempotencyKey(ctx), Voice: core.IsVoice(ctx)}
+	params := replyParams{ID: id, Body: body, Cc: cc, Bcc: bcc, Attachments: attachments, DryRun: dryRun, IdempotencyKey: core.IdempotencyKey(ctx), Voice: core.IsVoice(ctx)}
 	if err := c.call(ctx, MethodReply, params, &res); err != nil {
 		return core.Plan{}, core.Receipt{}, err
 	}
@@ -253,10 +253,10 @@ func (c *Client) Organize(ctx context.Context, id string, op core.OrganizeOp, dr
 	return res.Plan, nil
 }
 
-// PlaceCall starts a voice call to to on channel/account.
-func (c *Client) PlaceCall(ctx context.Context, channel core.Channel, account, to string, dryRun bool) (core.Plan, core.Call, error) {
+// PlaceCall starts a voice or video call to to on channel/account.
+func (c *Client) PlaceCall(ctx context.Context, channel core.Channel, account, to string, video, dryRun bool) (core.Plan, core.Call, error) {
 	var res planCallResult
-	err := c.call(ctx, MethodCall, callParams{Channel: channel, Account: account, To: to, DryRun: dryRun}, &res)
+	err := c.call(ctx, MethodCall, callParams{Channel: channel, Account: account, To: to, Video: video, DryRun: dryRun}, &res)
 	if err != nil {
 		return core.Plan{}, core.Call{}, err
 	}
@@ -521,6 +521,144 @@ func (c *Client) Search(ctx context.Context, channel core.Channel, account strin
 		return nil, err
 	}
 	return res.Items, nil
+}
+
+// BoardPeerStatus returns the daemon's P2P node status.
+func (c *Client) BoardPeerStatus(ctx context.Context) (core.BoardPeerStatus, error) {
+	var res p2pStatusResult
+	if err := c.call(ctx, MethodP2PStatus, p2pStatusParams{}, &res); err != nil {
+		return core.BoardPeerStatus{}, err
+	}
+	return res.Status, nil
+}
+
+// BoardPeerConnect dials a peer from its full multiaddr.
+func (c *Client) BoardPeerConnect(ctx context.Context, multiaddr string) ([]string, error) {
+	var res p2pConnectResult
+	if err := c.call(ctx, MethodP2PConnect, p2pConnectParams{Multiaddr: multiaddr}, &res); err != nil {
+		return nil, err
+	}
+	return res.Peers, nil
+}
+
+// BoardPeerSync publishes one forced board delta over P2P.
+func (c *Client) BoardPeerSync(ctx context.Context, boardID, memberID, typ string, payload []byte, version int) ([]string, error) {
+	var res p2pSyncResult
+	params := p2pSyncParams{BoardID: boardID, MemberID: memberID, Type: typ, Payload: payload, Version: version}
+	if err := c.call(ctx, MethodP2PSync, params, &res); err != nil {
+		return nil, err
+	}
+	return res.Peers, nil
+}
+
+// BoardCreate creates a shared board.
+func (c *Client) BoardCreate(ctx context.Context, name, ownerID string) (*core.Board, error) {
+	var res boardCreateResult
+	if err := c.call(ctx, MethodBoardCreate, boardCreateParams{Name: name, OwnerID: ownerID}, &res); err != nil {
+		return nil, err
+	}
+	return res.Board, nil
+}
+
+// BoardInvite generates an invite code for the board. ttl is the code's
+// time-to-live (0 means the default 48h).
+func (c *Client) BoardInvite(ctx context.Context, boardID, createdBy string, ttl time.Duration, maxUses int) (*core.InviteCode, error) {
+	var res boardInviteResult
+	if err := c.call(ctx, MethodBoardInvite, boardInviteParams{BoardID: boardID, CreatedBy: createdBy, TTLSeconds: int(ttl.Seconds()), MaxUses: maxUses}, &res); err != nil {
+		return nil, err
+	}
+	return res.Invite, nil
+}
+
+// BoardJoin lets a member join a board using an invite code.
+func (c *Client) BoardJoin(ctx context.Context, code, memberID, name, publicKey string) (*core.Member, error) {
+	var res boardJoinResult
+	if err := c.call(ctx, MethodBoardJoin, boardJoinParams{Code: code, MemberID: memberID, Name: name, PublicKey: publicKey}, &res); err != nil {
+		return nil, err
+	}
+	return res.Member, nil
+}
+
+// BoardClaimPeer claims an invite over the daemon's P2P node.
+func (c *Client) BoardClaimPeer(ctx context.Context, code, boardID, memberID, name, publicKey string) (*core.Member, error) {
+	var res boardJoinResult
+	if err := c.call(ctx, MethodBoardClaimPeer, boardClaimPeerParams{Code: code, BoardID: boardID, MemberID: memberID, Name: name, PublicKey: publicKey}, &res); err != nil {
+		return nil, err
+	}
+	return res.Member, nil
+}
+
+// BoardAcceptClaimReply adopts the reply to a claim made against a relay.
+func (c *Client) BoardAcceptClaimReply(ctx context.Context, code, boardID string, reply core.BoardPeerMessage) (*core.Member, error) {
+	var res boardJoinResult
+	if err := c.call(ctx, MethodBoardAcceptClaimReply, boardAcceptClaimReplyParams{Code: code, BoardID: boardID, Reply: reply}, &res); err != nil {
+		return nil, err
+	}
+	return res.Member, nil
+}
+
+// BoardList returns every shared board.
+func (c *Client) BoardList(ctx context.Context) ([]*core.Board, error) {
+	var res boardListResult
+	if err := c.call(ctx, MethodBoardList, boardListParams{}, &res); err != nil {
+		return nil, err
+	}
+	return res.Boards, nil
+}
+
+// BoardTaskCreate creates a task in a column of the board.
+func (c *Client) BoardTaskCreate(ctx context.Context, boardID, columnID, title, description, assigneeID string, dueDate *time.Time, tags []string, createdBy string) (*core.Task, error) {
+	var res boardTaskCreateResult
+	if err := c.call(ctx, MethodBoardTaskCreate, boardTaskCreateParams{BoardID: boardID, ColumnID: columnID, Title: title, Description: description, AssigneeID: assigneeID, DueDate: dueDate, Tags: tags, CreatedBy: createdBy}, &res); err != nil {
+		return nil, err
+	}
+	return res.Task, nil
+}
+
+// BoardTaskMove moves a task to another column.
+func (c *Client) BoardTaskMove(ctx context.Context, taskID, columnID string) (*core.Task, error) {
+	var res boardTaskMoveResult
+	if err := c.call(ctx, MethodBoardTaskMove, boardTaskMoveParams{TaskID: taskID, ColumnID: columnID}, &res); err != nil {
+		return nil, err
+	}
+	return res.Task, nil
+}
+
+// BoardTaskDone marks a task as done. version is the expected current
+// version for optimistic concurrency.
+func (c *Client) BoardTaskDone(ctx context.Context, taskID string, version int) (*core.Task, error) {
+	var res boardTaskDoneResult
+	if err := c.call(ctx, MethodBoardTaskDone, boardTaskDoneParams{TaskID: taskID, Version: version}, &res); err != nil {
+		return nil, err
+	}
+	return res.Task, nil
+}
+
+// BoardTaskComment appends a comment to a task.
+func (c *Client) BoardTaskComment(ctx context.Context, taskID, memberID, text string) (*core.Comment, error) {
+	var res boardTaskCommentResult
+	if err := c.call(ctx, MethodBoardTaskComment, boardTaskCommentParams{TaskID: taskID, MemberID: memberID, Text: text}, &res); err != nil {
+		return nil, err
+	}
+	return res.Comment, nil
+}
+
+// BoardMembers returns all members of a board.
+func (c *Client) BoardMembers(ctx context.Context, boardID string) ([]*core.Member, error) {
+	var res boardMembersResult
+	if err := c.call(ctx, MethodBoardMembers, boardMembersParams{BoardID: boardID}, &res); err != nil {
+		return nil, err
+	}
+	return res.Members, nil
+}
+
+// BoardTasks returns the tasks of a board.
+func (c *Client) BoardTasks(ctx context.Context, boardID string) ([]*core.Task, error) {
+	var res boardTasksResult
+	if err := c.call(ctx, MethodBoardTasks, boardTasksParams{BoardID: boardID}, &res); err != nil {
+		return nil, err
+	}
+	return res.Tasks, nil
 }
 
 // Avatar returns a local PNG path for (channel, account, thread)'s

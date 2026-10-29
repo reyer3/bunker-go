@@ -248,7 +248,7 @@ func TestIdempotencyReplySendsOnce(t *testing.T) {
 	ctx := core.WithIdempotencyKey(context.Background(), "r1")
 
 	for range 2 {
-		if _, _, err := svc.Reply(ctx, item.ID, "ok", nil, nil, false); err != nil {
+		if _, _, err := svc.Reply(ctx, item.ID, "ok", nil, nil, nil, false); err != nil {
 			t.Fatal(err)
 		}
 	}

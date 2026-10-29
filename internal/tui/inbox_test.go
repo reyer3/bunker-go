@@ -148,7 +148,7 @@ func (c *inboxClient) Read(_ context.Context, id string, receipt bool) (core.Ite
 	return c.readResult, c.readErr
 }
 
-func (c *inboxClient) Reply(context.Context, string, string, []string, []string, bool) (core.Plan, core.Receipt, error) {
+func (c *inboxClient) Reply(context.Context, string, string, []string, []string, []string, bool) (core.Plan, core.Receipt, error) {
 	c.otherCalls++
 	return core.Plan{}, core.Receipt{}, nil
 }
@@ -181,6 +181,56 @@ func (c *inboxClient) Download(_ context.Context, id string, index int, destPath
 }
 
 func (c *inboxClient) Close() error { return nil }
+
+func (c *inboxClient) BoardCreate(context.Context, string, string) (*core.Board, error) {
+	c.otherCalls++
+	return nil, nil
+}
+
+func (c *inboxClient) BoardInvite(context.Context, string, string, time.Duration, int) (*core.InviteCode, error) {
+	c.otherCalls++
+	return nil, nil
+}
+
+func (c *inboxClient) BoardJoin(context.Context, string, string, string, string) (*core.Member, error) {
+	c.otherCalls++
+	return nil, nil
+}
+
+func (c *inboxClient) BoardList(context.Context) ([]*core.Board, error) {
+	c.otherCalls++
+	return nil, nil
+}
+
+func (c *inboxClient) BoardTasks(context.Context, string) ([]*core.Task, error) {
+	c.otherCalls++
+	return nil, nil
+}
+
+func (c *inboxClient) BoardTaskCreate(context.Context, string, string, string, string, string, *time.Time, []string, string) (*core.Task, error) {
+	c.otherCalls++
+	return nil, nil
+}
+
+func (c *inboxClient) BoardTaskMove(context.Context, string, string) (*core.Task, error) {
+	c.otherCalls++
+	return nil, nil
+}
+
+func (c *inboxClient) BoardTaskDone(context.Context, string, int) (*core.Task, error) {
+	c.otherCalls++
+	return nil, nil
+}
+
+func (c *inboxClient) BoardTaskComment(context.Context, string, string, string) (*core.Comment, error) {
+	c.otherCalls++
+	return nil, nil
+}
+
+func (c *inboxClient) BoardMembers(context.Context, string) ([]*core.Member, error) {
+	c.otherCalls++
+	return nil, nil
+}
 
 func item(id string, channel core.Channel, account, thread string, at time.Time) core.Item {
 	return core.Item{ID: id, Channel: channel, Account: account, Thread: thread, Unread: true, Timestamp: at}

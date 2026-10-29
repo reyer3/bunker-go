@@ -56,7 +56,9 @@ func TestRunDaemonFakeSeedsDemoItemsAndServesRPC(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var stdout, stderr bytes.Buffer
 	done := make(chan error, 1)
-	go func() { done <- runDaemon(ctx, dir, filepath.Join(dir, "avatars"), socket, true, &stdout, &stderr) }()
+	go func() {
+		done <- runDaemon(ctx, dir, filepath.Join(dir, "avatars"), socket, true, "127.0.0.1:0", "", &stdout, &stderr)
+	}()
 
 	client := dialUntilReady(t, socket)
 	defer client.Close()
@@ -96,7 +98,9 @@ func TestRunDaemonWithoutConfigStartsWithEmptyRegistry(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var stdout, stderr bytes.Buffer
 	done := make(chan error, 1)
-	go func() { done <- runDaemon(ctx, dir, filepath.Join(dir, "avatars"), socket, false, &stdout, &stderr) }()
+	go func() {
+		done <- runDaemon(ctx, dir, filepath.Join(dir, "avatars"), socket, false, "127.0.0.1:0", "", &stdout, &stderr)
+	}()
 
 	client := dialUntilReady(t, socket)
 	defer client.Close()

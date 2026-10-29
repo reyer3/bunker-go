@@ -85,6 +85,13 @@ type Service struct {
 	// message's age against the channel's MessageWindows with; tests
 	// inject a fixed instant.
 	messageClock func() time.Time
+	// boardSvc is the shared-board service layer, wired when the store
+	// implements core.BoardStore (internal/store does). Nil means boards
+	// are not supported by this store.
+	boardSvc *BoardService
+	// boardPeer is the optional P2P transport the daemon registers with
+	// SetBoardPeer (internal/core/board_peer.go). Nil means P2P is off.
+	boardPeer BoardPeer
 }
 
 // SetQueryClock overrides the clock ListPage resolves relative query
@@ -122,9 +129,11 @@ func (s *Service) HealthReport(ctx context.Context) (HealthReport, error) {
 	return report, nil
 }
 
-// NewService wires a Service to its Store and Registry.
+// NewService wires a Service to its Store and Registry. When the store
+// implements core.BoardStore (internal/store does), an internal
+// BoardService is wired so the Service exposes the shared-board methods.
 func NewService(store Store, registry *Registry) *Service {
-	return &Service{
+	s := &Service{
 		store:               store,
 		registry:            registry,
 		sleep:               time.Sleep,
@@ -138,6 +147,10 @@ func NewService(store Store, registry *Registry) *Service {
 		idempotency:         newIdempotencyCache(),
 		messageClock:        time.Now,
 	}
+	if bs, ok := store.(BoardStore); ok {
+		s.boardSvc = NewBoardService(bs)
+	}
+	return s
 }
 
 // SetSleeper overrides how Service waits between fan-out recipients.
@@ -602,26 +615,31 @@ func toLowerASCII(s string) string {
 //
 // A real reply whose ctx carries an idempotency key (WithIdempotencyKey)
 // is sent at most once per key; see idempotencyCache.do.
-func (s *Service) Reply(ctx context.Context, id string, body string, cc []string, attachments []string, dryRun bool) (Plan, Receipt, error) {
+func (s *Service) Reply(ctx context.Context, id string, body string, cc, bcc []string, attachments []string, dryRun bool) (Plan, Receipt, error) {
 	if err := s.checkStagedPaths(attachments...); err != nil {
 		return Plan{}, Receipt{}, err
 	}
 	key := IdempotencyKey(ctx)
 	if dryRun || key == "" {
-		return s.reply(ctx, id, body, cc, attachments, dryRun)
+		return s.reply(ctx, id, body, cc, bcc, attachments, dryRun)
 	}
 	parts := append([]string{"reply", id, body, "cc"}, cc...)
+	parts = append(parts, "bcc")
+	parts = append(parts, bcc...)
 	parts = append(parts, "attachments")
 	parts = append(parts, s.fingerprintPaths(attachments)...)
 	parts = append(parts, fmt.Sprint("voice=", IsVoice(ctx)))
 	return s.idempotency.do(ctx, key, requestFingerprint(parts...), func() (Plan, Receipt, error) {
-		return s.reply(ctx, id, body, cc, attachments, false)
+		return s.reply(ctx, id, body, cc, bcc, attachments, false)
 	})
 }
 
-func (s *Service) reply(ctx context.Context, id string, body string, cc []string, attachments []string, dryRun bool) (Plan, Receipt, error) {
+func (s *Service) reply(ctx context.Context, id string, body string, cc, bcc []string, attachments []string, dryRun bool) (Plan, Receipt, error) {
 	item, err := s.store.Get(ctx, id)
 	if err != nil {
+		return Plan{}, Receipt{}, err
+	}
+	if err := validateOutgoingRecipients([]string{item.From.ID}, cc, bcc); err != nil {
 		return Plan{}, Receipt{}, err
 	}
 
@@ -631,6 +649,7 @@ func (s *Service) reply(ctx context.Context, id string, body string, cc []string
 		Account:    item.Account,
 		Target:     id,
 		Cc:         cc,
+		Bcc:        bcc,
 		Subject:    replySubject(item.Subject),
 		Preview:    body,
 		Media:      attachments,
@@ -647,12 +666,14 @@ func (s *Service) reply(ctx context.Context, id string, body string, cc []string
 		Account:     item.Account,
 		To:          []string{item.From.ID},
 		Cc:          cc,
+		Bcc:         bcc,
 		Thread:      item.Thread,
 		ReplyTo:     id,
 		Subject:     item.Subject,
 		Body:        body,
 		Attachments: attachments,
 	}
+	plan.RiskLevel, plan.SuggestedConfirmation, plan.EstimatedSideEffects = assessSendRisk(out)
 
 	if IsVoice(ctx) {
 		out.Voice = true
@@ -720,6 +741,8 @@ func (s *Service) Send(ctx context.Context, out Outgoing, dryRun bool) (Plan, Re
 	parts = append(parts, out.To...)
 	parts = append(parts, "cc")
 	parts = append(parts, out.Cc...)
+	parts = append(parts, "bcc")
+	parts = append(parts, out.Bcc...)
 	parts = append(parts, "attachments")
 	parts = append(parts, s.fingerprintPaths(out.Attachments)...)
 	parts = append(parts, fmt.Sprint("voice=", out.Voice), fmt.Sprint("forward=", out.Forward))
@@ -729,18 +752,23 @@ func (s *Service) Send(ctx context.Context, out Outgoing, dryRun bool) (Plan, Re
 }
 
 func (s *Service) send(ctx context.Context, out Outgoing, dryRun bool) (Plan, Receipt, error) {
+	if err := validateOutgoingRecipients(out.To, out.Cc, out.Bcc); err != nil {
+		return Plan{}, Receipt{}, err
+	}
 	plan := Plan{
 		Action:     "send",
 		Channel:    out.Channel,
 		Account:    out.Account,
 		Target:     fmt.Sprint(out.To),
 		Cc:         out.Cc,
+		Bcc:        out.Bcc,
 		Subject:    out.Subject,
 		Preview:    out.Body,
 		Media:      out.Attachments,
 		Recipients: append([]string{}, out.To...),
 		Forward:    out.Forward,
 	}
+	plan.RiskLevel, plan.SuggestedConfirmation, plan.EstimatedSideEffects = assessSendRisk(out)
 
 	// A forward goes to one target at a time (human pacing on chat
 	// channels): forwarding the same message to several people at once is
@@ -852,6 +880,9 @@ func (s *Service) sendFanout(ctx context.Context, adapter Adapter, plan Plan, ou
 	policy := fanoutPolicy(adapter)
 	if len(out.Cc) > 0 {
 		return Plan{}, Receipt{}, fmt.Errorf("core: send: %s has no Cc; a broadcast cannot carry %d Cc recipient(s): %w", out.Channel, len(out.Cc), ErrUnsupported)
+	}
+	if len(out.Bcc) > 0 {
+		return Plan{}, Receipt{}, fmt.Errorf("core: send: %s has no Bcc; a broadcast cannot carry %d Bcc recipient(s): %w", out.Channel, len(out.Bcc), ErrUnsupported)
 	}
 	if len(out.To) > policy.MaxRecipients {
 		return Plan{}, Receipt{}, fmt.Errorf("core: send: %d recipients exceeds the %d broadcast limit: %w", len(out.To), policy.MaxRecipients, ErrTooManyRecipients)
@@ -1061,4 +1092,210 @@ func (s *Service) PostStatus(ctx context.Context, channel Channel, account strin
 		return Plan{}, Receipt{}, fmt.Errorf("core: post status failed: %w", err)
 	}
 	return plan, receipt, nil
+}
+
+// assessSendRisk computes the dry-run risk assessment for an outgoing
+// message. It is used by Service.Send and Service.Reply to enrich the Plan
+// so an agent or CLI can decide whether to ask the user for confirm.
+func assessSendRisk(out Outgoing) (riskLevel, suggestedConfirmation, estimatedSideEffects string) {
+	// Build the side-effects description first; it is shared across risk levels.
+	var effects []string
+	if len(out.To) > 1 {
+		effects = append(effects, fmt.Sprintf("entrega a %d destinatarios", len(out.To)))
+	} else {
+		effects = append(effects, "entrega a un destinatario")
+	}
+	if len(out.Cc) > 0 {
+		effects = append(effects, fmt.Sprintf("copia oculta a %d destinatario(s)", len(out.Cc)))
+	}
+	if len(out.Bcc) > 0 {
+		effects = append(effects, fmt.Sprintf("copia oculta a %d destinatario(s)", len(out.Bcc)))
+	}
+	if len(out.Attachments) > 0 {
+		effects = append(effects, fmt.Sprintf("adjunta %d archivo(s)", len(out.Attachments)))
+	}
+	if out.Forward {
+		effects = append(effects, "marca como reenviado")
+	}
+	if out.Voice {
+		effects = append(effects, "envía como nota de voz")
+	}
+	estimatedSideEffects = strings.Join(effects, ", ")
+
+	// Determine the risk level.
+	risk := "bajo"
+	switch {
+	case len(out.To) > 1:
+		risk = "alto" // broadcast
+	case out.Forward && len(out.To) > 1:
+		risk = "alto" // bulk forward
+	case len(out.Attachments) > 0 || len(out.Cc) > 0 || len(out.Bcc) > 0:
+		risk = "medio" // attachments or extra recipients
+	}
+
+	// Suggested confirmation wording.
+	switch risk {
+	case "alto":
+		if len(out.To) > 1 {
+			suggestedConfirmation = fmt.Sprintf("¿Envías este mensaje a %d destinatarios? Es un broadcast y se entrega a todos.", len(out.To))
+		} else {
+			suggestedConfirmation = "¿Confirma el envío de este mensaje de alto riesgo?"
+		}
+	case "medio":
+		parts := []string{}
+		if len(out.Attachments) > 0 {
+			parts = append(parts, fmt.Sprintf("%d adjunto(s)", len(out.Attachments)))
+		}
+		if len(out.Cc) > 0 {
+			parts = append(parts, fmt.Sprintf("%d copia(s) visible(s)", len(out.Cc)))
+		}
+		if len(out.Bcc) > 0 {
+			parts = append(parts, fmt.Sprintf("%d copia(s) oculta(s)", len(out.Bcc)))
+		}
+		suggestedConfirmation = fmt.Sprintf("¿Envía este mensaje con %s?", strings.Join(parts, " y "))
+	}
+	return risk, suggestedConfirmation, estimatedSideEffects
+}
+
+// validateOutgoingRecipients rejects an empty To list, empty addresses, and
+// addresses carrying newline characters (header injection) in To/Cc/Bcc.
+func validateOutgoingRecipients(to, cc, bcc []string) error {
+	if len(to) == 0 {
+		return fmt.Errorf("core: send: no recipient given: %w", ErrUnsupported)
+	}
+	for _, list := range [][]string{to, cc, bcc} {
+		for _, a := range list {
+			if a == "" {
+				return fmt.Errorf("core: send: empty recipient address: %w", ErrUnsupported)
+			}
+			if strings.ContainsAny(a, "\n\r") {
+				return fmt.Errorf("core: send: recipient address must not contain newlines: %w", ErrUnsupported)
+			}
+		}
+	}
+	return nil
+}
+
+// boardSvcOrErr returns s.boardSvc, or an error when this store does not
+// support shared boards.
+func (s *Service) boardSvcOrErr() (*BoardService, error) {
+	if s.boardSvc == nil {
+		return nil, fmt.Errorf("core: boards not supported by this store: %w", ErrUnsupported)
+	}
+	return s.boardSvc, nil
+}
+
+// SetBoardNotifier configura el notificador de cambios de tablero que
+// BoardService usa para avisar al relay (u otro distribuidor) tras crear,
+// mover, completar o comentar una tarea. Es un no-op si el store no soporta
+// tableros compartidos (boardSvc nil).
+func (s *Service) SetBoardNotifier(n BoardNotifier) {
+	if s.boardSvc != nil {
+		s.boardSvc.SetBoardNotifier(n)
+	}
+}
+
+// BoardCreate creates a new shared board with the given name and owner,
+// delegating to the internal BoardService.
+func (s *Service) BoardCreate(ctx context.Context, name, ownerID string) (*Board, error) {
+	bs, err := s.boardSvcOrErr()
+	if err != nil {
+		return nil, err
+	}
+	return bs.CreateBoard(ctx, name, ownerID)
+}
+
+// BoardInvite generates an invite code for the board. ttl is the code's
+// time-to-live (0 means the default 48h); maxUses 0 means unlimited.
+func (s *Service) BoardInvite(ctx context.Context, boardID, createdBy string, ttl time.Duration, maxUses int) (*InviteCode, error) {
+	bs, err := s.boardSvcOrErr()
+	if err != nil {
+		return nil, err
+	}
+	return bs.GenerateInviteCode(ctx, boardID, createdBy, ttl, maxUses)
+}
+
+// BoardJoin lets a member join a board using an invite code.
+func (s *Service) BoardJoin(ctx context.Context, code, memberID, name, publicKey string) (*Member, error) {
+	bs, err := s.boardSvcOrErr()
+	if err != nil {
+		return nil, err
+	}
+	return bs.JoinBoard(ctx, code, memberID, name, publicKey)
+}
+
+// BoardList returns every shared board.
+func (s *Service) BoardList(ctx context.Context) ([]*Board, error) {
+	bs, err := s.boardSvcOrErr()
+	if err != nil {
+		return nil, err
+	}
+	return bs.ListBoards(ctx)
+}
+
+// ApplyBoardEvent aplica en el store local un delta que llegó de otro
+// dispositivo por relay o P2P (ya descifrado por el daemon, que es quien
+// conoce la clave del board). Es el lado receptor de la sincronización: lo
+// que otro miembro cambió se ve aquí sin acciones manuales.
+func (s *Service) ApplyBoardEvent(ev BoardEvent) error {
+	bs, err := s.boardSvcOrErr()
+	if err != nil {
+		return err
+	}
+	return bs.ApplyBoardEvent(ev)
+}
+
+// BoardTasks returns the tasks of a board.
+func (s *Service) BoardTasks(ctx context.Context, boardID string) ([]*Task, error) {
+	bs, err := s.boardSvcOrErr()
+	if err != nil {
+		return nil, err
+	}
+	return bs.ListTasks(ctx, boardID)
+}
+
+// BoardTaskCreate creates a task in a column of the board.
+func (s *Service) BoardTaskCreate(ctx context.Context, boardID, columnID, title, description, assigneeID string, dueDate *time.Time, tags []string, createdBy string) (*Task, error) {
+	bs, err := s.boardSvcOrErr()
+	if err != nil {
+		return nil, err
+	}
+	return bs.CreateTask(ctx, boardID, columnID, title, description, assigneeID, dueDate, tags, createdBy)
+}
+
+// BoardTaskMove moves a task to another column.
+func (s *Service) BoardTaskMove(ctx context.Context, taskID, columnID string) (*Task, error) {
+	bs, err := s.boardSvcOrErr()
+	if err != nil {
+		return nil, err
+	}
+	return bs.MoveTask(ctx, taskID, columnID)
+}
+
+// BoardTaskDone marks a task as done. version is the expected current
+// version for optimistic concurrency.
+func (s *Service) BoardTaskDone(ctx context.Context, taskID string, version int) (*Task, error) {
+	bs, err := s.boardSvcOrErr()
+	if err != nil {
+		return nil, err
+	}
+	return bs.DoneTask(ctx, taskID, version)
+}
+
+// BoardTaskComment appends a comment to a task.
+func (s *Service) BoardTaskComment(ctx context.Context, taskID, memberID, text string) (*Comment, error) {
+	bs, err := s.boardSvcOrErr()
+	if err != nil {
+		return nil, err
+	}
+	return bs.AddComment(ctx, taskID, memberID, text)
+}
+
+// BoardMembers returns all members of a board.
+func (s *Service) BoardMembers(ctx context.Context, boardID string) ([]*Member, error) {
+	bs, err := s.boardSvcOrErr()
+	if err != nil {
+		return nil, err
+	}
+	return bs.ListMembers(ctx, boardID)
 }

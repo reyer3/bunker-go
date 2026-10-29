@@ -54,6 +54,16 @@ type liveCall interface {
 	OnPeerAccept(fn func())
 	OnEnd(fn func(reason string))
 	AttachAudio(src meowcaller.AudioSource, sink meowcaller.AudioSink)
+	// ReceiveVideo attaches a sink for the peer's H.264 video (Annex-B
+	// access units). T4: remote video display. Without a sink the peer's
+	// video is discarded.
+	ReceiveVideo(sink meowcaller.VideoSink)
+	// SendVideo pushes one encoded H.264 access unit to the peer. T5:
+	// camera capture and outgoing video.
+	SendVideo(accessUnit []byte) error
+	// OnVideoKeyframeRequest registers a callback when the peer requests
+	// a keyframe (PLI/FIR), e.g. after a seek or packet loss. T5.
+	OnVideoKeyframeRequest(fn func())
 }
 
 // callAudio opens the local microphone (src) and speaker (sink) for one
@@ -92,6 +102,9 @@ type callRecord struct {
 	// cameraOff is set once our camera was turned off on an answered
 	// video call, so a repeated OnReady never signals it twice.
 	cameraOff bool
+	// video is the call's video session (remote display and/or camera
+	// capture), nil when the call has no video.
+	video *callVideo
 	// mediaTimer is the no-media watchdog, armed when the call is
 	// answered/accepted and stopped when media arrives or the call ends.
 	mediaTimer func() bool
@@ -100,10 +113,23 @@ type callRecord struct {
 // EnableCalls turns on voice calls for this account, driving engine for
 // signaling and audio for the local microphone/speaker. NewFromAccount
 // calls it only when the account opted in with "calls = true".
-func (a *Adapter) EnableCalls(engine callEngine, audio callAudio) {
+func (a *Adapter) EnableCalls(engine callEngine, audio callAudio, headless headlessMode, session mediaSession, video ...commandVideo) {
 	a.callMu.Lock()
 	a.calls = engine
 	a.callAudio = audio
+	if headless != nil {
+		a.headless = headless
+	} else {
+		a.headless = nilHeadless{}
+	}
+	if session != nil {
+		a.callSession = session
+	} else {
+		a.callSession = nilMediaSession{}
+	}
+	if len(video) > 0 {
+		a.callVideo = video[0]
+	}
 	a.liveCalls = make(map[string]*callRecord)
 	a.callMu.Unlock()
 	engine.OnIncomingCall(a.handleIncomingCall)
@@ -111,6 +137,23 @@ func (a *Adapter) EnableCalls(engine callEngine, audio callAudio) {
 	// call itself is refused with the same message (see checkCallAudio).
 	if err := a.checkCallAudio(); err != nil {
 		a.callLog().Warn("calls are enabled but cannot have audio", "error", err)
+	}
+	// Same for video: warn but do not refuse calls, since voice-only
+	// calls are still fine without video helpers.
+	if len(video) > 0 {
+		if err := video[0].Check(); err != nil {
+			a.callLog().Warn("calls are enabled but video helpers are missing", "error", err)
+		}
+	}
+	// Say at startup whether a media session is available. Without one, no
+	// remote desktop can own call media; local audio is the only path.
+	if _, ok := a.callSession.(nilMediaSession); ok {
+		a.callLog().Warn("calls are enabled but no media session is configured, remote audio is unavailable", "error", errMediaOwnerRemote)
+	}
+	// Say at startup whether the daemon is headless. A headless daemon
+	// with no media endpoint cannot play any call sound.
+	if a.headless.Headless() {
+		a.callLog().Warn("calls are enabled but the daemon is headless, local audio is disabled", "error", errHeadlessNoLocalAudio)
 	}
 }
 
@@ -404,6 +447,24 @@ func (a *Adapter) startCallAudio(callID string) {
 	if audio == nil || opened {
 		return
 	}
+
+	// Headless or remote-media-owned: never open local devices. A headless
+	// daemon has no local desktop, and a remote media owner (desktop over
+	// the tailnet) should be the one playing/capturing sound. When neither
+	// applies, local commandAudio opens as before.
+	if a.headless.Headless() {
+		if owner := a.callSession.Owner(callID); owner != "" {
+			a.setAudioError(callID, "audio de llamada manejado por escritorio remoto", errMediaOwnerRemote)
+			return
+		}
+		a.setAudioError(callID, "daemon sin escritorio local y sin endpoint de medios", errHeadlessNoLocalAudio)
+		return
+	}
+	if owner := a.callSession.Owner(callID); owner != "" {
+		a.setAudioError(callID, "audio de llamada manejado por escritorio remoto", errMediaOwnerRemote)
+		return
+	}
+
 	src, sink, err := audio.Open(func(short string, err error) { a.setAudioError(callID, short, err) })
 	if err != nil {
 		a.setAudioError(callID, audioOpenProblem(err), err)
@@ -418,6 +479,20 @@ func (a *Adapter) startCallAudio(callID string) {
 	rec.src, rec.sink = src, sink
 	a.callMu.Unlock()
 	rec.live.AttachAudio(src, sink)
+
+	// If the call carries video, start remote display and/or camera
+	// capture now that media is flowing (T4/T5). Video is best-effort: a
+	// missing helper or failed open does not kill the call's audio.
+	if rec.info.Video && rec.video == nil {
+		v, verr := newCallVideo(rec.live, a.callVideo, func(short string, err error) {
+			a.setAudioError(callID, short, err)
+		})
+		if verr != nil {
+			a.setAudioError(callID, videoOpenProblem(verr), verr)
+		} else {
+			rec.video = v
+		}
+	}
 }
 
 // turnCameraOff answers an incoming video call as voice: bunker sends no
@@ -458,6 +533,9 @@ func (a *Adapter) endCall(ctx context.Context, callID, reason string) core.Call 
 		return core.Call{}
 	}
 	closeAudio(rec.src, rec.sink)
+	if rec.video != nil {
+		_ = rec.video.Close()
+	}
 	a.writeCallItem(ctx, rec)
 	return rec.info
 }

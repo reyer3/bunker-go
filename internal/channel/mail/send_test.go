@@ -237,6 +237,76 @@ func TestAdapterSendToMultipleRecipientsAndCc(t *testing.T) {
 	}
 }
 
+// TestAdapterSendIncludesBccInEnvelopeNotHeaders covers T3: Bcc recipients
+// must reach the SMTP envelope (RCPT TO) but must never appear in the
+// message's MIME headers or body.
+func TestAdapterSendIncludesBccInEnvelopeNotHeaders(t *testing.T) {
+	imapAddr, mem, _ := newMemIMAPServer(t)
+	if err := mem.Create("INBOX/Sent", nil); err != nil {
+		t.Fatalf("create INBOX/Sent: %v", err)
+	}
+	smtpAddr, backend := newTestSMTPServer(t)
+
+	cfg := AccountConfig{Name: "cl", Username: "alice@example.cl", IMAPHost: "example.cl", FolderPrefix: "INBOX", FolderSeparator: '.'}
+	adapter := newAdapter(cfg, nil, nil, testDialInsecure(imapAddr))
+	adapter.smtpDial = testSMTPDialInsecure(smtpAddr)
+
+	out := core.Outgoing{
+		Channel: core.ChannelMail,
+		Account: "cl",
+		To:      []string{"alice@example.org"},
+		Cc:      []string{"carol@example.org"},
+		Bcc:     []string{"dave@example.org", "eve@example.org"},
+		Subject: "Hidden copy",
+		Body:    "Hi alice",
+	}
+	if _, err := adapter.Send(context.Background(), out); err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+
+	subs := backend.submissions()
+	if len(subs) != 1 {
+		t.Fatalf("len(submissions) = %d, want 1", len(subs))
+	}
+
+	// Bcc must be in the RCPT TO envelope.
+	wantRCPT := map[string]bool{
+		"alice@example.org": false,
+		"carol@example.org": false,
+		"dave@example.org":  false,
+		"eve@example.org":   false,
+	}
+	if len(subs[0].to) != len(wantRCPT) {
+		t.Fatalf("RCPT TO = %v, want exactly %v", subs[0].to, wantRCPT)
+	}
+	for _, addr := range subs[0].to {
+		if _, ok := wantRCPT[addr]; !ok {
+			t.Fatalf("unexpected RCPT TO %q, full list %v", addr, subs[0].to)
+		}
+		wantRCPT[addr] = true
+	}
+	for addr, seen := range wantRCPT {
+		if !seen {
+			t.Fatalf("RCPT TO missing %q, full list %v", addr, subs[0].to)
+		}
+	}
+
+	// Bcc must NOT appear in the MIME headers or body.
+	raw := string(subs[0].data)
+	if strings.Contains(raw, "Bcc:") {
+		t.Errorf("submitted data must not contain a Bcc header:\n%s", raw)
+	}
+	if strings.Contains(raw, "Resent-Bcc:") {
+		t.Errorf("submitted data must not contain a Resent-Bcc header:\n%s", raw)
+	}
+	if strings.Contains(raw, "dave@example.org") || strings.Contains(raw, "eve@example.org") {
+		t.Errorf("submitted data must not mention Bcc addresses in headers or body:\n%s", raw)
+	}
+	if !strings.Contains(raw, "Cc: <carol@example.org>") {
+		t.Errorf("submitted data missing Cc header:\n%s", raw)
+	}
+}
+
 func TestAdapterSendReplySetsThreadingAndAnswered(t *testing.T) {
 	imapAddr, mem, _ := newMemIMAPServer(t)
 	if err := mem.Create("INBOX/Sent", nil); err != nil {
