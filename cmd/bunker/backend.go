@@ -97,6 +97,11 @@ type Backend interface {
 	BoardPeerStatus(ctx context.Context) (core.BoardPeerStatus, error)
 	BoardPeerConnect(ctx context.Context, multiaddr string) ([]string, error)
 	BoardPeerSync(ctx context.Context, boardID, memberID, typ string, payload []byte, version int) ([]string, error)
+	// Invite claims (`bunker board join <code>@<board>`): the daemon either
+	// claims over its P2P node, or adopts the reply the CLI got straight
+	// from the creator's relay.
+	BoardClaimPeer(ctx context.Context, code, boardID, memberID, name, publicKey string) (*core.Member, error)
+	BoardAcceptClaimReply(ctx context.Context, code, boardID string, reply core.BoardPeerMessage) (*core.Member, error)
 }
 
 var (
