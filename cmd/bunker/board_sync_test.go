@@ -50,7 +50,12 @@ func encryptedDelta(t *testing.T, st *store.Store, boardID, typ string, payload 
 	if err != nil {
 		t.Fatal(err)
 	}
-	return enc
+	// On the wire the ciphertext is a base64 JSON string (encryptBoardDelta).
+	wire, err := json.Marshal(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wire
 }
 
 // El consumidor del daemon (lo que conecta a Relay.OnMessage y Node.
