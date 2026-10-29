@@ -459,3 +459,30 @@ func TestBoardsMigrationV8HasEncryptionColumns(t *testing.T) {
 		t.Fatalf("user_version = %d, want %d", got, store.CurrentSchemaVersion())
 	}
 }
+
+// ListInviteCodes devuelve solo las invitaciones del board pedido: el claim
+// remoto las recorre para encontrar la que corresponde a la prueba.
+func TestListInviteCodesByBoard(t *testing.T) {
+	s := openTestStore(t)
+	for _, id := range []string{"board-1", "board-2"} {
+		if err := s.CreateBoard(&core.Board{ID: id, Name: id, OwnerID: "owner-1"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, b := range []string{"board-1", "board-1", "board-2"} {
+		inv := &core.InviteCode{ID: fmt.Sprintf("invite-%d", i), BoardID: b, Code: fmt.Sprintf("code-%d", i)}
+		if err := s.CreateInviteCode(inv); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.ListInviteCodes("board-1")
+	if err != nil {
+		t.Fatalf("ListInviteCodes: %v", err)
+	}
+	if len(got) != 2 || got[0].BoardID != "board-1" || got[1].BoardID != "board-1" {
+		t.Fatalf("ListInviteCodes = %+v", got)
+	}
+	if empty, err := s.ListInviteCodes("board-x"); err != nil || len(empty) != 0 {
+		t.Fatalf("board sin invitaciones = %v, %v", empty, err)
+	}
+}

@@ -157,3 +157,30 @@ func TestGenerateInviteCodeKey(t *testing.T) {
 		t.Fatal("GenerateInviteCodeKey produjo la misma clave dos veces")
 	}
 }
+
+// La prueba de un claim depende del código y de cada campo que liga: otro
+// código, otro dominio u otro campo producen otra prueba, y el código nunca
+// aparece en ella.
+func TestProofBindsKeyDomainAndFields(t *testing.T) {
+	key := InviteCodeClaimKey("bunker-invite-abc")
+	p := Proof(key, "member.claim", "board-1", "member-1")
+	if p == "" || strings.Contains(p, "bunker-invite-abc") {
+		t.Fatalf("Proof = %q", p)
+	}
+	if p != Proof(key, "member.claim", "board-1", "member-1") {
+		t.Fatal("Proof no es determinista")
+	}
+	for name, other := range map[string]string{
+		"otro código":     Proof(InviteCodeClaimKey("bunker-invite-xyz"), "member.claim", "board-1", "member-1"),
+		"otro dominio":    Proof(key, "member.join", "board-1", "member-1"),
+		"otro campo":      Proof(key, "member.claim", "board-2", "member-1"),
+		"campos corridos": Proof(key, "member.claim", "board-1member-1"),
+	} {
+		if other == p {
+			t.Errorf("%s produce la misma prueba", name)
+		}
+	}
+	if !ProofEqual(p, Proof(key, "member.claim", "board-1", "member-1")) || ProofEqual(p, "") {
+		t.Fatal("ProofEqual no compara bien")
+	}
+}

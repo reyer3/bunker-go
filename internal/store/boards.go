@@ -628,6 +628,29 @@ func (s *Store) GetInviteCode(code string) (*core.InviteCode, error) {
 	return i, nil
 }
 
+// ListInviteCodes implements core.BoardStore.
+func (s *Store) ListInviteCodes(boardID string) ([]*core.InviteCode, error) {
+	ctx := context.Background()
+	rows, err := s.db.QueryContext(ctx, `SELECT `+inviteCodeColumns+` FROM invite_codes WHERE board_id = ? ORDER BY id`, boardID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list invite codes %s: %w", boardID, err)
+	}
+	defer rows.Close()
+
+	invites := []*core.InviteCode{}
+	for rows.Next() {
+		i, err := scanInviteCode(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: list invite codes %s scan: %w", boardID, err)
+		}
+		invites = append(invites, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list invite codes %s rows: %w", boardID, err)
+	}
+	return invites, nil
+}
+
 // UpdateInviteCode implements core.BoardStore.
 func (s *Store) UpdateInviteCode(invite *core.InviteCode) error {
 	ctx := context.Background()

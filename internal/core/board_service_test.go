@@ -176,6 +176,16 @@ func (s *memBoardStore) GetInviteCode(code string) (*core.InviteCode, error) {
 	return invite, nil
 }
 
+func (s *memBoardStore) ListInviteCodes(boardID string) ([]*core.InviteCode, error) {
+	out := make([]*core.InviteCode, 0)
+	for _, inv := range s.invites {
+		if inv.BoardID == boardID {
+			out = append(out, inv)
+		}
+	}
+	return out, nil
+}
+
 func (s *memBoardStore) UpdateInviteCode(invite *core.InviteCode) error {
 	if s.invites[invite.Code] == nil {
 		return core.ErrInviteNotFound
