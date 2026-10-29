@@ -95,9 +95,14 @@ const (
 	MethodBoardTaskComment  = "board_task_comment"
 	MethodBoardMembers      = "board_members"
 	MethodBoardTasks        = "board_tasks"
-	MethodP2PStatus         = "p2p_status"
-	MethodP2PConnect        = "p2p_connect"
-	MethodP2PSync           = "p2p_sync"
+	// MethodBoardClaimPeer claims an invite over the daemon's P2P node.
+	MethodBoardClaimPeer = "board_claim_peer"
+	// MethodBoardAcceptClaimReply adopts the reply to a claim the CLI made
+	// against the creator's relay.
+	MethodBoardAcceptClaimReply = "board_accept_claim_reply"
+	MethodP2PStatus             = "p2p_status"
+	MethodP2PConnect            = "p2p_connect"
+	MethodP2PSync               = "p2p_sync"
 )
 
 type listParams struct {
@@ -612,6 +617,24 @@ type boardTaskCommentParams struct {
 }
 type boardTaskCommentResult struct {
 	Comment *core.Comment `json:"comment"`
+}
+
+// boardClaimPeerParams is MethodBoardClaimPeer's params. Code travels only
+// over the local unix socket: the daemon derives the claim proof from it
+// and never puts it on the network.
+type boardClaimPeerParams struct {
+	Code      string `json:"code"`
+	BoardID   string `json:"board_id"`
+	MemberID  string `json:"member_id"`
+	Name      string `json:"name"`
+	PublicKey string `json:"public_key"`
+}
+
+// boardAcceptClaimReplyParams is MethodBoardAcceptClaimReply's params.
+type boardAcceptClaimReplyParams struct {
+	Code    string                `json:"code"`
+	BoardID string                `json:"board_id"`
+	Reply   core.BoardPeerMessage `json:"reply"`
 }
 
 // boardTasksParams is MethodBoardTasks's params.

@@ -625,6 +625,28 @@ func (s *Server) call(ctx context.Context, req Request) (any, error) {
 		}
 		return boardJoinResult{Member: member}, nil
 
+	case MethodBoardClaimPeer:
+		var p boardClaimPeerParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		member, err := s.svc.BoardClaimPeer(ctx, p.Code, p.BoardID, p.MemberID, p.Name, p.PublicKey)
+		if err != nil {
+			return nil, err
+		}
+		return boardJoinResult{Member: member}, nil
+
+	case MethodBoardAcceptClaimReply:
+		var p boardAcceptClaimReplyParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, fmt.Errorf("rpc: bad params: %w", err)
+		}
+		member, err := s.svc.BoardAcceptClaimReply(ctx, p.Code, p.BoardID, p.Reply)
+		if err != nil {
+			return nil, err
+		}
+		return boardJoinResult{Member: member}, nil
+
 	case MethodBoardList:
 		var p boardListParams
 		if len(req.Params) > 0 {

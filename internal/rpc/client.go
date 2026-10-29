@@ -579,6 +579,24 @@ func (c *Client) BoardJoin(ctx context.Context, code, memberID, name, publicKey 
 	return res.Member, nil
 }
 
+// BoardClaimPeer claims an invite over the daemon's P2P node.
+func (c *Client) BoardClaimPeer(ctx context.Context, code, boardID, memberID, name, publicKey string) (*core.Member, error) {
+	var res boardJoinResult
+	if err := c.call(ctx, MethodBoardClaimPeer, boardClaimPeerParams{Code: code, BoardID: boardID, MemberID: memberID, Name: name, PublicKey: publicKey}, &res); err != nil {
+		return nil, err
+	}
+	return res.Member, nil
+}
+
+// BoardAcceptClaimReply adopts the reply to a claim made against a relay.
+func (c *Client) BoardAcceptClaimReply(ctx context.Context, code, boardID string, reply core.BoardPeerMessage) (*core.Member, error) {
+	var res boardJoinResult
+	if err := c.call(ctx, MethodBoardAcceptClaimReply, boardAcceptClaimReplyParams{Code: code, BoardID: boardID, Reply: reply}, &res); err != nil {
+		return nil, err
+	}
+	return res.Member, nil
+}
+
 // BoardList returns every shared board.
 func (c *Client) BoardList(ctx context.Context) ([]*core.Board, error) {
 	var res boardListResult

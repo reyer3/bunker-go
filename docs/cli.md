@@ -13,7 +13,7 @@ compact plain text for a human at a terminal.
 | `list`, `find`, `read`, `thread`, `search`, `counts`, `health`, `contacts`, `chats`, `meetings`, `todo list`, `awaiting`, `calls`, `avatar`, `download` | yes: data |
 | `reply`, `send`, `edit`, `delete`, `react`, `organize`, `status post`, `call`, `call answer\|reject\|hangup`, `backfill` | yes: `{"dryRun", "plan", ...}` with the [`core.Plan`/`core.Receipt` shape](#coreplan-and-corereceipt-json-shape) |
 | `unread`, `read-thread`, `meetings join`, `todo add`, `todo done\|reopen` | yes: the result of the change |
-| `version`, `update`, `render`, `herdr toggle`, `herdr everywhere`, `p2p status\|connect\|sync` | yes |
+| `version`, `update`, `render`, `herdr toggle`, `herdr everywhere`, `p2p status\|connect\|sync`, `board join` | yes |
 | `import-keys matrix` | yes: `{"new", "already_known", "failed", "total"}` |
 | `daemon`, `mcp`, `bunker` (no arguments), `sidebar`, `open`, `app`, `link`, `help` | exempt: interactive, long-running or setup commands with no data result |
 
@@ -139,6 +139,39 @@ JSON shapes: status is `{"id", "addr", "peers": [...]}`; connect is
 Boards themselves (`bunker board ...`) and the light relay (`bunker board
 relay start`) are documented separately; the P2P node is an additional
 transport for the same `BoardEvent` stream, not a replacement for the relay.
+
+## `bunker board join <invitación> [--relay host:port] [--member-id id] [--name n] [--public-key k] [--dry-run] [--json]`
+
+Joins a shared board from another device. `bunker board invite --board <id>`
+prints the invitation as `<code>@<board-id>`; the board's key is not in it.
+`join` sends a `member.claim` to the creator's daemon carrying the board id,
+the member id, name and public key, and an HMAC proof derived from the code:
+the code itself never goes on the wire. The creator checks the proof against
+the board's invitations (not expired, not revoked, uses left), creates the
+member, consumes one use and answers `member.welcome`, encrypted with a key
+derived from the code, with the board (including its key), the member and the
+columns. The local daemon decrypts it and stores the board. Repeating the
+claim with the same member id gets the welcome again without spending a use.
+
+- With `--relay` (or `$BUNKER_RELAY_ADDR`) the CLI claims against the
+  creator's relay directly and hands the reply to the local daemon.
+- Without a relay the local daemon claims over its P2P node, trying each
+  connected peer (`bunker p2p connect` to the creator first).
+- `--dry-run` prints the plan (`action` `board.join`, `target` the board id,
+  `account` `relay` or `p2p`) and contacts nobody; the plan never shows the
+  code.
+
+A rejected claim (wrong, expired, revoked or used-up code, or a code for
+another board) exits non-zero with the creator's reason (`claim rechazado por
+el creador: ...`). An invitation without `@<board-id>` (older format) joins
+against the local store only, as before.
+
+The relay registers a connection for a board only after a confirmed
+`member.claim`, or a `member.join` from an existing member signed with the
+board key (`core.JoinProof`); anything else gets `member.reject`, and
+messages from unregistered connections are neither relayed nor applied.
+
+JSON: `{"member": {...}}`; with `--dry-run`, `{"dryRun": true, "plan": {...}}`.
 
 ## `bunker version [--json]`
 

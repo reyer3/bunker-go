@@ -160,6 +160,8 @@ Commands:
   board join <codigo> [--member-id id] [--name n]           une el dispositivo
                                                               al tablero
                                                               [--public-key clave]
+                                                              [--relay addr]
+                                                              [--dry-run]
   board list [--board <id>]                                 lista tableros o las
                                                               tareas de un tablero
   board task create --board <id> --column <id> --titulo t   crea una tarea

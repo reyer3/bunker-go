@@ -17,7 +17,7 @@ import (
 
 const boardUsage = `usage: bunker board create --name <nombre>
        bunker board invite --board <board-id> [--ttl <horas>] [--max-uses <n>]
-       bunker board join <codigo-invitacion> [--member-id <id>] [--name <nombre>] [--public-key <clave>] [--relay <addr>]
+       bunker board join <codigo-invitacion> [--member-id <id>] [--name <nombre>] [--public-key <clave>] [--relay <addr>] [--dry-run]
        bunker board list [--board <board-id>]
        bunker board task create --board <board-id> --column <col-id> --titulo <texto>
               [--descripcion <texto>] [--asignar <member-id>] [--vencimiento <YYYY-MM-DD>]
@@ -113,9 +113,8 @@ func cmdBoardInvite(ctx context.Context, backend Backend, args []string, stdout,
 		writeJSON(stdout, map[string]any{"invite": invite})
 		return 0
 	}
-	// El código de invitación completo ya incluye la clave pública del tablero
-	// (embebida tras un punto, en base64 URL-safe), así que no hay que pedir
-	// --public-key por separado al generar.
+	// Lo que se comparte es codigo@board: quien se une lo pasa a
+	// `bunker board join` y recibe la clave del tablero en el welcome.
 	fmt.Fprintf(stdout, "%s\n", inviteCodeString(invite))
 	return 0
 }
@@ -133,22 +132,27 @@ func parseInviteTTL(raw string) (time.Duration, error) {
 	return time.Duration(hours) * time.Hour, nil
 }
 
-// inviteCodeString renderiza el código de invitación completo: el código
-// corto seguido de la clave pública del tablero en base64 URL-safe, embebida
-// tras un punto. Así quien reciba el código puede configurar el cifrado E2EE
-// sin que el relay conozca la clave.
+// inviteCodeString renderiza la invitación que se comparte: el código
+// corto y el id del tablero, separados por "@". El id le dice a quien se
+// une a qué board pedir y por cuál enrutar el claim. La clave del board ya
+// no viaja en la invitación: llega cifrada en el member.welcome, solo a
+// quien prueba el código ante el creador.
 func inviteCodeString(invite *core.InviteCode) string {
-	if len(invite.PublicKey) == 0 {
-		return invite.Code
-	}
-	return invite.Code + "." + base64.RawURLEncoding.EncodeToString(invite.PublicKey)
+	return invite.Code + "@" + invite.BoardID
 }
 
-// splitInviteCode separa el código de invitación completo en el código
-// corto (para buscarlo en el servidor) y la clave pública del tablero
-// embebida tras un punto (base64 URL-safe). Si no hay clave embebida,
-// devuelve el código tal cual y una clave vacía.
-func splitInviteCode(full string) (code, publicKey string) {
+// splitInviteCode separa la invitación en el código corto y el id del
+// tablero. Sin "@" es una invitación antigua o local: boardID vacío.
+func splitInviteCode(full string) (code, boardID string) {
+	if i := strings.LastIndex(full, "@"); i > 0 && i < len(full)-1 {
+		return full[:i], full[i+1:]
+	}
+	return full, ""
+}
+
+// splitLegacyInviteCode separa el formato antiguo codigo.<clave base64>,
+// que solo sirve para unirse en el mismo daemon que tiene la invitación.
+func splitLegacyInviteCode(full string) (code, publicKey string) {
 	code = full
 	if parts := strings.SplitN(full, ".", 2); len(parts) == 2 && parts[1] != "" {
 		if _, err := base64.RawURLEncoding.DecodeString(parts[1]); err == nil {
@@ -165,6 +169,7 @@ func cmdBoardJoin(ctx context.Context, backend Backend, args []string, stdout, s
 	memberName := fs.String("name", "", "nombre para mostrar del miembro")
 	publicKey := fs.String("public-key", "", "clave publica para E2EE")
 	relayAddr := fs.String("relay", "", "direccion del relay (host:puerto); default $BUNKER_RELAY_ADDR")
+	dryRun := fs.Bool("dry-run", false, "mostrar el plan sin contactar al creador")
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	positionals, err := parseInterspersed(fs, args)
 	if err != nil {
@@ -175,34 +180,78 @@ func cmdBoardJoin(ctx context.Context, backend Backend, args []string, stdout, s
 		fmt.Fprintln(stderr, boardUsage)
 		return 2
 	}
-	// El código de invitación completo trae la clave pública del tablero
-	// embebida (codigo.<clave en base64 URL-safe)). Si el usuario no pasa
-	// --public-key, se usa la embebida; si no hay ninguna, se une sin clave
-	// (el cifrado E2EE no funcionará hasta que se configure).
-	code, embeddedKey := splitInviteCode(positionals[0])
-	joinPublicKey := *publicKey
-	if joinPublicKey == "" {
-		joinPublicKey = embeddedKey
+	addr := strings.TrimSpace(*relayAddr)
+	if addr == "" {
+		addr = strings.TrimSpace(os.Getenv("BUNKER_RELAY_ADDR"))
 	}
-	member, err := backend.BoardJoin(ctx, code, *memberID, *memberName, joinPublicKey)
+	code, boardID := splitInviteCode(positionals[0])
+	if boardID == "" {
+		return cmdBoardJoinLocal(ctx, backend, positionals[0], *memberID, *memberName, *publicKey, addr, *dryRun, *jsonOut, stdout, stderr)
+	}
+
+	if *dryRun {
+		return printPlanResult(*jsonOut, true, boardJoinPlan(boardID, *memberID, addr), core.Receipt{}, stdout)
+	}
+	var member *core.Member
+	if addr != "" {
+		member, err = claimViaRelay(ctx, backend, addr, code, boardID, *memberID, *memberName, *publicKey)
+	} else {
+		member, err = backend.BoardClaimPeer(ctx, code, boardID, *memberID, *memberName, *publicKey)
+	}
 	if err != nil {
 		return fail(*jsonOut, stdout, stderr, err)
+	}
+	if *jsonOut {
+		writeJSON(stdout, map[string]any{"member": member})
+		return 0
+	}
+	fmt.Fprintf(stdout, "%s\n", member.ID)
+	return 0
+}
+
+// boardJoinPlan describe el claim sin hacerlo. Nunca muestra el código: el
+// plan se imprime y se puede pegar en un log.
+func boardJoinPlan(boardID, memberID, relayAddr string) core.Plan {
+	who := memberID
+	if who == "" {
+		who = "(id nuevo)"
+	}
+	via, preview := "p2p", "reclamar la invitación del tablero "+boardID+" como "+who+" con los peers P2P conectados al daemon"
+	if relayAddr != "" {
+		via, preview = "relay", "reclamar la invitación del tablero "+boardID+" como "+who+" en el relay "+relayAddr
+	}
+	return core.Plan{Action: "board.join", Channel: core.Channel("board"), Account: via, Target: boardID, Preview: preview}
+}
+
+// cmdBoardJoinLocal es el join contra el store del propio daemon, para una
+// invitación sin board (formato antiguo, o el mismo dispositivo que la
+// creó). El código completo trae la clave del tablero embebida
+// (codigo.<clave en base64 URL-safe>); si el usuario no pasa --public-key,
+// se usa la embebida.
+func cmdBoardJoinLocal(ctx context.Context, backend Backend, full, memberID, memberName, publicKey, addr string, dryRun, jsonOut bool, stdout, stderr io.Writer) int {
+	code, embeddedKey := splitLegacyInviteCode(full)
+	if dryRun {
+		plan := core.Plan{Action: "board.join", Channel: core.Channel("board"), Account: "local", Target: memberID, Preview: "unirse con una invitación del store local"}
+		return printPlanResult(jsonOut, true, plan, core.Receipt{}, stdout)
+	}
+	if publicKey == "" {
+		publicKey = embeddedKey
+	}
+	member, err := backend.BoardJoin(ctx, code, memberID, memberName, publicKey)
+	if err != nil {
+		return fail(jsonOut, stdout, stderr, err)
 	}
 
 	// Registrarse en el relay ligero para recibir los deltas del board en
 	// tiempo real. Falla suave: el join ya esta confirmado por el backend,
 	// el relay es solo sincronizacion y nunca debe hacer fallar el join.
-	addr := strings.TrimSpace(*relayAddr)
-	if addr == "" {
-		addr = os.Getenv("BUNKER_RELAY_ADDR")
-	}
 	if addr != "" {
 		if _, err := relayJoinMember(ctx, addr, member.BoardID, member.ID); err != nil {
 			fmt.Fprintf(stderr, "warning: relay %s: %v\n", addr, err)
 		}
 	}
 
-	if *jsonOut {
+	if jsonOut {
 		writeJSON(stdout, map[string]any{"member": member})
 		return 0
 	}

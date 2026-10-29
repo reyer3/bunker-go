@@ -97,13 +97,14 @@ type fakeBackend struct {
 
 	boardErr error
 
-	boardCreateCalls   []boardCreateCall
-	boardInviteCalls   []boardInviteCall
-	boardJoinCalls     []boardJoinCall
-	boardListCalls     []string
-	boardTaskCalls     []boardTaskCall
-	boardTaskDoneCalls []boardTaskDoneCall
-	boardMembersCalls  []string
+	boardCreateCalls    []boardCreateCall
+	boardInviteCalls    []boardInviteCall
+	boardJoinCalls      []boardJoinCall
+	boardClaimPeerCalls []boardClaimPeerCall
+	boardListCalls      []string
+	boardTaskCalls      []boardTaskCall
+	boardTaskDoneCalls  []boardTaskDoneCall
+	boardMembersCalls   []string
 }
 
 type boardCreateCall struct {
@@ -123,6 +124,10 @@ type boardJoinCall struct {
 	MemberID  string
 	Name      string
 	PublicKey string
+}
+
+type boardClaimPeerCall struct {
+	Code, BoardID, MemberID, Name, PublicKey string
 }
 
 type boardTaskCall struct {
@@ -610,6 +615,21 @@ func (f *fakeBackend) BoardJoin(ctx context.Context, code, memberID, name, publi
 		return nil, f.boardErr
 	}
 	return &core.Member{ID: memberID, BoardID: "", Name: name, PublicKey: publicKey, Role: "member"}, nil
+}
+
+func (f *fakeBackend) BoardClaimPeer(ctx context.Context, code, boardID, memberID, name, publicKey string) (*core.Member, error) {
+	f.boardClaimPeerCalls = append(f.boardClaimPeerCalls, boardClaimPeerCall{Code: code, BoardID: boardID, MemberID: memberID, Name: name, PublicKey: publicKey})
+	if f.boardErr != nil {
+		return nil, f.boardErr
+	}
+	return &core.Member{ID: memberID, BoardID: boardID, Name: name, PublicKey: publicKey, Role: "member"}, nil
+}
+
+func (f *fakeBackend) BoardAcceptClaimReply(ctx context.Context, code, boardID string, reply core.BoardPeerMessage) (*core.Member, error) {
+	if f.boardErr != nil {
+		return nil, f.boardErr
+	}
+	return &core.Member{ID: reply.MemberID, BoardID: boardID, Role: "member"}, nil
 }
 
 func (f *fakeBackend) BoardList(ctx context.Context) ([]*core.Board, error) {
