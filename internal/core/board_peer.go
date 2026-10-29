@@ -37,9 +37,15 @@ type BoardPeerMessage struct {
 	Version   int
 }
 
-// SetBoardPeer registra el transporte P2P del daemon.
+// SetBoardPeer registra el transporte P2P del daemon. Si el transporte
+// entrega claims entrantes (BoardClaimResponder), el Service queda como su
+// respondedor: el daemon que tiene la invitación la atiende sin más
+// cableado.
 func (s *Service) SetBoardPeer(p BoardPeer) {
 	s.boardPeer = p
+	if r, ok := p.(BoardClaimResponder); ok {
+		r.OnClaim(s.answerPeer)
+	}
 }
 
 // BoardPeerStatus describe el estado del nodo P2P para `bunker p2p status`.

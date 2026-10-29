@@ -57,6 +57,8 @@ type Node struct {
 	// de aplicar (decrypt + Store). Los mensajes que este nodo publica con
 	// Publish no pasan por aquí (anti-eco).
 	inbound func(RelayMessage)
+	// request responde los claims que llegan por claimProtocol (claim.go).
+	request func(RelayMessage) RelayMessage
 	logger  *slog.Logger
 }
 
@@ -96,6 +98,7 @@ func NewNode(listenAddr string) (*Node, error) {
 	}
 
 	h.SetStreamHandler(boardProtocol, n.handleStream)
+	h.SetStreamHandler(claimProtocol, n.handleClaimStream)
 	return n, nil
 }
 

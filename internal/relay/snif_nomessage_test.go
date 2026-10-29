@@ -16,6 +16,7 @@ import (
 // Node.OnInbound ya es capaz.
 func TestRelayPeerReceivesAndConsumerSeesDelta(t *testing.T) {
 	r := NewRelay("127.0.0.1:0")
+	r.SetAdmission(admitAll)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := r.Start(ctx); err != nil {

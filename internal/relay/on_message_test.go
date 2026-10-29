@@ -11,9 +11,11 @@ import (
 
 // TestOnMessageDeliversClientMessages: the daemon must receive (and apply)
 // the deltas other devices write on the relay. The consumer fires once per
-// client-written line, carrying the parsed message.
+// delta an admitted client writes; the member.join itself is admission,
+// not a delta, and never reaches it.
 func TestOnMessageDeliversClientMessages(t *testing.T) {
 	r := NewRelay("127.0.0.1:0")
+	r.SetAdmission(admitAll)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := r.Start(ctx); err != nil {
@@ -42,12 +44,8 @@ func TestOnMessageDeliversClientMessages(t *testing.T) {
 
 	select {
 	case msg := <-got:
-		if msg.Type != "member.join" {
-			t.Fatalf("first delivery = %+v, want member.join", msg)
-		}
-		msg = <-got
 		if msg.Type != "task.create" || string(msg.Payload) != `"cifrado"` {
-			t.Fatalf("second delivery = %+v, want the written delta", msg)
+			t.Fatalf("delivery = %+v, want the written delta", msg)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("OnMessage never fired for client-written messages")
@@ -60,6 +58,7 @@ func TestOnMessageDeliversClientMessages(t *testing.T) {
 // forbids).
 func TestOnMessageIgnoresDaemonPublish(t *testing.T) {
 	r := NewRelay("127.0.0.1:0")
+	r.SetAdmission(admitAll)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := r.Start(ctx); err != nil {

@@ -92,6 +92,9 @@ func runDaemon(ctx context.Context, stateDir, avatarCacheDir, socketPath string,
 	}
 
 	svc := core.NewService(st, reg)
+	// The relay refuses every client without an admission check, so it
+	// must learn to verify claims and member proofs against this store.
+	boardRelay.SetAdmission(boardRelayAdmission(svc))
 	// Nodo libp2p para sincronizar tableros sin servidor central. Es
 	// opcional (--p2p-listen): si no se pide o falla, el daemon sigue con
 	// el relay. Un fallo de P2P nunca debe impedir guardar cambios.

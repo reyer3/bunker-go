@@ -109,6 +109,7 @@ func waitForJoin() {
 
 func TestRelayBroadcastSameBoard(t *testing.T) {
 	r := relay.NewRelay("127.0.0.1:0")
+	r.SetAdmission(admitAllExt)
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 	if err := r.Start(ctx); err != nil {
@@ -169,6 +170,7 @@ func TestRelayBroadcastSameBoard(t *testing.T) {
 
 func TestRelayIsolationBetweenBoards(t *testing.T) {
 	r := relay.NewRelay("127.0.0.1:0")
+	r.SetAdmission(admitAllExt)
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 	if err := r.Start(ctx); err != nil {
@@ -206,6 +208,7 @@ func TestRelayIsolationBetweenBoards(t *testing.T) {
 
 func TestRelayDisconnectKeepsOthersConnected(t *testing.T) {
 	r := relay.NewRelay("127.0.0.1:0")
+	r.SetAdmission(admitAllExt)
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 	if err := r.Start(ctx); err != nil {
@@ -262,6 +265,7 @@ func TestRelayDisconnectKeepsOthersConnected(t *testing.T) {
 // propio remitente), como si lo hubiera enviado un dispositivo unido.
 func TestRelayPublishReachesBoardMembers(t *testing.T) {
 	r := relay.NewRelay("127.0.0.1:0")
+	r.SetAdmission(admitAllExt)
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 	if err := r.Start(ctx); err != nil {
@@ -320,6 +324,7 @@ func TestRelayPublishReachesBoardMembers(t *testing.T) {
 // por lo que Publish no lo exige.
 func TestRelayPublishRequiresBoard(t *testing.T) {
 	r := relay.NewRelay("127.0.0.1:0")
+	r.SetAdmission(admitAllExt)
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 	if err := r.Start(ctx); err != nil {
@@ -336,3 +341,7 @@ func TestRelayPublishRequiresBoard(t *testing.T) {
 		t.Errorf("Publish con member_id vacio: %v, esperaba nil", err)
 	}
 }
+
+// admitAllExt admite cualquier member.join sin respuesta: estos tests
+// prueban el enrutado, no la admisión (admission_test.go la prueba).
+func admitAllExt(relay.RelayMessage) (*relay.RelayMessage, error) { return nil, nil }
