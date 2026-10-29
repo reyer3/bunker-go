@@ -106,6 +106,54 @@ func (a *Adapter) Fetch(ctx context.Context, id string) (core.Item, error) {
 // attachment), which setMeeting turns into the invitation the message
 // carries.
 //
+// inlineFilename picks a filename for an inline part: the
+// Content-Disposition filename param first, the Content-Type name param
+// second — the same order AttachmentHeader.Filename uses, so both part
+// kinds render the same way in the client.
+func inlineFilename(contentType func() (string, map[string]string, error),
+	disposition func() (string, map[string]string, error)) string {
+	if _, params, err := disposition(); err == nil {
+		if name, ok := params["filename"]; ok {
+			return name
+		}
+	}
+	if _, params, err := contentType(); err == nil {
+		return params["name"]
+	}
+	return ""
+}
+
+// isInlineImage says whether a MIME content type is an image the client
+// can render on its own (PNG, JPEG, GIF, WebP...). Only ever true for
+// leaf parts, never for a multipart wrapper.
+func isInlineImage(contentType string) bool {
+	return strings.HasPrefix(strings.ToLower(contentType), "image/")
+}
+
+// inlineImageName builds a filename for a CID-embedded image whose part
+// carries none, so the client can still save it with a sensible string
+// (n is the 1-based position the part takes in Item.Attachments).
+func inlineImageName(contentType string, n int) string {
+	ext := "bin"
+	switch strings.ToLower(contentType) {
+	case "image/png":
+		ext = "png"
+	case "image/jpeg":
+		ext = "jpg"
+	case "image/gif":
+		ext = "gif"
+	case "image/webp":
+		ext = "webp"
+	case "image/bmp":
+		ext = "bmp"
+	case "image/svg+xml":
+		ext = "svg"
+	case "image/avif":
+		ext = "avif"
+	}
+	return fmt.Sprintf("cid-%d.%s", n, ext)
+}
+
 // truncated says raw was cut short on purpose (sync's bounded body fetch,
 // bodytext.go): the MIME structure then ends abruptly, so a read error
 // stops the walk and keeps the text gathered so far instead of failing,
@@ -144,6 +192,24 @@ func walkMessage(raw []byte, truncated bool) (body string, attachments []core.At
 			switch {
 			case isCalendarType(contentType):
 				calendars = append(calendars, string(data))
+			case isInlineImage(contentType) && readErr == nil:
+				// An image embedded in the body (the CID way: no disposition,
+				// or an explicit `inline`) used to be read and discarded, so
+				// the client could never download it. Count it as an
+				// attachment row like any paperclip file. A truncated read
+				// yields no row: its size would be wrong and nothing usable
+				// follows the cut.
+				name := inlineFilename(h.ContentType, h.ContentDisposition)
+				if name == "" {
+					name = inlineImageName(contentType, len(attachments)+1)
+				}
+				attachments = append(attachments, core.Attachment{
+					Name:   name,
+					MIME:   contentType,
+					Size:   int64(len(data)),
+					Ref:    fmt.Sprintf("part-%d", len(attachments)+1),
+					Inline: true,
+				})
 			case strings.EqualFold(contentType, "text/plain") && !haveText:
 				plainText = string(data)
 				haveText = true
