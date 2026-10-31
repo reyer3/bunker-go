@@ -44,7 +44,7 @@ unset token
 echo "3. RELEASE_PLEASE_TOKEN updated."
 
 run=$(gh run list --repo "$repo" --workflow release.yml --branch main \
-  --status failure --limit 1 --json databaseId -q '.[0].databaseId')
+  --status failure --limit 1 --json databaseId -q '.[0].databaseId // empty')
 if [[ -z "$run" ]]; then
   echo "4. No failed release run on main; nothing to re-run."
   exit 0
