@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.0](https://github.com/reyer3/bunker-go/compare/v0.24.0...v0.25.0) (2026-10-29)
+
+
+### Features
+
+* **board:** tableros compartidos y sincronizacion P2P con libp2p ([#169](https://github.com/reyer3/bunker-go/issues/169)) ([657edb0](https://github.com/reyer3/bunker-go/commit/657edb0ed81d1cb595166622c2dd77c72c9bf37a))
+
 ## [0.24.0](https://github.com/reyer3/bunker-go/compare/v0.23.0...v0.24.0) (2026-10-23)
 
 
