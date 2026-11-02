@@ -79,3 +79,8 @@ Use conventional commits (`feat:`, `fix:`, `docs:`, `test:`, `build:`,
 changelog. Merging the release PR it maintains publishes the release
 (`.github/workflows/release.yml`, which needs the `RELEASE_PLEASE_TOKEN`
 secret). Never tag or bump versions by hand.
+
+When `release.yml` fails with "Bad credentials", the fine-grained
+`RELEASE_PLEASE_TOKEN` has expired: run `scripts/renew-release-token.sh`
+from an interactive terminal. It opens the prefilled token form, stores
+the new secret and reruns the failed release.
