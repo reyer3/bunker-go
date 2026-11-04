@@ -56,3 +56,30 @@ func TestOpenRunsOverrideAndReportsMissingOpener(t *testing.T) {
 		t.Fatalf("missing opener err = %v, want one naming %s", err, Env)
 	}
 }
+
+func TestOpenFileRunsOverrideAndRejectsRelativePath(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out")
+	script := filepath.Join(dir, "opener.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho \"$1\" > "+out+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	page := filepath.Join(dir, "page.html")
+	if err := OpenFile(page, env(map[string]string{Env: script})); err != nil {
+		t.Fatalf("OpenFile: %v", err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		b, _ := os.ReadFile(out)
+		if strings.TrimSpace(string(b)) == page {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("opener never received the path, out = %q", b)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := OpenFile("page.html", env(nil)); err == nil {
+		t.Fatal("OpenFile accepted a relative path")
+	}
+}

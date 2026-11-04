@@ -795,7 +795,7 @@ takes the same flags as `list` and prints the same output, but
 store only; `bunker search` is the different command that asks the mail
 server.
 
-## `bunker read <id> [--mark-read] [--json]`
+## `bunker read <id> [--mark-read] [--json|--html]`
 
 Fetches the full item, using the adapter's `Fetcher` capability if it has
 one, falling back to the stored copy otherwise. **By default it has no
@@ -821,6 +821,17 @@ the adapter implements `core.ReadMarker`, and in the local store:
 `--mark-read` is a usage error (exit 2). The MCP `read` tool and the
 TUI's item fetches never mark anything read; the TUI marks through its
 own explicit actions (opening a conversation, `read-thread`).
+
+`--html` (mail only) opens the message's HTML body in the browser instead
+of printing it. The body is sanitized first: only formatting tags are kept;
+scripts, styles, event handlers, images (nothing is fetched from remote
+servers) and links other than `http(s):`/`mailto:` are dropped, and the page
+carries a strict Content-Security-Policy. It is written to a private temp
+file (`bunker-mail-*.html`) opened with `xdg-open` (`open` on macOS, or
+`$BUNKER_OPEN_URL`). A mail with no HTML part fails with an error rather than
+showing plain text; `--html` and `--json` together are a usage error (exit 2).
+The HTML is only present on this on-demand fetch (`Meta["html"]`); it is never
+stored by sync.
 
 ```json
 {"item": { <core.Item> }}

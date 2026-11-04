@@ -75,9 +75,10 @@ Commands:
                                                              is: has: in: channel:
                                                              account: label:
                                                              before: after: "..." -x
-  read <id> [--mark-read] [--json]                         fetch full body
+  read <id> [--mark-read] [--json|--html]                  fetch full body
        (no side effect; --mark-read also marks it read on
-       WhatsApp/Matrix and locally; mail is always PEEK-only)
+       WhatsApp/Matrix and locally; mail is always PEEK-only;
+       --html opens a mail's HTML body, sanitized, in the browser)
   reply <id> <text|-> [--cc addr]... [--attach path]...
        [--dry-run] [--json]                                 reply to an item
   reply <id> --voice <file.ogg> [--dry-run] [--json]       reply with a voice note
@@ -505,22 +506,37 @@ func cmdRead(ctx context.Context, backend Backend, args []string, stdout, stderr
 	// existing scripts keep working; combining it with --mark-read is a
 	// contradiction and fails rather than guessing.
 	noReceipt := fs.Bool("no-receipt", false, "deprecated no-op: read marks nothing unless --mark-read is given")
+	showHTMLBody := fs.Bool("html", false, "open the mail's HTML body, sanitized, in the browser")
 	positionals, err := parseInterspersed(fs, args)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
 	if len(positionals) < 1 {
-		fmt.Fprintln(stderr, "usage: bunker read <id> [--mark-read] [--json]")
+		fmt.Fprintln(stderr, "usage: bunker read <id> [--mark-read] [--json|--html]")
 		return 2
 	}
 	if *markRead && *noReceipt {
 		fmt.Fprintln(stderr, "error: --mark-read and --no-receipt contradict each other")
 		return 2
 	}
+	if *showHTMLBody && *jsonOut {
+		fmt.Fprintln(stderr, "error: --html and --json contradict each other")
+		return 2
+	}
 	item, err := backend.Read(ctx, positionals[0], *markRead)
 	if err != nil {
 		return fail(*jsonOut, stdout, stderr, err)
+	}
+	if *showHTMLBody {
+		rawHTML := item.Meta["html"]
+		if rawHTML == "" {
+			return fail(false, stdout, stderr, fmt.Errorf("cmd: read --html: %s has no HTML part", item.ID))
+		}
+		if _, err := showHTML(item.Subject, rawHTML); err != nil {
+			return fail(false, stdout, stderr, err)
+		}
+		return 0
 	}
 	if *jsonOut {
 		writeJSON(stdout, map[string]any{"item": item})
