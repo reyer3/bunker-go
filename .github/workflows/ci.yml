@@ -51,5 +51,5 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: stable
-      - run: go install github.com/betterleaks/betterleaks@latest
+      - run: go install github.com/betterleaks/betterleaks@v1.9.0
       - run: betterleaks git --redact .
