@@ -435,6 +435,9 @@ func (m Model) chatTailLines() []string {
 	if forward, ok := m.chatForwardLine(); ok {
 		lines = append(lines, forward)
 	}
+	if reply, ok := m.chatReplyLine(); ok {
+		lines = append(lines, reply)
+	}
 	if attach, ok := m.chatAttachLine(); ok {
 		lines = append(lines, attach)
 	}

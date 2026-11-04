@@ -170,13 +170,15 @@ type chatSendReloadMsg struct {
 type chatSendRequest struct {
 	channel         core.Channel
 	account, thread string
-	// draftID is the item a reply quotes; newTo the address of a chat
-	// opened from the contact picker (no item to reply to).
-	draftID, newTo string
-	forward        bool
-	body           string
-	attachments    []string
-	voice          bool
+	// replyTo is the message a reply answers (Alt+R); nil sends a plain
+	// message. newTo is the address of a chat opened from the contact
+	// picker.
+	replyTo     *core.Item
+	newTo       string
+	forward     bool
+	body        string
+	attachments []string
+	voice       bool
 }
 
 // chatSendRequest captures the open chat's current send state for body.
@@ -185,7 +187,7 @@ func (m Model) chatSendRequest(body string) chatSendRequest {
 		channel:     m.chatChannel,
 		account:     m.chatAccount,
 		thread:      m.chatThread,
-		draftID:     m.chatDraftID,
+		replyTo:     m.chatReplyTo,
 		newTo:       m.chatNewTo,
 		forward:     m.chatForward != nil,
 		body:        body,
@@ -200,44 +202,31 @@ func (m Model) chatSendCmd(body string, dryRun bool) tea.Cmd {
 	return m.chatSendRequest(body).cmd(m.client, m.chatReplyToken, dryRun)
 }
 
-// cmd previews (dryRun) or sends r: a reply to the conversation's newest
-// item, or, for a chat opened from the contact picker (no item to reply
-// to) and for a forward, a fresh send to its thread and address. token
-// is the preview token for a dry-run, and the queue entry's seq for a
-// real send (chatReplySentMsg.token).
+// cmd previews (dryRun) or sends r: a reply to the message picked with
+// Alt+R, else a plain message to the chat's own thread (to its address for
+// a chat opened from the contact picker; a forward is such a message
+// flagged as forwarded). token is the preview token for a dry-run, and the
+// queue entry's seq for a real send (chatReplySentMsg.token).
 func (r chatSendRequest) cmd(client Client, token uint64, dryRun bool) tea.Cmd {
-	if r.forward {
-		// A forward is a fresh send to the chat, never a reply quoting
-		// its newest message.
-		to := r.newTo
-		if to == "" {
-			to = r.thread
-		}
-		return chatOutgoingCmd(client, core.Outgoing{
-			Channel:     r.channel,
-			Account:     r.account,
-			To:          []string{to},
-			Thread:      r.thread,
-			Body:        r.body,
-			Attachments: r.attachments,
-			Voice:       r.voice,
-			Forward:     true,
-		}, token, dryRun)
-	}
-	if r.draftID != "" || r.newTo == "" {
+	if r.replyTo != nil && !r.forward {
 		if dryRun {
-			return previewChatReply(client, r.draftID, r.body, r.attachments, token, r.voice)
+			return previewChatReply(client, r.replyTo.ID, r.body, r.attachments, token, r.voice)
 		}
-		return sendChatReply(client, r.draftID, r.body, r.attachments, token, r.voice)
+		return sendChatReply(client, r.replyTo.ID, r.body, r.attachments, token, r.voice)
+	}
+	to := r.newTo
+	if to == "" {
+		to = r.thread
 	}
 	return chatOutgoingCmd(client, core.Outgoing{
 		Channel:     r.channel,
 		Account:     r.account,
-		To:          []string{r.newTo},
+		To:          []string{to},
 		Thread:      r.thread,
 		Body:        r.body,
 		Attachments: r.attachments,
 		Voice:       r.voice,
+		Forward:     r.forward,
 	}, token, dryRun)
 }
 

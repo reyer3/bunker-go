@@ -86,6 +86,8 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.openChatLink()
 	case chatForwardKey:
 		return m.startChatForward()
+	case chatReplyKey:
+		return m.startChatReply()
 	case chatSelectPrevKey:
 		return m.moveChatFocus(-1), nil
 	case chatSelectNextKey:
@@ -101,6 +103,9 @@ func (m Model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Esc stays in the chat it was going to.
 		if m.chatForward != nil {
 			return m.cancelChatForward(), nil
+		}
+		if m.chatReplyTo != nil {
+			return m.cancelChatReply(), nil
 		}
 		// A selection is dropped first, so Esc never leaves the chat
 		// while a message is still highlighted.

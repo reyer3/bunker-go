@@ -109,7 +109,7 @@ func TestChatViewRendersOwnAndOtherBubblesWithDaySeparator(t *testing.T) {
 // Enter must preview first and show "¿Enviar a ...? Enter/Esc", a second
 // Enter sends for real, and Esc cancels without ever sending.
 func TestChatEnterShowsInlineConfirmBeforeSending(t *testing.T) {
-	client := &replyClient{previewOut: core.Plan{Recipients: []string{"5511999999999@s.whatsapp.net"}}}
+	client := &replyClient{outgoingPreview: core.Plan{Recipients: []string{"5511999999999@s.whatsapp.net"}}}
 	model := chatReadyModel(client, "whatsapp:personal:1")
 	model.confirmChatSend = true // these pin the explicit two-step flow
 	model, cmd := openChat(model)
@@ -124,8 +124,8 @@ func TestChatEnterShowsInlineConfirmBeforeSending(t *testing.T) {
 	}
 	updated, _ = model.Update(cmd())
 	model = updated.(Model)
-	if !model.chatConfirm || len(client.calls) != 1 || !client.calls[0].dryRun {
-		t.Fatalf("expected an inline confirm after exactly one dry-run preview, chatConfirm=%v calls=%+v", model.chatConfirm, client.calls)
+	if !model.chatConfirm || len(client.chatSends()) != 1 || !client.chatSends()[0].dryRun {
+		t.Fatalf("expected an inline confirm after exactly one dry-run preview, chatConfirm=%v calls=%+v", model.chatConfirm, client.chatSends())
 	}
 	// The confirm text is long enough that a 40-column width wraps it
 	// across lines (correctly, per fitInbox's "every line fits the
@@ -143,8 +143,8 @@ func TestChatEnterShowsInlineConfirmBeforeSending(t *testing.T) {
 	}
 	updated, _ = model.Update(cmd())
 	model = updated.(Model)
-	if len(client.calls) != 2 || client.calls[1].dryRun {
-		t.Fatalf("calls = %+v, want a second, real (non-dry-run) send", client.calls)
+	if len(client.chatSends()) != 2 || client.chatSends()[1].dryRun {
+		t.Fatalf("calls = %+v, want a second, real (non-dry-run) send", client.chatSends())
 	}
 }
 
@@ -153,7 +153,7 @@ func TestChatEnterShowsInlineConfirmBeforeSending(t *testing.T) {
 // a second Enter while a real send is blocked in flight must not launch
 // another one.
 func TestChatNoDoubleSendWhileOneIsInFlight(t *testing.T) {
-	client := &replyClient{previewOut: core.Plan{Recipients: []string{"alice"}}}
+	client := &replyClient{outgoingPreview: core.Plan{Recipients: []string{"alice"}}}
 	model := chatReadyModel(client, "whatsapp:personal:1")
 	model.confirmChatSend = true // these pin the explicit two-step flow
 	model, cmd := openChat(model)
@@ -190,7 +190,7 @@ func TestChatNoDoubleSendWhileOneIsInFlight(t *testing.T) {
 }
 
 func TestChatEscCancelsConfirmWithoutSending(t *testing.T) {
-	client := &replyClient{previewOut: core.Plan{Recipients: []string{"alice"}}}
+	client := &replyClient{outgoingPreview: core.Plan{Recipients: []string{"alice"}}}
 	model := chatReadyModel(client, "whatsapp:personal:1")
 	model.confirmChatSend = true // these pin the explicit two-step flow
 	model, cmd := openChat(model)
@@ -206,8 +206,8 @@ func TestChatEscCancelsConfirmWithoutSending(t *testing.T) {
 	}
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	model = updated.(Model)
-	if model.chatConfirm || len(client.calls) != 1 {
-		t.Fatalf("Esc must cancel without a real send: chatConfirm=%v calls=%+v", model.chatConfirm, client.calls)
+	if model.chatConfirm || len(client.chatSends()) != 1 {
+		t.Fatalf("Esc must cancel without a real send: chatConfirm=%v calls=%+v", model.chatConfirm, client.chatSends())
 	}
 	if model.composer.Value() != "hola" {
 		t.Fatalf("draft after Esc = %q, want it kept for editing", model.composer.Value())
@@ -330,7 +330,7 @@ func TestChatScrollUpAtTopPaginatesOlderMessages(t *testing.T) {
 // second Enter while chatPreviewPending is true must be a complete no-op:
 // no new command, no bumped token, no second Reply(dryRun=true) call.
 func TestChatEnterIgnoredWhilePreviewPending(t *testing.T) {
-	client := &replyClient{previewOut: core.Plan{Recipients: []string{"alice"}}}
+	client := &replyClient{outgoingPreview: core.Plan{Recipients: []string{"alice"}}}
 	model := chatReadyModel(client, "whatsapp:personal:1")
 	model.confirmChatSend = true // these pin the explicit two-step flow
 	model, cmd := openChat(model)
@@ -368,8 +368,8 @@ func TestChatEnterIgnoredWhilePreviewPending(t *testing.T) {
 	updated, _ = model.Update(<-done)
 	model = updated.(Model)
 
-	if len(client.calls) != 1 {
-		t.Fatalf("preview calls = %d, want exactly 1 despite the extra Enter", len(client.calls))
+	if len(client.chatSends()) != 1 {
+		t.Fatalf("preview calls = %d, want exactly 1 despite the extra Enter", len(client.chatSends()))
 	}
 	if !model.chatConfirm {
 		t.Fatal("expected the inline confirm once the (single) preview resolved")
@@ -382,7 +382,7 @@ func TestChatEnterIgnoredWhilePreviewPending(t *testing.T) {
 // not wait for the real send (which may hold WhatsApp's simulated
 // composing delay of several seconds) to do either.
 func TestChatConfirmShowsOptimisticBubbleAndClearsComposer(t *testing.T) {
-	client := &replyClient{previewOut: core.Plan{Recipients: []string{"alice"}}}
+	client := &replyClient{outgoingPreview: core.Plan{Recipients: []string{"alice"}}}
 	model := chatReadyModel(client, "whatsapp:personal:1")
 	model.confirmChatSend = true // these pin the explicit two-step flow
 	model, cmd := openChat(model)
@@ -433,8 +433,8 @@ func TestChatConfirmShowsOptimisticBubbleAndClearsComposer(t *testing.T) {
 // the message just sent, never two.
 func TestChatSendSuccessReloadsAndDedupesOptimisticBubble(t *testing.T) {
 	client := &replyClient{
-		previewOut: core.Plan{Recipients: []string{"alice"}},
-		sendRcpt:   core.Receipt{ID: "whatsapp:personal:99"},
+		outgoingPreview:  core.Plan{Recipients: []string{"alice"}},
+		outgoingSentRcpt: core.Receipt{ID: "whatsapp:personal:99"},
 	}
 	model := chatReadyModel(client, "whatsapp:personal:1")
 	model.confirmChatSend = true // these pin the explicit two-step flow
@@ -481,8 +481,8 @@ func TestChatSendSuccessReloadsAndDedupesOptimisticBubble(t *testing.T) {
 // retry may ever be issued.
 func TestChatSendFailureMarksBubbleAndRestoresDraft(t *testing.T) {
 	client := &replyClient{
-		previewOut: core.Plan{Recipients: []string{"alice"}},
-		sendErr:    context.DeadlineExceeded,
+		outgoingPreview: core.Plan{Recipients: []string{"alice"}},
+		outgoingSentErr: context.DeadlineExceeded,
 	}
 	model := chatReadyModel(client, "whatsapp:personal:1")
 	model.confirmChatSend = true // pins the explicit two-step flow

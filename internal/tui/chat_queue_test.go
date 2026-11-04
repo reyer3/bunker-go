@@ -35,10 +35,27 @@ func (c *queueClient) Reply(ctx context.Context, id, body string, cc, bcc, attac
 	return plan, rcpt, err
 }
 
+// Send is Reply's counterpart for a plain chat message: the same failure
+// and receipt scripting.
+func (c *queueClient) Send(ctx context.Context, out core.Outgoing, dryRun bool) (core.Plan, core.Receipt, error) {
+	plan, rcpt, err := c.replyClient.Send(ctx, out, dryRun)
+	if dryRun {
+		return plan, rcpt, err
+	}
+	c.real++
+	if c.real == c.failAt {
+		return core.Plan{}, core.Receipt{}, errors.New("sin conexión")
+	}
+	if c.real <= len(c.rcpts) {
+		rcpt = core.Receipt{ID: c.rcpts[c.real-1]}
+	}
+	return plan, rcpt, err
+}
+
 // realBodies lists the bodies of the real (non-dry-run) sends, in order.
 func (c *queueClient) realBodies() []string {
 	var out []string
-	for _, call := range c.calls {
+	for _, call := range append(append([]replyCall(nil), c.calls...), c.chatSends()...) {
 		if !call.dryRun {
 			out = append(out, call.body)
 		}
@@ -48,7 +65,7 @@ func (c *queueClient) realBodies() []string {
 
 func queueChat(t *testing.T, client *queueClient) Model {
 	t.Helper()
-	client.previewOut = core.Plan{Recipients: []string{"alice"}}
+	client.outgoingPreview = core.Plan{Recipients: []string{"alice"}}
 	model := chatReadyModel(client, "whatsapp:personal:1")
 	model.width, model.height = 60, 40
 	model, cmd := openChat(model)
@@ -208,7 +225,7 @@ func TestChatQueuedSendKeepsItsOwnAttachments(t *testing.T) {
 		model = updated.(Model)
 	}
 	var real []replyCall
-	for _, c := range client.calls {
+	for _, c := range client.chatSends() {
 		if !c.dryRun {
 			real = append(real, c)
 		}
