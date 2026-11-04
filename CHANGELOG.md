@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.27.0](https://github.com/reyer3/bunker-go/compare/v0.26.0...v0.27.0) (2026-11-04)
+
+
+### Features
+
+* **tui:** chat sends are plain messages; Alt+R answers a selected one ([#187](https://github.com/reyer3/bunker-go/issues/187)) ([a2e5e08](https://github.com/reyer3/bunker-go/commit/a2e5e086abe6d9199ff5787c1f34ab728c78abf7))
+
+
+### Bug Fixes
+
+* **core:** reply to a message bunker sent addresses its recipient ([#186](https://github.com/reyer3/bunker-go/issues/186)) ([c54d6ff](https://github.com/reyer3/bunker-go/commit/c54d6ff3eb97de1bdda83fde9e461b5162107c9a))
+
 ## [0.26.0](https://github.com/reyer3/bunker-go/compare/v0.25.0...v0.26.0) (2026-11-04)
 
 
