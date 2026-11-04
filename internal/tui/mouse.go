@@ -145,6 +145,7 @@ func (m Model) openChat(item core.Item) (Model, tea.Cmd) {
 	m.chatAction = nil
 	m.chatEditID, m.chatEditDraft = "", ""
 	m.chatForward = nil
+	m.chatReplyTo = nil
 	m.chatToken++
 	m.composer = newChatComposer(chatComposerWidth(m.width), m.renderer())
 	if draft, ok := m.drafts[chatDraftKey(m.chatChannel, m.chatAccount, m.chatThread)]; ok {
@@ -163,6 +164,7 @@ func (m Model) leaveChat() (Model, tea.Cmd) {
 	// draft back so that is what gets kept.
 	m = m.cancelChatEdit()
 	m = m.cancelChatForward()
+	m = m.cancelChatReply()
 	m.chatAction = nil
 	if next, kept := m.keepDraft(chatDraftKey(channel, account, thread), m.composer.Value()); kept {
 		m = next.withFlash("borrador guardado")

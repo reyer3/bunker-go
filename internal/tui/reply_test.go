@@ -75,6 +75,22 @@ func (c *replyClient) Send(ctx context.Context, out core.Outgoing, dryRun bool) 
 	return c.outgoingSent, c.outgoingSentRcpt, c.outgoingSentErr
 }
 
+// chatSends lists the plain messages sent to a chat (core.Outgoing on a
+// chat channel), in the shape of replyCall: since typing in a chat sends
+// a plain message and only Alt+R answers one, this is where those sends
+// are recorded. Mail's own Send calls (the thread editor) are not chat
+// sends and stay in outgoingCalls.
+func (c *replyClient) chatSends() []replyCall {
+	var out []replyCall
+	for _, call := range c.outgoingCalls {
+		if call.out.Channel == core.ChannelMail {
+			continue
+		}
+		out = append(out, replyCall{id: call.out.ReplyTo, body: call.out.Body, attach: call.out.Attachments, dryRun: call.dryRun, hasDeadline: call.hasDeadline})
+	}
+	return out
+}
+
 func (c *replyClient) Reply(ctx context.Context, id, body string, cc, bcc, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
 	_, hasDeadline := ctx.Deadline()
 	c.calls = append(c.calls, replyCall{id: id, body: body, cc: cc, bcc: bcc, attach: attachments, dryRun: dryRun, hasDeadline: hasDeadline})
@@ -116,7 +132,7 @@ func (c *replyClient) Counts(ctx context.Context) (map[core.Channel]map[string]i
 
 func (c *replyClient) sendCalls() int {
 	n := 0
-	for _, call := range c.calls {
+	for _, call := range append(append([]replyCall(nil), c.calls...), c.chatSends()...) {
 		if !call.dryRun {
 			n++
 		}

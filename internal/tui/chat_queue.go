@@ -167,6 +167,7 @@ func (m Model) enqueueChatSend(draft string) (Model, tea.Cmd) {
 	m.chatAttachErr = nil
 	m.chatVoice, m.chatVoiceDur = false, 0
 	m.chatForward = nil
+	m.chatReplyTo = nil
 	m.chatPlan = core.Plan{}
 	m.chatSendErr = nil
 	m.composer.Reset()
@@ -353,6 +354,7 @@ func (m Model) restoreChatAttachments(failed []chatOptimisticMsg, clean bool) Mo
 		if e.req.forward {
 			m.chatForward = &chatForwardState{}
 		}
+		m.chatReplyTo = e.req.replyTo
 	}
 	return m
 }

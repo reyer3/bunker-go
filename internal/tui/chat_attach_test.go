@@ -136,8 +136,8 @@ func TestChatDropPathsAttachAndSend(t *testing.T) {
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(Model)
 	cmd()
-	if len(client.calls) != 1 || !client.calls[0].dryRun || len(client.calls[0].attach) != 1 || client.calls[0].attach[0] != file {
-		t.Fatalf("preview call = %+v, want a dry-run carrying the attachment", client.calls)
+	if len(client.chatSends()) != 1 || !client.chatSends()[0].dryRun || len(client.chatSends()[0].attach) != 1 || client.chatSends()[0].attach[0] != file {
+		t.Fatalf("preview call = %+v, want a dry-run carrying the attachment", client.chatSends())
 	}
 }
 
@@ -150,8 +150,8 @@ func TestChatAttachmentOnlySendIsAllowed(t *testing.T) {
 		t.Fatal("an attachment with an empty draft should still preview")
 	}
 	cmd()
-	if len(client.calls) != 1 || client.calls[0].body != "" {
-		t.Fatalf("calls = %+v", client.calls)
+	if len(client.chatSends()) != 1 || client.chatSends()[0].body != "" {
+		t.Fatalf("calls = %+v", client.chatSends())
 	}
 }
 

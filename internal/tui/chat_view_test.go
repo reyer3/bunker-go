@@ -435,7 +435,7 @@ func TestWalkthroughChatViewGolden(t *testing.T) {
 // TrueColor profile, like TestWalkthroughChatViewGolden.
 func TestWalkthroughChatOptimisticBubbleGolden(t *testing.T) {
 	at := time.Date(2026, 9, 26, 10, 42, 0, 0, time.UTC)
-	client := &replyClient{previewOut: core.Plan{Recipients: []string{"5511999999999@s.whatsapp.net"}}}
+	client := &replyClient{outgoingPreview: core.Plan{Recipients: []string{"5511999999999@s.whatsapp.net"}}}
 	client.items = []core.Item{{
 		ID: "whatsapp:personal:1", Channel: core.ChannelWhatsApp, Account: "personal",
 		Thread: "5511999999999@s.whatsapp.net", From: core.Address{ID: "5511999999999@s.whatsapp.net", Name: "Alice"},

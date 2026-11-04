@@ -553,7 +553,7 @@ func TestDoubleClickOnAnImageInTheViewerOpensItExternally(t *testing.T) {
 // --- sending with one Enter ---
 
 func realSends(c *replyClient) (real, dry int) {
-	for _, call := range c.calls {
+	for _, call := range append(append([]replyCall(nil), c.calls...), c.chatSends()...) {
 		if call.dryRun {
 			dry++
 		} else {
@@ -572,7 +572,7 @@ func plainChat(t *testing.T, client *replyClient) Model {
 }
 
 func TestPlainTextSendsWithASingleEnter(t *testing.T) {
-	client := &replyClient{previewOut: core.Plan{Recipients: []string{"alice"}}, sendRcpt: core.Receipt{ID: "whatsapp:personal:9"}}
+	client := &replyClient{outgoingPreview: core.Plan{Recipients: []string{"alice"}}, outgoingSentRcpt: core.Receipt{ID: "whatsapp:personal:9"}}
 	model := plainChat(t, client)
 
 	model, previewCmd := uxPress(t, model, tea.KeyMsg{Type: tea.KeyEnter})
@@ -593,8 +593,8 @@ func TestPlainTextSendsWithASingleEnter(t *testing.T) {
 	if real, dry := realSends(client); real != 1 || dry != 1 {
 		t.Fatalf("real sends = %d, dry-runs = %d, want 1 and 1 (dry-run first)", real, dry)
 	}
-	if !client.calls[0].dryRun || client.calls[1].dryRun || client.calls[1].body != "hola" {
-		t.Fatalf("calls = %+v, want a dry-run then the real send", client.calls)
+	if !client.chatSends()[0].dryRun || client.chatSends()[1].dryRun || client.chatSends()[1].body != "hola" {
+		t.Fatalf("calls = %+v, want a dry-run then the real send", client.chatSends())
 	}
 	if model.chatSendBusy() {
 		t.Fatal("still sending after the receipt")
@@ -602,7 +602,7 @@ func TestPlainTextSendsWithASingleEnter(t *testing.T) {
 }
 
 func TestPlanErrorShowsTheErrorAndDoesNotSend(t *testing.T) {
-	client := &replyClient{previewErr: errors.New("sin permiso")}
+	client := &replyClient{outgoingPreviewErr: errors.New("sin permiso")}
 	model := plainChat(t, client)
 	model, previewCmd := uxPress(t, model, tea.KeyMsg{Type: tea.KeyEnter})
 	updated, cmd := model.Update(previewCmd())
@@ -620,7 +620,7 @@ func TestPlanErrorShowsTheErrorAndDoesNotSend(t *testing.T) {
 		t.Fatalf("real=%d dry=%d", real, dry)
 	}
 	// The next Enter is a clean retry, not a stuck state.
-	client.previewErr = nil
+	client.outgoingPreviewErr = nil
 	_, cmd = uxPress(t, model, tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("Enter after the error should retry")
@@ -628,7 +628,7 @@ func TestPlanErrorShowsTheErrorAndDoesNotSend(t *testing.T) {
 }
 
 func TestAttachmentsStillNeedAnExplicitConfirm(t *testing.T) {
-	client := &replyClient{previewOut: core.Plan{Recipients: []string{"alice"}}}
+	client := &replyClient{outgoingPreview: core.Plan{Recipients: []string{"alice"}}}
 	model := plainChat(t, client)
 	file := filepath.Join(t.TempDir(), "nota.txt")
 	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
@@ -647,7 +647,7 @@ func TestAttachmentsStillNeedAnExplicitConfirm(t *testing.T) {
 }
 
 func TestVoiceNoteStillNeedsAnExplicitConfirm(t *testing.T) {
-	client := &replyClient{previewOut: core.Plan{Recipients: []string{"alice"}, Voice: true}}
+	client := &replyClient{outgoingPreview: core.Plan{Recipients: []string{"alice"}, Voice: true}}
 	model := plainChat(t, client)
 	file := filepath.Join(t.TempDir(), "voz.ogg")
 	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
@@ -690,7 +690,7 @@ func TestEditStillNeedsAnExplicitConfirm(t *testing.T) {
 }
 
 func TestConfirmChatSendOptionRestoresTheTwoStepFlow(t *testing.T) {
-	client := &replyClient{previewOut: core.Plan{Recipients: []string{"alice"}}}
+	client := &replyClient{outgoingPreview: core.Plan{Recipients: []string{"alice"}}}
 	model := plainChat(t, client)
 	model.confirmChatSend = true
 	model, previewCmd := uxPress(t, model, tea.KeyMsg{Type: tea.KeyEnter})
@@ -716,7 +716,7 @@ func TestConfirmChatSendOptionRestoresTheTwoStepFlow(t *testing.T) {
 // back the "tengo que dar como 4 enters" bug in reverse: an impatient
 // second Enter, while the preview or the send is in flight, is ignored.
 func TestFastDoubleEnterSendsOnce(t *testing.T) {
-	client := &replyClient{previewOut: core.Plan{Recipients: []string{"alice"}}, sendRcpt: core.Receipt{ID: "whatsapp:personal:9"}}
+	client := &replyClient{outgoingPreview: core.Plan{Recipients: []string{"alice"}}, outgoingSentRcpt: core.Receipt{ID: "whatsapp:personal:9"}}
 	model := plainChat(t, client)
 
 	model, previewCmd := uxPress(t, model, keyEnter)
@@ -745,7 +745,7 @@ func TestFastDoubleEnterSendsOnce(t *testing.T) {
 var keyEnter = tea.KeyMsg{Type: tea.KeyEnter}
 
 func TestAutoSendDoesNotSurviveLeavingTheChat(t *testing.T) {
-	client := &replyClient{previewOut: core.Plan{Recipients: []string{"alice"}}}
+	client := &replyClient{outgoingPreview: core.Plan{Recipients: []string{"alice"}}}
 	model := plainChat(t, client)
 	model, previewCmd := uxPress(t, model, keyEnter)
 	if !model.chatAutoSend {

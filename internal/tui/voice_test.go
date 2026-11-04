@@ -40,6 +40,15 @@ func (c *voiceClient) Reply(ctx context.Context, id, body string, cc, bcc, attac
 	return c.replyClient.Reply(ctx, id, body, cc, bcc, attachments, dryRun)
 }
 
+// Send remembers whether each plain chat message was a voice note, as
+// Reply does for a reply.
+func (c *voiceClient) Send(ctx context.Context, out core.Outgoing, dryRun bool) (core.Plan, core.Receipt, error) {
+	c.mu.Lock()
+	c.voices = append(c.voices, out.Voice)
+	c.mu.Unlock()
+	return c.replyClient.Send(ctx, out, dryRun)
+}
+
 var voiceNow = time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
 
 // voiceChatModel opens a WhatsApp chat holding one received voice note
@@ -324,7 +333,7 @@ func recordingModel(t *testing.T, argv []string) (Model, *voiceClient) {
 	t.Helper()
 	t.Setenv("TMPDIR", t.TempDir())
 	client := &voiceClient{}
-	client.previewOut = core.Plan{Voice: true, Recipients: []string{"5511999999999@s.whatsapp.net"},
+	client.outgoingPreview = core.Plan{Voice: true, Recipients: []string{"5511999999999@s.whatsapp.net"},
 		Attachments: []core.AttachmentInfo{{Name: "x.ogg", Voice: true, DurationMS: 3000}}}
 	model := voiceChatModel(t, client)
 	model.voiceRecordCmds = map[string][]string{voiceRecordKeyFor(core.ChannelWhatsApp, "personal"): argv}
@@ -382,11 +391,11 @@ func TestRecordStopPreviewConfirmSendsVoiceNote(t *testing.T) {
 	}
 	updated, _ = model.Update(preview())
 	model = updated.(Model)
-	if !model.chatConfirm || len(client.calls) != 1 || !client.calls[0].dryRun || !client.voices[0] {
-		t.Fatalf("expected one voice dry-run preview, confirm=%v calls=%+v voices=%v", model.chatConfirm, client.calls, client.voices)
+	if !model.chatConfirm || len(client.chatSends()) != 1 || !client.chatSends()[0].dryRun || !client.voices[0] {
+		t.Fatalf("expected one voice dry-run preview, confirm=%v calls=%+v voices=%v", model.chatConfirm, client.chatSends(), client.voices)
 	}
-	if client.calls[0].body != "" || len(client.calls[0].attach) != 1 || client.calls[0].attach[0] != path {
-		t.Fatalf("preview call = %+v", client.calls[0])
+	if client.chatSends()[0].body != "" || len(client.chatSends()[0].attach) != 1 || client.chatSends()[0].attach[0] != path {
+		t.Fatalf("preview call = %+v", client.chatSends()[0])
 	}
 	if view := model.View(); !strings.Contains(view, "🎤 Nota de voz · 0:03") || strings.Contains(view, "bunker-voz") {
 		t.Fatalf("the pending note should show as a voice note, not a temp file:\n%s", view)
@@ -395,7 +404,7 @@ func TestRecordStopPreviewConfirmSendsVoiceNote(t *testing.T) {
 	if !strings.Contains(unwrapped, "¿Enviar nota de voz (0:03) a 5511999999999@s.whatsapp.net? ↵ enviar · Esc cancelar") {
 		t.Fatalf("confirm line missing:\n%s", model.View())
 	}
-	if len(client.calls) != 1 {
+	if len(client.chatSends()) != 1 {
 		t.Fatal("nothing may be sent before the confirm")
 	}
 
@@ -408,8 +417,8 @@ func TestRecordStopPreviewConfirmSendsVoiceNote(t *testing.T) {
 	sent := send().(chatReplySentMsg)
 	updated, _ = model.Update(sent)
 	model = updated.(Model)
-	if len(client.calls) != 2 || client.calls[1].dryRun || !client.voices[1] {
-		t.Fatalf("calls = %+v voices = %v, want a real voice send", client.calls, client.voices)
+	if len(client.chatSends()) != 2 || client.chatSends()[1].dryRun || !client.voices[1] {
+		t.Fatalf("calls = %+v voices = %v, want a real voice send", client.chatSends(), client.voices)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("the temp recording was not deleted after sending: %v", err)

@@ -618,8 +618,21 @@ message and `Alt+Down` the next one. With nothing selected, `Alt+Up`
 selects the newest; `Alt+Down` past the newest drops the selection. The
 selected bubble is scrolled into view, and `Esc` drops the selection
 before it would leave the chat. The message actions below (`Alt+Y`,
-`Alt+O`, `Alt+L`, `Alt+F`) act on the selected message, or on the newest
-when none is.
+`Alt+O`, `Alt+L`, `Alt+R`, `Alt+F`) act on the selected message, or on
+the newest when none is.
+
+**Replying to a chat message.** What you type in a chat is sent as a
+plain message: it quotes nothing. To answer one message, select it
+(`Alt+Up`/`Alt+Down`, or a click) and press `Alt+R`: a
+"↪ Respondiendo a <name>: «<start of the message>»" line appears under
+the composer, and the next send goes out as a reply to that message (the
+quote bubble on WhatsApp, the reply relation on Matrix). The mark is
+dropped once it is sent, so the message after that is plain again; it is
+also dropped by `Esc` (before it would drop the selection) and by leaving
+the chat. A send that fails keeps the mark, so retrying answers the same
+message. Your own messages can be answered too ("tu mensaje"). A deleted
+message cannot, and neither can any while an edit or a forward is being
+composed. The command palette lists it as "Responder mensaje".
 
 **Selecting and copying text.** The panel captures the mouse, which is
 what keeps the terminal from selecting text. Three ways around it:

@@ -81,7 +81,7 @@ func TestCtrlSSendsLikeEnterEverywhere(t *testing.T) {
 	}
 	runCmds(cmd)
 	real := 0
-	for _, c := range client.calls {
+	for _, c := range client.chatSends() {
 		if !c.dryRun {
 			real++
 		}

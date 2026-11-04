@@ -255,6 +255,9 @@ type Model struct {
 	forwardPick      *core.Item
 	chatForward      *chatForwardState
 	chatForwardToken uint64
+	// chatReplyTo is the message the next send in the open chat answers
+	// (Alt+R, chat_reply.go); nil sends a plain message.
+	chatReplyTo *core.Item
 	// selectMode is true while the mouse is released so the terminal
 	// selects text natively (F7/Alt+S).
 	selectMode bool

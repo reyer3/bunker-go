@@ -254,6 +254,7 @@ func (m Model) paletteCommands() []paletteEntry {
 		add("Grabar nota de voz", "Alt+V", paletteAlt('v'), m.voiceRecordBlocked())
 		add("Reproducir nota de voz", "Alt+P", paletteAlt('p'), m.voicePlayBlocked())
 		add("Copiar mensaje", "Alt+Y", paletteAlt('y'), m.copyBlocked())
+		add("Responder mensaje", "Alt+R", paletteAlt('r'), m.chatReplyBlocked())
 		add("Reenviar mensaje", "Alt+F", paletteAlt('f'), m.copyBlocked())
 		add("Abrir adjunto", "Alt+O", paletteAlt('o'), m.openBlocked())
 		add("Modo selección", "F7", tea.KeyMsg{Type: tea.KeyF7}, "")
