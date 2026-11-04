@@ -629,6 +629,9 @@ func (s *Service) Reply(ctx context.Context, id string, body string, cc, bcc []s
 	parts = append(parts, "attachments")
 	parts = append(parts, s.fingerprintPaths(attachments)...)
 	parts = append(parts, fmt.Sprint("voice=", IsVoice(ctx)))
+	if IsHTML(ctx) {
+		parts = append(parts, "html=true") // absent when false, so existing keys keep their fingerprint
+	}
 	return s.idempotency.do(ctx, key, requestFingerprint(parts...), func() (Plan, Receipt, error) {
 		return s.reply(ctx, id, body, cc, bcc, attachments, false)
 	})
@@ -672,10 +675,17 @@ func (s *Service) reply(ctx context.Context, id string, body string, cc, bcc []s
 		Subject:     item.Subject,
 		Body:        body,
 		Attachments: attachments,
+		HTML:        IsHTML(ctx),
+	}
+	plan.HTML = out.HTML
+	voiceOut := out
+	voiceOut.Voice = IsVoice(ctx)
+	if err := checkHTML(adapter, voiceOut, "reply"); err != nil {
+		return Plan{}, Receipt{}, err
 	}
 	plan.RiskLevel, plan.SuggestedConfirmation, plan.EstimatedSideEffects = assessSendRisk(out)
 
-	if IsVoice(ctx) {
+	if voiceOut.Voice {
 		out.Voice = true
 		return s.deliverVoice(ctx, adapter, plan, out, item.Thread, item.ThreadName, item.From.ID, "reply", dryRun)
 	}
@@ -746,6 +756,9 @@ func (s *Service) Send(ctx context.Context, out Outgoing, dryRun bool) (Plan, Re
 	parts = append(parts, "attachments")
 	parts = append(parts, s.fingerprintPaths(out.Attachments)...)
 	parts = append(parts, fmt.Sprint("voice=", out.Voice), fmt.Sprint("forward=", out.Forward))
+	if out.HTML {
+		parts = append(parts, "html=true") // absent when false, so existing keys keep their fingerprint
+	}
 	return s.idempotency.do(ctx, key, requestFingerprint(parts...), func() (Plan, Receipt, error) {
 		return s.send(ctx, out, false)
 	})
@@ -767,6 +780,7 @@ func (s *Service) send(ctx context.Context, out Outgoing, dryRun bool) (Plan, Re
 		Media:      out.Attachments,
 		Recipients: append([]string{}, out.To...),
 		Forward:    out.Forward,
+		HTML:       out.HTML,
 	}
 	plan.RiskLevel, plan.SuggestedConfirmation, plan.EstimatedSideEffects = assessSendRisk(out)
 
@@ -779,6 +793,9 @@ func (s *Service) send(ctx context.Context, out Outgoing, dryRun bool) (Plan, Re
 
 	adapter, err := s.adapterFor(out.Channel, out.Account)
 	if err != nil {
+		return Plan{}, Receipt{}, err
+	}
+	if err := checkHTML(adapter, out, "send"); err != nil {
 		return Plan{}, Receipt{}, err
 	}
 
@@ -1119,6 +1136,9 @@ func assessSendRisk(out Outgoing) (riskLevel, suggestedConfirmation, estimatedSi
 	}
 	if out.Voice {
 		effects = append(effects, "envía como nota de voz")
+	}
+	if out.HTML {
+		effects = append(effects, "envía como HTML")
 	}
 	estimatedSideEffects = strings.Join(effects, ", ")
 

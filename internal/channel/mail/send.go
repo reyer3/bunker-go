@@ -249,6 +249,19 @@ func buildRawMessage(cfg AccountConfig, out core.Outgoing, subject, messageID, i
 	}
 
 	var buf bytes.Buffer
+	if len(out.Attachments) == 0 && out.HTML {
+		iw, err := gomail.CreateInlineWriter(&buf, h)
+		if err != nil {
+			return nil, fmt.Errorf("create writer: %w", err)
+		}
+		if err := writeAlternativeParts(iw, out.Body); err != nil {
+			return nil, err
+		}
+		if err := iw.Close(); err != nil {
+			return nil, fmt.Errorf("close writer: %w", err)
+		}
+		return buf.Bytes(), nil
+	}
 	if len(out.Attachments) == 0 {
 		h.Set("Content-Type", "text/plain; charset=utf-8")
 		w, err := gomail.CreateSingleInlineWriter(&buf, h)
@@ -269,17 +282,30 @@ func buildRawMessage(cfg AccountConfig, out core.Outgoing, subject, messageID, i
 		return nil, fmt.Errorf("create writer: %w", err)
 	}
 
-	var textHeader gomail.InlineHeader
-	textHeader.Set("Content-Type", "text/plain; charset=utf-8")
-	tw, err := mw.CreateSingleInline(textHeader)
-	if err != nil {
-		return nil, fmt.Errorf("create text part: %w", err)
-	}
-	if _, err := tw.Write([]byte(out.Body)); err != nil {
-		return nil, fmt.Errorf("write body: %w", err)
-	}
-	if err := tw.Close(); err != nil {
-		return nil, fmt.Errorf("close text part: %w", err)
+	if out.HTML {
+		iw, err := mw.CreateInline()
+		if err != nil {
+			return nil, fmt.Errorf("create alternative part: %w", err)
+		}
+		if err := writeAlternativeParts(iw, out.Body); err != nil {
+			return nil, err
+		}
+		if err := iw.Close(); err != nil {
+			return nil, fmt.Errorf("close alternative part: %w", err)
+		}
+	} else {
+		var textHeader gomail.InlineHeader
+		textHeader.Set("Content-Type", "text/plain; charset=utf-8")
+		tw, err := mw.CreateSingleInline(textHeader)
+		if err != nil {
+			return nil, fmt.Errorf("create text part: %w", err)
+		}
+		if _, err := tw.Write([]byte(out.Body)); err != nil {
+			return nil, fmt.Errorf("write body: %w", err)
+		}
+		if err := tw.Close(); err != nil {
+			return nil, fmt.Errorf("close text part: %w", err)
+		}
 	}
 
 	for _, path := range out.Attachments {
@@ -308,3 +334,32 @@ func buildRawMessage(cfg AccountConfig, out core.Outgoing, subject, messageID, i
 	}
 	return buf.Bytes(), nil
 }
+
+// writeAlternativeParts writes an HTML body as the text/plain and
+// text/html alternatives of one message: the plain part is the HTML
+// rendered as text, so a reader without HTML still gets the content.
+func writeAlternativeParts(iw *gomail.InlineWriter, htmlBody string) error {
+	for _, part := range []struct{ contentType, body string }{
+		{"text/plain; charset=utf-8", HTMLToText(htmlBody)},
+		{"text/html; charset=utf-8", htmlBody},
+	} {
+		var ph gomail.InlineHeader
+		ph.Set("Content-Type", part.contentType)
+		pw, err := iw.CreatePart(ph)
+		if err != nil {
+			return fmt.Errorf("create %s part: %w", part.contentType, err)
+		}
+		if _, err := pw.Write([]byte(part.body)); err != nil {
+			return fmt.Errorf("write %s part: %w", part.contentType, err)
+		}
+		if err := pw.Close(); err != nil {
+			return fmt.Errorf("close %s part: %w", part.contentType, err)
+		}
+	}
+	return nil
+}
+
+// SendsHTML marks the mail adapter as an core.HTMLSender.
+func (a *Adapter) SendsHTML() {}
+
+var _ core.HTMLSender = (*Adapter)(nil)

@@ -17,6 +17,7 @@ type fakeBackend struct {
 
 	sendDryRuns   []bool
 	replyVoice    []bool
+	replyHTML     []bool
 	unreadCalls   []string
 	unreadLocal   bool
 	unreadErr     error
@@ -438,6 +439,7 @@ func (f *fakeBackend) Counts(ctx context.Context) (map[core.Channel]map[string]i
 func (f *fakeBackend) Reply(ctx context.Context, id, body string, cc, bcc []string, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
 	f.replyCalls = append(f.replyCalls, replyCall{ID: id, Body: body, Cc: cc, Bcc: bcc, Attachments: attachments, DryRun: dryRun})
 	f.replyVoice = append(f.replyVoice, core.IsVoice(ctx))
+	f.replyHTML = append(f.replyHTML, core.IsHTML(ctx))
 	f.sendKeys = append(f.sendKeys, core.IdempotencyKey(ctx))
 	if f.replyErr != nil {
 		return core.Plan{}, core.Receipt{}, f.replyErr

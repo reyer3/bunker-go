@@ -795,7 +795,7 @@ takes the same flags as `list` and prints the same output, but
 store only; `bunker search` is the different command that asks the mail
 server.
 
-## `bunker read <id> [--mark-read] [--json]`
+## `bunker read <id> [--mark-read] [--json|--html]`
 
 Fetches the full item, using the adapter's `Fetcher` capability if it has
 one, falling back to the stored copy otherwise. **By default it has no
@@ -822,14 +822,38 @@ the adapter implements `core.ReadMarker`, and in the local store:
 TUI's item fetches never mark anything read; the TUI marks through its
 own explicit actions (opening a conversation, `read-thread`).
 
+`--html` (mail only) opens the message's HTML body in the browser instead
+of printing it. The body is sanitized first: only formatting tags are kept;
+scripts, styles, event handlers, images (nothing is fetched from remote
+servers) and links other than `http(s):`/`mailto:` are dropped, and the page
+carries a strict Content-Security-Policy. It is written to a private temp
+file (`bunker-mail-*.html`) opened with `xdg-open` (`open` on macOS, or
+`$BUNKER_OPEN_URL`). A mail with no HTML part fails with an error rather than
+showing plain text; `--html` and `--json` together are a usage error (exit 2).
+The HTML is only present on this on-demand fetch (`Meta["html"]`); it is never
+stored by sync.
+
 ```json
 {"item": { <core.Item> }}
 ```
 
-## `bunker reply <id> <text|-> [--cc addr]... [--bcc addr]... [--attach path]... [--idempotency-key k] [--dry-run] [--json]`
+## `bunker reply <id> <text|-> [--cc addr]... [--bcc addr]... [--attach path]... [--html] [--idempotency-key k] [--dry-run] [--json]`
 
 `bunker reply <id> --voice <file.ogg>` replies with a voice note instead
 (no text; see [Voice notes](#voice-notes-notas-de-voz)).
+
+`--html` (mail only) says `<text>` is HTML markup. The message goes out as
+`multipart/alternative`: a `text/plain` part rendered from the HTML plus
+the `text/html` part as given (inside `multipart/mixed` when there are
+attachments). Any other channel refuses it with `ErrUnsupported` instead of
+sending the markup as literal text, on `--dry-run` too, and it cannot be
+combined with `--voice` (exit 2). The plan carries `"html": true` and the
+human output adds an `as HTML` line. The markup is sent unsanitized: it is
+the author's own message. A sent copy kept in the local store holds the HTML
+source as its body. A client talking to a daemon that predates `--html` (an older
+build, or one not restarted after an update) refuses the request with
+`ErrUnsupported` instead of sending the markup as text: it first asks the
+daemon for a dry-run plan and requires `"html": true` in it.
 
 Replies to item `<id>`. `<text>` can be `-` to read the body from stdin.
 `--dry-run` returns the `Plan` alone and never reaches the channel
@@ -881,11 +905,24 @@ such as `51999999999@s.whatsapp.net` even when the recipient was typed
 as bare digits, or a Matrix room id); the stored sent item joins that
 conversation.
 
-## `bunker send <channel> <account> <to> <text|-> [--cc addr]... [--bcc addr]... [--subject s] [--attach path]... [--media path]... [--forward] [--idempotency-key k] [--dry-run] [--json]`
+## `bunker send <channel> <account> <to> <text|-> [--cc addr]... [--bcc addr]... [--subject s] [--attach path]... [--media path]... [--forward] [--html] [--idempotency-key k] [--dry-run] [--json]`
 
 `bunker send <channel> <account> <to> --voice <file.ogg>` sends an Ogg
 Opus file as a voice note (no text; see
 [Voice notes](#voice-notes-notas-de-voz)).
+
+`--html` (mail only) says `<text>` is HTML markup. The message goes out as
+`multipart/alternative`: a `text/plain` part rendered from the HTML plus
+the `text/html` part as given (inside `multipart/mixed` when there are
+attachments). Any other channel refuses it with `ErrUnsupported` instead of
+sending the markup as literal text, on `--dry-run` too, and it cannot be
+combined with `--voice` (exit 2). The plan carries `"html": true` and the
+human output adds an `as HTML` line. The markup is sent unsanitized: it is
+the author's own message. A sent copy kept in the local store holds the HTML
+source as its body. A client talking to a daemon that predates `--html` (an older
+build, or one not restarted after an update) refuses the request with
+`ErrUnsupported` instead of sending the markup as text: it first asks the
+daemon for a dry-run plan and requires `"html": true` in it.
 
 `--forward` marks the message as forwarded from another conversation.
 On WhatsApp it carries the native label (the recipient sees

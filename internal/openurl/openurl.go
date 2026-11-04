@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/url"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -55,5 +56,31 @@ func Open(rawURL string, getenv func(string) string) error {
 		return fmt.Errorf("openurl: no se pudo abrir el enlace con %q: %w", argv[0], err)
 	}
 	go cmd.Wait() // reap it; its outcome is the opener's business
+	return nil
+}
+
+// OpenFile opens a local file (an absolute path) with the same opener as
+// Open. Unlike a link, the path comes from bunker itself, never from a
+// message, so it is not restricted to http(s).
+func OpenFile(path string, getenv func(string) string) error {
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("openurl: la ruta %q no es absoluta", path)
+	}
+	opener := []string{"xdg-open"}
+	if runtime.GOOS == "darwin" {
+		opener = []string{"open"}
+	}
+	if custom := strings.Fields(getenv(Env)); len(custom) > 0 {
+		opener = custom
+	}
+	bin, err := exec.LookPath(opener[0])
+	if err != nil {
+		return fmt.Errorf("openurl: no se encontró %q para abrir el archivo; instala xdg-open o define %s", opener[0], Env)
+	}
+	cmd := exec.Command(bin, append(opener[1:], path)...)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("openurl: no se pudo abrir el archivo con %q: %w", opener[0], err)
+	}
+	go cmd.Wait()
 	return nil
 }
