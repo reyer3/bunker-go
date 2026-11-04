@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.0](https://github.com/reyer3/bunker-go/compare/v0.25.0...v0.26.0) (2026-11-04)
+
+
+### Features
+
+* **mail:** --html to read and send HTML mail ([#182](https://github.com/reyer3/bunker-go/issues/182)) ([56a3214](https://github.com/reyer3/bunker-go/commit/56a32148100d4d82b69e3e6075e72b56f0b3e919))
+
 ## [0.25.0](https://github.com/reyer3/bunker-go/compare/v0.24.0...v0.25.0) (2026-10-29)
 
 
