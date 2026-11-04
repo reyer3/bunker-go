@@ -642,7 +642,8 @@ func (s *Service) reply(ctx context.Context, id string, body string, cc, bcc []s
 	if err != nil {
 		return Plan{}, Receipt{}, err
 	}
-	if err := validateOutgoingRecipients([]string{item.From.ID}, cc, bcc); err != nil {
+	recipient := replyRecipient(item)
+	if err := validateOutgoingRecipients([]string{recipient}, cc, bcc); err != nil {
 		return Plan{}, Receipt{}, err
 	}
 
@@ -656,7 +657,7 @@ func (s *Service) reply(ctx context.Context, id string, body string, cc, bcc []s
 		Subject:    replySubject(item.Subject),
 		Preview:    body,
 		Media:      attachments,
-		Recipients: []string{item.From.ID},
+		Recipients: []string{recipient},
 	}
 
 	adapter, err := s.adapterFor(item.Channel, item.Account)
@@ -667,7 +668,7 @@ func (s *Service) reply(ctx context.Context, id string, body string, cc, bcc []s
 	out := Outgoing{
 		Channel:     item.Channel,
 		Account:     item.Account,
-		To:          []string{item.From.ID},
+		To:          []string{recipient},
 		Cc:          cc,
 		Bcc:         bcc,
 		Thread:      item.Thread,
@@ -687,7 +688,7 @@ func (s *Service) reply(ctx context.Context, id string, body string, cc, bcc []s
 
 	if voiceOut.Voice {
 		out.Voice = true
-		return s.deliverVoice(ctx, adapter, plan, out, item.Thread, item.ThreadName, item.From.ID, "reply", dryRun)
+		return s.deliverVoice(ctx, adapter, plan, out, item.Thread, item.ThreadName, recipient, "reply", dryRun)
 	}
 
 	if len(attachments) > 0 {
@@ -707,7 +708,7 @@ func (s *Service) reply(ctx context.Context, id string, body string, cc, bcc []s
 		if err != nil {
 			return Plan{}, Receipt{}, fmt.Errorf("core: reply send failed: %w", err)
 		}
-		s.storeSentItem(ctx, item.Channel, item.Account, item.Thread, item.ThreadName, item.From.ID, plan.Subject, body, plan.Attachments, receipt)
+		s.storeSentItem(ctx, item.Channel, item.Account, item.Thread, item.ThreadName, recipient, plan.Subject, body, plan.Attachments, receipt)
 		return plan, receipt, nil
 	}
 
@@ -722,8 +723,20 @@ func (s *Service) reply(ctx context.Context, id string, body string, cc, bcc []s
 	if err != nil {
 		return Plan{}, Receipt{}, fmt.Errorf("core: reply send failed: %w", err)
 	}
-	s.storeSentItem(ctx, item.Channel, item.Account, item.Thread, item.ThreadName, item.From.ID, plan.Subject, body, nil, receipt)
+	s.storeSentItem(ctx, item.Channel, item.Account, item.Thread, item.ThreadName, recipient, plan.Subject, body, nil, receipt)
 	return plan, receipt, nil
+}
+
+// replyRecipient is who a reply to item is addressed to: its sender. A
+// message bunker sent itself is stored with the addressee in To and no
+// From (storeSentItem), so replying to it, as the chat view does when the
+// newest message is ours, falls back to that addressee instead of failing
+// on an empty sender. Any other item keeps its sender.
+func replyRecipient(item Item) string {
+	if item.From.ID == "" && item.FromMe && len(item.To) > 0 {
+		return item.To[0].ID
+	}
+	return item.From.ID
 }
 
 // Send delivers a fresh outgoing message. dryRun returns the Plan alone.
