@@ -176,6 +176,10 @@ type Outgoing struct {
 	// forward to more than one recipient: forwarding is one target at a
 	// time, never a broadcast.
 	Forward bool `json:"forward,omitempty"`
+	// HTML marks Body as HTML markup. Only an adapter implementing
+	// HTMLSender can deliver it; Service refuses it elsewhere with
+	// ErrUnsupported rather than sending the markup as literal text.
+	HTML bool `json:"html,omitempty"`
 }
 
 // Receipt confirms a write op actually reached the channel.
@@ -215,6 +219,15 @@ type RecipientResult struct {
 // it.
 type Sender interface {
 	Send(ctx context.Context, out Outgoing) (Receipt, error)
+}
+
+// HTMLSender is an optional marker capability: an adapter that can
+// deliver Outgoing.HTML as a real HTML message (mail, as
+// multipart/alternative with a text/plain rendering). WhatsApp and Matrix
+// do not implement it.
+type HTMLSender interface {
+	Sender
+	SendsHTML()
 }
 
 // MultiRecipientSender is an optional, stronger marker capability: an
@@ -550,6 +563,8 @@ type Plan struct {
 	// Forward reports that the message goes out marked as forwarded
 	// (see Outgoing.Forward).
 	Forward bool `json:"forward,omitempty"`
+	// HTML reports that the body goes out as HTML (see Outgoing.HTML).
+	HTML bool `json:"html,omitempty"`
 	// Recipients lists every To address this send/reply reaches, in
 	// order — one entry whether the adapter addressed everyone with a
 	// single native call (mail) or Service fanned out N sequential

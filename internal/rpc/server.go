@@ -153,6 +153,9 @@ func (s *Server) call(ctx context.Context, req Request) (any, error) {
 		if p.Voice {
 			replyCtx = core.WithVoice(replyCtx)
 		}
+		if p.HTML {
+			replyCtx = core.WithHTML(replyCtx)
+		}
 		plan, receipt, err := s.svc.Reply(replyCtx, p.ID, p.Body, p.Cc, p.Bcc, p.Attachments, p.DryRun)
 		if err != nil {
 			return nil, err

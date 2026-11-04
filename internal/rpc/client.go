@@ -191,7 +191,7 @@ func (c *Client) Reply(ctx context.Context, id, body string, cc, bcc []string, a
 		return core.Plan{}, core.Receipt{}, err
 	}
 	var res planReceiptResult
-	params := replyParams{ID: id, Body: body, Cc: cc, Bcc: bcc, Attachments: attachments, DryRun: dryRun, IdempotencyKey: core.IdempotencyKey(ctx), Voice: core.IsVoice(ctx)}
+	params := replyParams{ID: id, Body: body, Cc: cc, Bcc: bcc, Attachments: attachments, DryRun: dryRun, IdempotencyKey: core.IdempotencyKey(ctx), Voice: core.IsVoice(ctx), HTML: core.IsHTML(ctx)}
 	if err := c.call(ctx, MethodReply, params, &res); err != nil {
 		return core.Plan{}, core.Receipt{}, err
 	}

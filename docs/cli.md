@@ -837,10 +837,20 @@ stored by sync.
 {"item": { <core.Item> }}
 ```
 
-## `bunker reply <id> <text|-> [--cc addr]... [--bcc addr]... [--attach path]... [--idempotency-key k] [--dry-run] [--json]`
+## `bunker reply <id> <text|-> [--cc addr]... [--bcc addr]... [--attach path]... [--html] [--idempotency-key k] [--dry-run] [--json]`
 
 `bunker reply <id> --voice <file.ogg>` replies with a voice note instead
 (no text; see [Voice notes](#voice-notes-notas-de-voz)).
+
+`--html` (mail only) says `<text>` is HTML markup. The message goes out as
+`multipart/alternative`: a `text/plain` part rendered from the HTML plus
+the `text/html` part as given (inside `multipart/mixed` when there are
+attachments). Any other channel refuses it with `ErrUnsupported` instead of
+sending the markup as literal text, on `--dry-run` too, and it cannot be
+combined with `--voice` (exit 2). The plan carries `"html": true` and the
+human output adds an `as HTML` line. The markup is sent unsanitized: it is
+the author's own message. A sent copy kept in the local store holds the HTML
+source as its body.
 
 Replies to item `<id>`. `<text>` can be `-` to read the body from stdin.
 `--dry-run` returns the `Plan` alone and never reaches the channel
@@ -892,11 +902,21 @@ such as `51999999999@s.whatsapp.net` even when the recipient was typed
 as bare digits, or a Matrix room id); the stored sent item joins that
 conversation.
 
-## `bunker send <channel> <account> <to> <text|-> [--cc addr]... [--bcc addr]... [--subject s] [--attach path]... [--media path]... [--forward] [--idempotency-key k] [--dry-run] [--json]`
+## `bunker send <channel> <account> <to> <text|-> [--cc addr]... [--bcc addr]... [--subject s] [--attach path]... [--media path]... [--forward] [--html] [--idempotency-key k] [--dry-run] [--json]`
 
 `bunker send <channel> <account> <to> --voice <file.ogg>` sends an Ogg
 Opus file as a voice note (no text; see
 [Voice notes](#voice-notes-notas-de-voz)).
+
+`--html` (mail only) says `<text>` is HTML markup. The message goes out as
+`multipart/alternative`: a `text/plain` part rendered from the HTML plus
+the `text/html` part as given (inside `multipart/mixed` when there are
+attachments). Any other channel refuses it with `ErrUnsupported` instead of
+sending the markup as literal text, on `--dry-run` too, and it cannot be
+combined with `--voice` (exit 2). The plan carries `"html": true` and the
+human output adds an `as HTML` line. The markup is sent unsanitized: it is
+the author's own message. A sent copy kept in the local store holds the HTML
+source as its body.
 
 `--forward` marks the message as forwarded from another conversation.
 On WhatsApp it carries the native label (the recipient sees
