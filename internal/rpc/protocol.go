@@ -174,6 +174,8 @@ type replyParams struct {
 	IdempotencyKey string   `json:"idempotency_key,omitempty"`
 	// Voice sends the single attachment as a voice note (core.WithVoice).
 	Voice bool `json:"voice,omitempty"`
+	// HTML sends the body as an HTML message (core.WithHTML).
+	HTML bool `json:"html,omitempty"`
 }
 
 type sendParams struct {

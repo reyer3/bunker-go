@@ -61,6 +61,9 @@ func TestAdapterFetch(t *testing.T) {
 	if item.Body != "Plain body text" {
 		t.Errorf("Body = %q, want the text/plain part", item.Body)
 	}
+	if got := strings.TrimSpace(item.Meta["html"]); got != "<p>Html body text</p>" {
+		t.Errorf("Meta[html] = %q, want the text/html part", got)
+	}
 	if len(item.Attachments) != 1 {
 		t.Fatalf("len(Attachments) = %d, want 1", len(item.Attachments))
 	}
@@ -108,5 +111,38 @@ func TestAdapterFetchPrefersPlainTextAndFallsBackToHTML(t *testing.T) {
 	}
 	if !strings.Contains(item.Body, "Only html here") {
 		t.Errorf("Body = %q, want the HTML fallback rendered as text", item.Body)
+	}
+}
+
+func TestAdapterFetchPlainOnlyHasNoHTMLMeta(t *testing.T) {
+	plain := "From: a@example.org\r\n" +
+		"To: r@example.org\r\n" +
+		"Subject: Plain\r\n" +
+		"Message-Id: <plainonly@example.org>\r\n" +
+		"Date: Fri, 25 Sep 2026 10:00:00 +0000\r\n" +
+		"Content-Type: text/plain; charset=utf-8\r\n" +
+		"\r\n" +
+		"just text\r\n"
+
+	addr, _, _ := newMemIMAPServer(t)
+	appendMessage(t, addr, "INBOX", plain)
+
+	cfg := AccountConfig{Name: "cl", IMAPHost: "unused"}
+	adapter := newAdapter(cfg, nil, nil, testDialInsecure(addr))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	sink := newFakeSink()
+	done := make(chan error, 1)
+	go func() { done <- adapter.Run(ctx, sink) }()
+	seed := waitForUpsert(t, sink, 5*time.Second)
+	cancel()
+	<-done
+
+	item, err := adapter.Fetch(context.Background(), seed.ID)
+	if err != nil {
+		t.Fatalf("Fetch() error = %v", err)
+	}
+	if _, ok := item.Meta["html"]; ok {
+		t.Errorf("Meta[html] = %q, want absent for a mail with no HTML part", item.Meta["html"])
 	}
 }

@@ -75,20 +75,25 @@ Commands:
                                                              is: has: in: channel:
                                                              account: label:
                                                              before: after: "..." -x
-  read <id> [--mark-read] [--json]                         fetch full body
+  read <id> [--mark-read] [--json|--html]                  fetch full body
        (no side effect; --mark-read also marks it read on
-       WhatsApp/Matrix and locally; mail is always PEEK-only)
-  reply <id> <text|-> [--cc addr]... [--attach path]...
+       WhatsApp/Matrix and locally; mail is always PEEK-only;
+       --html opens a mail's HTML body, sanitized, in the browser)
+  reply <id> <text|-> [--cc addr]... [--attach path]... [--html]
        [--dry-run] [--json]                                 reply to an item
+                                                             (--html: the text is
+                                                             HTML; mail only)
   reply <id> --voice <file.ogg> [--dry-run] [--json]       reply with a voice note
   send <channel> <account> <to> <text|->
        [--cc addr]... [--subject s]
-       [--attach path]... [--media path]... [--forward]
+       [--attach path]... [--media path]... [--forward] [--html]
        [--dry-run] [--json]                                 send a fresh message
                                                              (<to> and each --cc
                                                              may be a comma list;
                                                              --forward marks it
-                                                             forwarded, one <to>)
+                                                             forwarded, one <to>;
+                                                             --html: the text is
+                                                             HTML, mail only)
   send <channel> <account> <to> --voice <file.ogg>
        [--dry-run] [--json]                                 send an Ogg Opus file
                                                              as a voice note
@@ -505,22 +510,37 @@ func cmdRead(ctx context.Context, backend Backend, args []string, stdout, stderr
 	// existing scripts keep working; combining it with --mark-read is a
 	// contradiction and fails rather than guessing.
 	noReceipt := fs.Bool("no-receipt", false, "deprecated no-op: read marks nothing unless --mark-read is given")
+	showHTMLBody := fs.Bool("html", false, "open the mail's HTML body, sanitized, in the browser")
 	positionals, err := parseInterspersed(fs, args)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
 	if len(positionals) < 1 {
-		fmt.Fprintln(stderr, "usage: bunker read <id> [--mark-read] [--json]")
+		fmt.Fprintln(stderr, "usage: bunker read <id> [--mark-read] [--json|--html]")
 		return 2
 	}
 	if *markRead && *noReceipt {
 		fmt.Fprintln(stderr, "error: --mark-read and --no-receipt contradict each other")
 		return 2
 	}
+	if *showHTMLBody && *jsonOut {
+		fmt.Fprintln(stderr, "error: --html and --json contradict each other")
+		return 2
+	}
 	item, err := backend.Read(ctx, positionals[0], *markRead)
 	if err != nil {
 		return fail(*jsonOut, stdout, stderr, err)
+	}
+	if *showHTMLBody {
+		rawHTML := item.Meta["html"]
+		if rawHTML == "" {
+			return fail(false, stdout, stderr, fmt.Errorf("cmd: read --html: %s has no HTML part", item.ID))
+		}
+		if _, err := showHTML(item.Subject, rawHTML); err != nil {
+			return fail(false, stdout, stderr, err)
+		}
+		return 0
 	}
 	if *jsonOut {
 		writeJSON(stdout, map[string]any{"item": item})
@@ -536,6 +556,7 @@ func cmdReply(ctx context.Context, backend Backend, args []string, stdin io.Read
 	fs.Var(&attach, "attach", "local file to attach (repeatable)")
 	fs.Var(&cc, "cc", "additional recipient, comma-separated values allowed (repeatable)")
 	voice := fs.String("voice", "", "send this Ogg Opus file as a voice note (no text)")
+	htmlBody := fs.Bool("html", false, "the text is HTML: send it as multipart/alternative (mail only)")
 	dryRun := fs.Bool("dry-run", false, "plan the reply without sending it")
 	idemKey := fs.String("idempotency-key", "", "send at most once per key: a repeat returns the first receipt")
 	jsonOut := fs.Bool("json", false, "emit JSON")
@@ -545,9 +566,16 @@ func cmdReply(ctx context.Context, backend Backend, args []string, stdin io.Read
 		return 2
 	}
 	if len(positionals) < 2 && !(*voice != "" && len(positionals) == 1) {
-		fmt.Fprintln(stderr, "usage: bunker reply <id> <text|-> [--cc addr]... [--attach path]... [--idempotency-key k] [--dry-run] [--json]")
+		fmt.Fprintln(stderr, "usage: bunker reply <id> <text|-> [--cc addr]... [--attach path]... [--html] [--idempotency-key k] [--dry-run] [--json]")
 		fmt.Fprintln(stderr, "       bunker reply <id> --voice <file.ogg> [--idempotency-key k] [--dry-run] [--json]")
 		return 2
+	}
+	if *htmlBody && *voice != "" {
+		fmt.Fprintln(stderr, "error: --html and --voice contradict each other: a voice note has no text")
+		return 2
+	}
+	if *htmlBody {
+		ctx = core.WithHTML(ctx)
 	}
 	if *voice != "" {
 		attach = append(stringSliceFlag{*voice}, attach...)
@@ -604,6 +632,7 @@ func cmdSend(ctx context.Context, backend Backend, args []string, stdin io.Reade
 	fs.Var(&cc, "cc", "additional recipient, comma-separated values allowed (repeatable)")
 	voice := fs.String("voice", "", "send this Ogg Opus file as a voice note (no text)")
 	forward := fs.Bool("forward", false, "mark the message as forwarded (WhatsApp shows its native label; one recipient only)")
+	htmlBody := fs.Bool("html", false, "the text is HTML: send it as multipart/alternative (mail only)")
 	dryRun := fs.Bool("dry-run", false, "plan the send without delivering it")
 	idemKey := fs.String("idempotency-key", "", "send at most once per key: a repeat returns the first receipt")
 	jsonOut := fs.Bool("json", false, "emit JSON")
@@ -613,8 +642,12 @@ func cmdSend(ctx context.Context, backend Backend, args []string, stdin io.Reade
 		return 2
 	}
 	if len(positionals) < 4 && !(*voice != "" && len(positionals) == 3) {
-		fmt.Fprintln(stderr, "usage: bunker send <channel> <account> <to> <text|-> [--cc addr]... [--subject s] [--attach path]... [--media path]... [--forward] [--idempotency-key k] [--dry-run] [--json]")
+		fmt.Fprintln(stderr, "usage: bunker send <channel> <account> <to> <text|-> [--cc addr]... [--subject s] [--attach path]... [--media path]... [--forward] [--html] [--idempotency-key k] [--dry-run] [--json]")
 		fmt.Fprintln(stderr, "       bunker send <channel> <account> <to> --voice <file.ogg> [--idempotency-key k] [--dry-run] [--json]")
+		return 2
+	}
+	if *htmlBody && *voice != "" {
+		fmt.Fprintln(stderr, "error: --html and --voice contradict each other: a voice note has no text")
 		return 2
 	}
 	attachments := append(append([]string{}, []string(media)...), []string(attach)...)
@@ -650,6 +683,7 @@ func cmdSend(ctx context.Context, backend Backend, args []string, stdin io.Reade
 		Attachments: attachments,
 		Voice:       *voice != "",
 		Forward:     *forward,
+		HTML:        *htmlBody,
 	}
 	plan, receipt, err := backend.Send(core.WithIdempotencyKey(ctx, *idemKey), out, *dryRun)
 	if err != nil {
@@ -949,6 +983,9 @@ func printPlanResult(jsonOut, dryRun bool, plan core.Plan, receipt core.Receipt,
 	}
 	if plan.Forward {
 		fmt.Fprintln(stdout, "  as a forward")
+	}
+	if plan.HTML {
+		fmt.Fprintln(stdout, "  as HTML")
 	}
 	for _, att := range plan.Attachments {
 		if att.Voice {
