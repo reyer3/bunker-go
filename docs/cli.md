@@ -850,7 +850,10 @@ sending the markup as literal text, on `--dry-run` too, and it cannot be
 combined with `--voice` (exit 2). The plan carries `"html": true` and the
 human output adds an `as HTML` line. The markup is sent unsanitized: it is
 the author's own message. A sent copy kept in the local store holds the HTML
-source as its body.
+source as its body. A client talking to a daemon that predates `--html` (an older
+build, or one not restarted after an update) refuses the request with
+`ErrUnsupported` instead of sending the markup as text: it first asks the
+daemon for a dry-run plan and requires `"html": true` in it.
 
 Replies to item `<id>`. `<text>` can be `-` to read the body from stdin.
 `--dry-run` returns the `Plan` alone and never reaches the channel
@@ -916,7 +919,10 @@ sending the markup as literal text, on `--dry-run` too, and it cannot be
 combined with `--voice` (exit 2). The plan carries `"html": true` and the
 human output adds an `as HTML` line. The markup is sent unsanitized: it is
 the author's own message. A sent copy kept in the local store holds the HTML
-source as its body.
+source as its body. A client talking to a daemon that predates `--html` (an older
+build, or one not restarted after an update) refuses the request with
+`ErrUnsupported` instead of sending the markup as text: it first asks the
+daemon for a dry-run plan and requires `"html": true` in it.
 
 `--forward` marks the message as forwarded from another conversation.
 On WhatsApp it carries the native label (the recipient sees

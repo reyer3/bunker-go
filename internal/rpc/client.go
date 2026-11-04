@@ -185,6 +185,15 @@ func (c *Client) Counts(ctx context.Context) (map[core.Channel]map[string]int, e
 // goes on the wire so the daemon sends at most once per key. A remote
 // client uploads the attachments (or voice note) first (see uploadFiles).
 func (c *Client) Reply(ctx context.Context, id, body string, cc, bcc []string, attachments []string, dryRun bool) (core.Plan, core.Receipt, error) {
+	if core.IsHTML(ctx) {
+		if err := checkHTMLSupport(func(probe bool) (core.Plan, error) {
+			var res planReceiptResult
+			err := c.call(ctx, MethodReply, replyParams{ID: id, Body: body, Cc: cc, Bcc: bcc, DryRun: probe, HTML: true}, &res)
+			return res.Plan, err
+		}); err != nil {
+			return core.Plan{}, core.Receipt{}, err
+		}
+	}
 	attachments, uploads, err := c.uploadFiles(ctx, attachments...)
 	defer uploads.release(ctx)
 	if err != nil {
@@ -202,6 +211,17 @@ func (c *Client) Reply(ctx context.Context, id, body string, cc, bcc []string, a
 // (core.WithIdempotencyKey) goes on the wire, as for Reply. A remote
 // client uploads the attachments (or voice note) first (see uploadFiles).
 func (c *Client) Send(ctx context.Context, out core.Outgoing, dryRun bool) (core.Plan, core.Receipt, error) {
+	if out.HTML {
+		if err := checkHTMLSupport(func(probe bool) (core.Plan, error) {
+			probeOut := out
+			probeOut.Attachments = nil // the plan's html flag does not depend on files; skip uploading them twice
+			var res planReceiptResult
+			err := c.call(ctx, MethodSend, sendParams{Outgoing: probeOut, DryRun: probe}, &res)
+			return res.Plan, err
+		}); err != nil {
+			return core.Plan{}, core.Receipt{}, err
+		}
+	}
 	attachments, uploads, err := c.uploadFiles(ctx, out.Attachments...)
 	defer uploads.release(ctx)
 	if err != nil {
@@ -213,6 +233,25 @@ func (c *Client) Send(ctx context.Context, out core.Outgoing, dryRun bool) (core
 		return core.Plan{}, core.Receipt{}, err
 	}
 	return uploads.localPlan(res.Plan), res.Receipt, nil
+}
+
+// checkHTMLSupport guards an HTML send against a daemon that predates
+// --html (an older build, or one not restarted after an update): it
+// ignores the unknown field and would deliver the markup as literal
+// text. A dry run touches no channel, so the client first asks the daemon
+// for one and requires plan.HTML in the answer, which only a daemon that
+// understands the field sets. probe runs the request with the given
+// dry-run flag; it runs even when the caller asked for a dry run, so that
+// plan is checked the same way.
+func checkHTMLSupport(probe func(dryRun bool) (core.Plan, error)) error {
+	plan, err := probe(true)
+	if err != nil {
+		return err
+	}
+	if !plan.HTML {
+		return fmt.Errorf("rpc: the daemon does not support HTML messages (restart or update it): %w", core.ErrUnsupported)
+	}
+	return nil
 }
 
 // EditMessage replaces the text of our own message id. An idempotency key
