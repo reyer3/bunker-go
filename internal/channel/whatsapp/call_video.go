@@ -10,9 +10,13 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/purpshell/meowcaller"
 )
+
+// errVideoDisabled is returned when a call has no video configured.
+var errVideoDisabled = errors.New("whatsapp: video is not configured for this call")
 
 // VideoError is reported when a video helper fails or is missing, like
 // AudioError for audio. The short text goes to the user; the full error
@@ -333,6 +337,7 @@ type videoHelper struct {
 	stderr  *tailBuffer
 	done    chan struct{}
 	exitErr error
+	closing atomic.Bool
 	log     *slog.Logger
 	problem func(string, error)
 	once    sync.Once
@@ -372,6 +377,9 @@ func (h *videoHelper) watch() {
 	err := h.cmd.Wait()
 	h.exitErr = err
 	close(h.done)
+	if h.closing.Load() {
+		return
+	}
 	status := "exit status 0"
 	if err != nil {
 		status = err.Error()
@@ -386,4 +394,10 @@ func (h *videoHelper) report(err error) {
 			h.problem(h.name+": "+err.Error(), err)
 		}
 	})
+}
+
+func (h *videoHelper) close() {
+	h.closing.Store(true)
+	_ = h.cmd.Process.Kill()
+	<-h.done
 }
